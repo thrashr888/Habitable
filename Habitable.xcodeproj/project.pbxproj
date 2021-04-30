@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 52;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -11,6 +11,16 @@
 		8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF213262639E8BC009F97C2 /* ContentView.swift */; };
 		8AF213292639E8BF009F97C2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AF213282639E8BF009F97C2 /* Assets.xcassets */; };
 		8AF2132C2639E8BF009F97C2 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AF2132B2639E8BF009F97C2 /* Preview Assets.xcassets */; };
+		8AF213362639E9DA009F97C2 /* ShellOut in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF213352639E9DA009F97C2 /* ShellOut */; };
+		8AF213382639F21C009F97C2 /* terraform in Resources */ = {isa = PBXBuildFile; fileRef = 8AF213372639F21C009F97C2 /* terraform */; };
+		8AF2133A2639F75C009F97C2 /* TerraformRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF213392639F75C009F97C2 /* TerraformRunner.swift */; };
+		8AF2133D263A0448009F97C2 /* SwiftyJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF2133C263A0448009F97C2 /* SwiftyJSON */; };
+		8AF2133F263A0CFB009F97C2 /* JsonLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF2133E263A0CFB009F97C2 /* JsonLog.swift */; };
+		8AF21343263A2DE9009F97C2 /* ResourceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF21342263A2DE9009F97C2 /* ResourceState.swift */; };
+		8AF21346263BCD7F009F97C2 /* OrderedCollections in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF21345263BCD7F009F97C2 /* OrderedCollections */; };
+		8AF21348263BCD7F009F97C2 /* Collections in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF21347263BCD7F009F97C2 /* Collections */; };
+		8AF2134A263BCD7F009F97C2 /* DequeModule in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF21349263BCD7F009F97C2 /* DequeModule */; };
+		8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF2134B263C97B6009F97C2 /* Ansi.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +31,11 @@
 		8AF2132B2639E8BF009F97C2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		8AF2132D2639E8BF009F97C2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8AF2132E2639E8BF009F97C2 /* Habitable.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Habitable.entitlements; sourceTree = "<group>"; };
+		8AF213372639F21C009F97C2 /* terraform */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = terraform; sourceTree = "<group>"; };
+		8AF213392639F75C009F97C2 /* TerraformRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformRunner.swift; sourceTree = "<group>"; };
+		8AF2133E263A0CFB009F97C2 /* JsonLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JsonLog.swift; sourceTree = "<group>"; };
+		8AF21342263A2DE9009F97C2 /* ResourceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceState.swift; sourceTree = "<group>"; };
+		8AF2134B263C97B6009F97C2 /* Ansi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ansi.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -28,6 +43,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8AF2133D263A0448009F97C2 /* SwiftyJSON in Frameworks */,
+				8AF213362639E9DA009F97C2 /* ShellOut in Frameworks */,
+				8AF2134A263BCD7F009F97C2 /* DequeModule in Frameworks */,
+				8AF21348263BCD7F009F97C2 /* Collections in Frameworks */,
+				8AF21346263BCD7F009F97C2 /* OrderedCollections in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -37,6 +57,7 @@
 		8AF213182639E8BC009F97C2 = {
 			isa = PBXGroup;
 			children = (
+				8AF213372639F21C009F97C2 /* terraform */,
 				8AF213232639E8BC009F97C2 /* Habitable */,
 				8AF213222639E8BC009F97C2 /* Products */,
 			);
@@ -55,6 +76,10 @@
 			children = (
 				8AF213242639E8BC009F97C2 /* HabitableApp.swift */,
 				8AF213262639E8BC009F97C2 /* ContentView.swift */,
+				8AF2134B263C97B6009F97C2 /* Ansi.swift */,
+				8AF213392639F75C009F97C2 /* TerraformRunner.swift */,
+				8AF2133E263A0CFB009F97C2 /* JsonLog.swift */,
+				8AF21342263A2DE9009F97C2 /* ResourceState.swift */,
 				8AF213282639E8BF009F97C2 /* Assets.xcassets */,
 				8AF2132D2639E8BF009F97C2 /* Info.plist */,
 				8AF2132E2639E8BF009F97C2 /* Habitable.entitlements */,
@@ -87,6 +112,13 @@
 			dependencies = (
 			);
 			name = Habitable;
+			packageProductDependencies = (
+				8AF213352639E9DA009F97C2 /* ShellOut */,
+				8AF2133C263A0448009F97C2 /* SwiftyJSON */,
+				8AF21345263BCD7F009F97C2 /* OrderedCollections */,
+				8AF21347263BCD7F009F97C2 /* Collections */,
+				8AF21349263BCD7F009F97C2 /* DequeModule */,
+			);
 			productName = Habitable;
 			productReference = 8AF213212639E8BC009F97C2 /* Habitable.app */;
 			productType = "com.apple.product-type.application";
@@ -114,6 +146,11 @@
 				Base,
 			);
 			mainGroup = 8AF213182639E8BC009F97C2;
+			packageReferences = (
+				8AF213342639E9DA009F97C2 /* XCRemoteSwiftPackageReference "ShellOut" */,
+				8AF2133B263A0448009F97C2 /* XCRemoteSwiftPackageReference "SwiftyJSON" */,
+				8AF21344263BCD7E009F97C2 /* XCRemoteSwiftPackageReference "swift-collections" */,
+			);
 			productRefGroup = 8AF213222639E8BC009F97C2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -130,6 +167,7 @@
 			files = (
 				8AF2132C2639E8BF009F97C2 /* Preview Assets.xcassets in Resources */,
 				8AF213292639E8BF009F97C2 /* Assets.xcassets in Resources */,
+				8AF213382639F21C009F97C2 /* terraform in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -140,7 +178,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8AF2133F263A0CFB009F97C2 /* JsonLog.swift in Sources */,
 				8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */,
+				8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */,
+				8AF21343263A2DE9009F97C2 /* ResourceState.swift in Sources */,
+				8AF2133A2639F75C009F97C2 /* TerraformRunner.swift in Sources */,
 				8AF213252639E8BC009F97C2 /* HabitableApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -333,6 +375,61 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		8AF213342639E9DA009F97C2 /* XCRemoteSwiftPackageReference "ShellOut" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/JohnSundell/ShellOut.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.3.0;
+			};
+		};
+		8AF2133B263A0448009F97C2 /* XCRemoteSwiftPackageReference "SwiftyJSON" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SwiftyJSON/SwiftyJSON.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
+		8AF21344263BCD7E009F97C2 /* XCRemoteSwiftPackageReference "swift-collections" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-collections.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8AF213352639E9DA009F97C2 /* ShellOut */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8AF213342639E9DA009F97C2 /* XCRemoteSwiftPackageReference "ShellOut" */;
+			productName = ShellOut;
+		};
+		8AF2133C263A0448009F97C2 /* SwiftyJSON */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8AF2133B263A0448009F97C2 /* XCRemoteSwiftPackageReference "SwiftyJSON" */;
+			productName = SwiftyJSON;
+		};
+		8AF21345263BCD7F009F97C2 /* OrderedCollections */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8AF21344263BCD7E009F97C2 /* XCRemoteSwiftPackageReference "swift-collections" */;
+			productName = OrderedCollections;
+		};
+		8AF21347263BCD7F009F97C2 /* Collections */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8AF21344263BCD7E009F97C2 /* XCRemoteSwiftPackageReference "swift-collections" */;
+			productName = Collections;
+		};
+		8AF21349263BCD7F009F97C2 /* DequeModule */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8AF21344263BCD7E009F97C2 /* XCRemoteSwiftPackageReference "swift-collections" */;
+			productName = DequeModule;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8AF213192639E8BC009F97C2 /* Project object */;
 }
