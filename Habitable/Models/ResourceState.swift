@@ -5,28 +5,28 @@
 //  Created by Paul Thrasher on 4/28/21.
 //
 
-import Foundation
 import Collections
+import Foundation
 
 enum States: String {
-  case NoOp = "noop"
-  case Applied = "applied"
-  case Applying = "applying"
-  case ApplyErrored = "apply failed"
-  case Created = "created"
-  case Creating = "creating"
-  case CreateErrored = "create failed"
-  case Deleted = "deleted"
-  case Deleting = "deleting"
-  case DeleteErrored = "delete failed"
-  case Provisioned = "provisioned"
-  case Provisioning = "provisioning"
-  case ProvisionErrored = "provisioning failed"
-  case Refreshed = "refreshed"
-  case Replaced = "replaced"
-  case Updated = "updated"
-  case Updating = "updating"
-  case UpdateErrored = "update failed"
+    case NoOp = "noop"
+    case Applied = "applied"
+    case Applying = "applying"
+    case ApplyErrored = "apply failed"
+    case Created = "created"
+    case Creating = "creating"
+    case CreateErrored = "create failed"
+    case Deleted = "deleted"
+    case Deleting = "deleting"
+    case DeleteErrored = "delete failed"
+    case Provisioned = "provisioned"
+    case Provisioning = "provisioning"
+    case ProvisionErrored = "provisioning failed"
+    case Refreshed = "refreshed"
+    case Replaced = "replaced"
+    case Updated = "updated"
+    case Updating = "updating"
+    case UpdateErrored = "update failed"
 }
 
 let actionToState: OrderedDictionary<ChangeActions, States> = [
@@ -72,6 +72,7 @@ struct Stage {
     var done = false
     var errored = false
 }
+
 struct StageUpdate {
     var state: States?
     var identifier: String?
@@ -88,72 +89,69 @@ class ResourceState {
     var action: ChangeActions = .NoOp
     var targetState: States = .NoOp
     var stages: [Stage] = []
-    
-    init(_ jsonLog: PlannedChangeSummary){
+
+    init(_ jsonLog: PlannedChangeSummary) {
         address = jsonLog.address
         resource = jsonLog.resource
         action = jsonLog.action
-        
+
         if let state = actionToState[jsonLog.action] {
-            self.targetState = state
+            targetState = state
         }
     }
-    func update(_ hook: HookMessage){
-        self.resource = hook.resource
-        
-        switch(hook.type) {
+
+    func update(_ hook: HookMessage) {
+        resource = hook.resource
+
+        switch hook.type {
         case MessageTypes.ApplyStart:
             guard let state = applyStartActionToState[hook.action] else { break }
-            self.stages.append(Stage(
+            stages.append(Stage(
                 state: state,
                 identifier: identifierFromHook(hook),
                 elapsed: "0"
             ))
-            break
-            
+
         case MessageTypes.ApplyProgress:
-            self.updateLatestStage(StageUpdate(
+            updateLatestStage(StageUpdate(
                 elapsed: hook.elapsed_seconds
             ))
-            break
-            
+
         case MessageTypes.ApplyComplete:
             var state = States.Applied
             if let found = applyStartActionToState[hook.action] {
                 state = found
             }
-            self.updateLatestStage(StageUpdate(
+            updateLatestStage(StageUpdate(
                 state: state,
                 identifier: identifierFromHook(hook),
                 elapsed: hook.elapsed_seconds,
                 done: true
             ))
-            break
-            
+
         case MessageTypes.ApplyErrored:
             var state = States.ApplyErrored
             if let found = applyStartActionToState[hook.action] {
                 state = found
             }
-            self.updateLatestStage(StageUpdate(
+            updateLatestStage(StageUpdate(
                 state: state,
                 elapsed: hook.elapsed_seconds,
                 done: true,
                 errored: true
             ))
-            break
 
         default:
             print("\(hook.type) unsupported")
         }
     }
-    
+
     private func identifierFromHook(_ hook: HookMessage) -> String? {
         guard let id_key = hook.id_key, let id_value = hook.id_value else { return nil }
         return "\(id_key)=\(id_value)"
     }
-    
-    private func updateLatestStage(_ attrs: StageUpdate){
+
+    private func updateLatestStage(_ attrs: StageUpdate) {
         guard stages.indices.contains(stages.count - 1) else {
             return
         }
@@ -161,10 +159,10 @@ class ResourceState {
 
         // Special case for identifier: only update if not already present. This
         // ensures that we don't delete the identifier after destroying a resource.
-        if (stage.identifier == nil && attrs.identifier != nil) {
+        if stage.identifier == nil, attrs.identifier != nil {
             stage.identifier = attrs.identifier
         }
-        
+
         if let state = attrs.state {
             stage.state = state
         }
