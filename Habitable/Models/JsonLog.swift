@@ -9,36 +9,59 @@ import Foundation
 import SwiftyJSON
 
 enum ChangeActions: String {
-  case NoOp = "noop"
-  case Create = "create"
-  case Read = "read"
-  case Update = "update"
-  case Replace = "replace"
-  case Delete = "delete"
+    case NoOp = "noop"
+    case Create = "create"
+    case Read = "read"
+    case Update = "update"
+    case Replace = "replace"
+    case Delete = "delete"
 }
 
 enum MessageTypes: String {
-  // Generic messages
-  case Version = "version"
-  case Log = "log"
-  case Diagnostic = "diagnostic"
+    // Generic messages
+    case Version = "version"
+    case Log = "log"
+    case Diagnostic = "diagnostic"
 
-  // Operation results
-  case PlannedChange = "planned_change"
-  case ChangeSummary = "change_summary"
-  case Outputs = "outputs"
+    // Operation results
+    case PlannedChange = "planned_change"
+    case ChangeSummary = "change_summary"
+    case Outputs = "outputs"
 
-  // Hook-driven messages
-  case ApplyStart = "apply_start"
-  case ApplyProgress = "apply_progress"
-  case ApplyComplete = "apply_complete"
-  case ApplyErrored = "apply_errored"
-  case ProvisionStart = "provision_start"
-  case ProvisionProgress = "provision_progress"
-  case ProvisionComplete = "provision_complete"
-  case ProvisionErrored = "provision_errored"
-  case RefreshStart = "refresh_start"
-  case RefreshComplete = "refresh_complete"
+    // Hook-driven messages
+    case ApplyStart = "apply_start"
+    case ApplyProgress = "apply_progress"
+    case ApplyComplete = "apply_complete"
+    case ApplyErrored = "apply_errored"
+    case ProvisionStart = "provision_start"
+    case ProvisionProgress = "provision_progress"
+    case ProvisionComplete = "provision_complete"
+    case ProvisionErrored = "provision_errored"
+    case RefreshStart = "refresh_start"
+    case RefreshComplete = "refresh_complete"
+}
+
+func isResourceMessage(_ message: JSON) -> Bool {
+    if !message["type"].exists() { return false }
+    return message["type"].string == MessageTypes.PlannedChange.rawValue || isHookMessage(message)
+}
+
+func isHookMessage(_ message: JSON) -> Bool {
+    if !message["type"].exists() { return false }
+    guard let mType = message["type"].string, let type = MessageTypes(rawValue: mType) else { return false }
+
+    return [
+        MessageTypes.ApplyStart,
+        MessageTypes.ApplyProgress,
+        MessageTypes.ApplyComplete,
+        MessageTypes.ApplyErrored,
+        MessageTypes.ProvisionStart,
+        MessageTypes.ProvisionProgress,
+        MessageTypes.ProvisionComplete,
+        MessageTypes.ProvisionErrored,
+        MessageTypes.RefreshStart,
+        MessageTypes.RefreshComplete,
+    ].contains(type)
 }
 
 protocol tfMessage {
@@ -79,6 +102,7 @@ struct ChangeSummaryChanges {
     var remove: Int
     var operation: String?
 }
+
 struct ChangeSummaryMessage: tfMessage {
     var id = UUID()
     var type: MessageTypes = .ChangeSummary
@@ -90,9 +114,9 @@ func transformChangeSummary(_ log: JSON) -> ChangeSummaryMessage {
     return ChangeSummaryMessage(
         message: log["@message"].string,
         changes: ChangeSummaryChanges(
-            add: log["changes"]["add"].intValue,
-            change: log["changes"]["change"].intValue,
-            remove: log["changes"]["remove"].intValue,
+            add: log["changes"]["add"].int ?? 0,
+            change: log["changes"]["change"].int ?? 0,
+            remove: log["changes"]["remove"].int ?? 0,
             operation: log["changes"]["operation"].string
         )
     )
@@ -104,12 +128,14 @@ struct Output {
     var value: String?
     var sensitive = false
 }
+
 struct OutputsMessage: tfMessage {
     var id = UUID()
     var type: MessageTypes = .Outputs
     var message: String?
     var outputs: [Output] = []
 }
+
 func transformOutputs(_ log: JSON) -> OutputsMessage {
     var outputs: [Output] = []
     for (k, out) in log["outputs"] {
@@ -131,6 +157,7 @@ struct DiagnosticSummary {
     var summary: String?
     var detail: String?
 }
+
 struct DiagnosticMessage: tfMessage {
     var id = UUID()
     var type: MessageTypes = .Diagnostic
@@ -164,13 +191,13 @@ struct HookMessage: tfMessage {
 }
 
 func transformHook(_ log: JSON) -> HookMessage? {
-    guard let mType = log["type"].string, let type = MessageTypes.init(rawValue: mType) else {
+    guard let mType = log["type"].string, let type = MessageTypes(rawValue: mType) else {
         return nil
     }
-    
+
     let hook = log["hook"]
-    
-    var action: ChangeActions? = nil
+
+    var action: ChangeActions?
     if let value = hook["action"].string {
         action = ChangeActions(rawValue: value)
     }
@@ -204,11 +231,13 @@ struct Resource {
     var resource_name: String?
     var resource_key: String?
 }
+
 struct PlannedChangeSummary {
     var address: String
     var resource: Resource
     var action: ChangeActions = .NoOp
 }
+
 struct PlannedChangeMessage: tfMessage {
     var id = UUID()
     var type: MessageTypes = .PlannedChange
@@ -219,8 +248,8 @@ struct PlannedChangeMessage: tfMessage {
 func transformPlannedChange(_ log: JSON) -> PlannedChangeMessage {
     let change = log["change"]
     let resource = change["resource"]
-    
-    var action: ChangeActions? = nil
+
+    var action: ChangeActions?
     if let value = change["action"].string {
         action = ChangeActions(rawValue: value)
     }
@@ -238,6 +267,70 @@ func transformPlannedChange(_ log: JSON) -> PlannedChangeMessage {
                 resource_key: resource["resource_key"].string
             ),
             action: action ?? .NoOp
+        )
+    )
+}
+
+struct ShowResource {
+    var id = UUID()
+    var address: String?
+    var mode: String?
+    var type: String?
+    var name: String?
+    var provider_name: String?
+    var schema_version: Int?
+    var values: [String: JSON]?
+}
+
+struct ShowModule {
+    var resources: [ShowResource]
+}
+
+struct ShowValues {
+    var outputs: [Output]
+}
+
+struct ShowMessage {
+    var id = UUID()
+    var format_version: String?
+    var terraform_version: String?
+    var values: ShowValues
+    var root_module: ShowModule
+}
+
+func transformShow(_ log: JSON) -> ShowMessage {
+    var outputs: [Output] = []
+    for (k, out) in log["values"]["outputs"] {
+        let add = Output(
+            key: k,
+            value: out["value"].string,
+            sensitive: out["sensitive"].boolValue
+        )
+        outputs.append(add)
+    }
+
+    var resources: [ShowResource] = []
+    for (_, res) in log["values"]["root_module"]["resources"] {
+        let add = ShowResource(
+            address: res["address"].string,
+            mode: res["mode"].string,
+            type: res["type"].string,
+            name: res["name"].string,
+            provider_name: res["provider_name"].string,
+            schema_version: res["schema_version"].int,
+            values: res["schema_version"].dictionary
+        )
+        resources.append(add)
+    }
+
+    return ShowMessage(
+        format_version: log["format_version"].string,
+        terraform_version: log["terraform_version"].string,
+        values: ShowValues(
+            outputs: outputs
+        ),
+        root_module: ShowModule(
+            resources: resources
         )
     )
 }
