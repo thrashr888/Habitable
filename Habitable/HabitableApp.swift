@@ -9,8 +9,10 @@ import SwiftUI
 
 @main
 struct HabitableApp: App {
+    @AppStorage("lastWorkingDirectory") var lastWorkingDirectory: URL?
+    
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Workspace", id: "Workspace.viewer") {
             ContentView()
                 .frame(minWidth: 800, minHeight: 400)
         }

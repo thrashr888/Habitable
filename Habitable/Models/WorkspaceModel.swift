@@ -12,66 +12,6 @@ import SwiftTerm
 import SwiftUI
 import SwiftyJSON
 
-enum RunStatus: String {
-    case pending = "PENDING"
-    case planning = "PLANNING"
-    case planned = "PLANNED"
-    case planQueued = "PLAN_QUEUED"
-    case plannedAndFinished = "PLANNED_AND_FINISHED"
-    case confirmed = "CONFIRMED"
-    case applying = "APPLYING"
-    case applied = "APPLIED"
-    case applyQueued = "APPLY_QUEUED"
-    case discarded = "DISCARDED"
-    case errored = "ERRORED"
-    case canceled = "CANCELED"
-}
-
-class TerraformRun: ObservableObject {
-    var id = UUID()
-    var workspace: Workspace
-    var createdAt = Date()
-    var autoApply = false
-    var message = ""
-    @Published var status: RunStatus = .pending
-    @Published var textOutput: String?
-    @Published var errorMessage: String?
-    @Published var plan: StructuredLog?
-    @Published var apply: StructuredLog?
-    @Published var startState: ShowMessage?
-    @Published var endState: ShowMessage?
-    @Published var variables: Variables?
-
-    init(workspace: Workspace) {
-        self.workspace = workspace
-    }
-}
-
-class TerraformVariable: ObservableObject {
-    var id = UUID()
-    @Published var key: String = ""
-    @Published var value: String = ""
-    @Published var description: String = ""
-    @Published var sensitive = false
-    @Published var hcl = false
-}
-
-class EnvironmentVariable: ObservableObject {
-    var id = UUID()
-    @Published var key: String = ""
-    @Published var value: String = ""
-    @Published var description: String = ""
-    @Published var sensitive = false
-}
-
-class Variables: ObservableObject {
-    @Published var terraformVariables: [TerraformVariable] = []
-    @Published var environmentVariables: [EnvironmentVariable] = []
-}
-
-// TODO: rename to Workspace
-// move all these variables to workspace
-// keep shell stuff in a runner
 // break out plan, apply, show, etc runners
 class Workspace: ObservableObject {
     var id = UUID()
@@ -83,29 +23,50 @@ class Workspace: ObservableObject {
     @Published var lockedBy: TerraformRun?
 
     // config
-    @Published var isValid = true // run `terraform validate`
+    @Published var isValid = false
     @Published var isInitialized = false
     @Published var hasState = false
     @Published var hasVariables = false
 
     // settings
-    @Published var workingDirectory: String?
+    @Published var workingDirectory: URL?
+//    @AppStorage("workingDirectory") var workingDirectory: URL?
+    @AppStorage("lastWorkingDirectory") var lastWorkingDirectory: URL?
     @Published var description = ""
     @Published var autoApply = false
-    @Published var terraformVersion = "0.15.2"
+    @Published var terraformVersion = "0.15.3"
 
     // data
     @Published var textOutput: String?
     @Published var errorMessage: String?
     @Published var runs: [TerraformRun] = []
     @Published var state: ShowMessage?
-    @Published var variables = Variables()
+    @Published var terraformVariables: [TerraformVariable] = []
+    @Published var environmentVariables: [EnvironmentVariable] = []
 
     init(dir: URL? = nil) {
+        if dir == nil, let lastDir = lastWorkingDirectory {
+            workingDirectory = lastDir
+            updateWorkingDirectory(dir: lastDir)
+            return
+        }
         if let dir = dir {
-            workingDirectory = dir.path
+            workingDirectory = dir
             updateWorkingDirectory(dir: dir)
         }
+    }
+    
+//    init(path: String? = nil) {
+//        if let path = path {
+//            let dir = URL(fileURLWithPath: path)
+//            workingDirectory = dir
+//            updateWorkingDirectory(dir: dir)
+//        }
+//    }
+    
+    func reset() {
+        textOutput = nil
+        errorMessage = nil
     }
 
     func addUrl() {
@@ -126,7 +87,8 @@ class Workspace: ObservableObject {
     }
 
     func updateWorkingDirectory(dir: URL) {
-        workingDirectory = dir.path
+        workingDirectory = dir
+        lastWorkingDirectory = dir
 
         var isDir: ObjCBool = false
         let fileManager = FileManager.default
@@ -135,9 +97,69 @@ class Workspace: ObservableObject {
         }
         if fileManager.fileExists(atPath: dir.appendingPathComponent("terraform.tfstate").path, isDirectory: &isDir) {
             hasState = true
+            refreshResources()
         }
+        
+        checkVariables()
+        validate()
+    }
+    
+    func checkVariables() {
+        guard let dir = workingDirectory else { return }
+        
+        let fileManager = FileManager.default
+        var isDir: ObjCBool = false
         if fileManager.fileExists(atPath: dir.appendingPathComponent("terraform.tfvars").path, isDirectory: &isDir) {
             hasVariables = true
+            parseTextVariables(file: dir.appendingPathComponent("terraform.tfvars"))
+        }
+        isDir = false
+        if fileManager.fileExists(atPath: dir.appendingPathComponent("terraform.tfvars.json").path, isDirectory: &isDir) {
+            hasVariables = true
+            parseJSONVariables(file: dir.appendingPathComponent("terraform.tfvars.json"))
+        }
+        
+        parseEnvironmentVariables()
+    }
+    
+    private func parseEnvironmentVariables() {
+        environmentVariables = []
+        for (key, value) in ProcessInfo.processInfo.environment {
+            if !key.hasPrefix("TF_VAR_") { continue }
+            let variable = EnvironmentVariable()
+            variable.key = key
+            variable.value = value
+            environmentVariables.append(variable)
+        }
+    }
+    
+    private func parseTextVariables(file: URL) {
+        do {
+            terraformVariables = []
+            let vars = try String(contentsOf: file)
+            for v in vars.split(separator: "\n") {
+                let parts = v.split(separator: "=")
+                                
+                let variable = TerraformVariable()
+                variable.key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                if parts.count > 1 {
+                    // TODO parse json value
+                    variable.value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                terraformVariables.append(variable)
+            }
+        } catch {
+            print(error.localizedDescription)
+        }
+    }
+    
+    private func parseJSONVariables(file: URL) {
+        let json = JSON.init(file)
+        for (key, value):(String, JSON) in json {
+            let variable = TerraformVariable()
+            variable.key = key
+            variable.value = value.string ?? ""
+            terraformVariables.append(variable)
         }
     }
 
@@ -147,6 +169,7 @@ class Workspace: ObservableObject {
 
     func initialize() {
         guard let workingDirectory = self.workingDirectory else { return }
+        reset()
         locked = true
         runner.initialize(workingDirectory: workingDirectory, completion: { res, error in
             self.locked = false
@@ -158,22 +181,101 @@ class Workspace: ObservableObject {
                 self.textOutput = self.cleanANSI(res)
                 self.isValid = true
             }
+            self.objectWillChange.send()
         })
     }
-
+    
     func validate() {
-        // TODO:
-        // does initialize do this?
-        isValid = true
+        guard let workingDirectory = self.workingDirectory else { return }
+        reset()
+        locked = true
+        runner.validate(workingDirectory: workingDirectory, completion: { res, error in
+            self.locked = false
+            if let error = error {
+                self.errorMessage = error.message
+                self.isValid = false
+            }
+            if let _ = res {
+                self.isValid = true
+            }
+            self.objectWillChange.send()
+        })
     }
-
+    
     func refreshResources() {
-//        runner.show(workingDirectory: workingDirectory)
+        guard let workingDirectory = workingDirectory else { return }
+        lock()
+        
+        runner.show(workingDirectory: workingDirectory, completion: { res, error in
+            self.unlock()
+            
+            if let res = res {
+                let json = parseJsonOutput(res)
+                self.state = transformShow(json)
+                self.isValid = true
+            }
+            
+            if let error = error {
+                self.errorMessage = error.message
+                self.isValid = false
+            }
+        })
+    }
+    
+//    func show() {
+//        guard let workingDirectory = self.workingDirectory else { return }
+//        locked = true
+//        runner.validate(workingDirectory: workingDirectory, completion: { res, error in
+//            self.locked = false
+//            if let error = error {
+//                self.errorMessage = error.message
+//                self.isValid = false
+//            }
+//            if let res = res {
+//                self.textOutput = self.cleanANSI(res)
+//                self.isValid = true
+//            }
+//        })
+//    }
+    
+    func didPlan(run: TerraformRun, plan: StructuredLog) {
+        if self.autoApply {
+            run.doApply({ apply, error in
+                
+            })
+        }
+    }
+    
+    func didApply(run: TerraformRun, apply: StructuredLog) {
+        for run in runs {
+            run.doDiscard()
+        }
+        refreshResources()
+    }
+    
+    func lock(_ by: TerraformRun? = nil) {
+        lockedBy = by
+        locked = true
+    }
+    func unlock() {
+        lockedBy = nil
+        locked = false
     }
 
     func queueRun(_: String? = nil) {
-        // TODO: we don't actually copy the config over, so queuing doesn't make sense
-        // just run a Plan or Apply immediately and lock the workspace
-        runs.append(TerraformRun(workspace: self))
+        if locked {
+            return
+        }
+        let run = TerraformRun(workspace: self)
+        run.number = runs.count + 1
+        runs.append(run)
+    }
+    
+    func addTerraformVariable(_ variable: TerraformVariable) {
+        terraformVariables.append(variable)
+    }
+    
+    func addEnvironmentVariable(_ variable: EnvironmentVariable) {
+        environmentVariables.append(variable)
     }
 }

@@ -8,10 +8,12 @@
 import Foundation
 
 class StructuredLog: ObservableObject {
+    var id = UUID()
     var logs: [LogMessage] = []
     var changeSummaries: [ChangeSummaryMessage] = []
     var versions: [VersionMessage] = []
     var diagnostics: [DiagnosticMessage] = []
     var resources: [ResourceState] = []
     var outputs: [OutputsMessage] = []
+    var createdAt = Date()
 }

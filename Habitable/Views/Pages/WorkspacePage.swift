@@ -15,7 +15,7 @@ struct CheckView: View {
             if check {
                 Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
             } else {
-                Image(systemName: "circle.fill").foregroundColor(.red)
+                Image(systemName: "nosign").foregroundColor(.red)
             }
             Text(label)
         }
@@ -23,7 +23,8 @@ struct CheckView: View {
 }
 
 struct WorkspacePage: View {
-    @ObservedObject var workspace: Workspace
+    @EnvironmentObject var workspace: Workspace
+
     var body: some View {
         VStack(alignment: .leading) {
             Text("Checks")
@@ -47,6 +48,8 @@ struct WorkspacePage: View {
                     workspace.initialize()
                 }
             }
+            
+            Spacer()
 
             if workspace.textOutput != nil {
                 Divider()
@@ -54,7 +57,7 @@ struct WorkspacePage: View {
                 Spacer()
             }
         }
-        .padding(.bottom)
+        .padding(.all)
         .navigationTitle("Workspace")
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -69,31 +72,13 @@ struct WorkspacePage: View {
                         .help("Validate")
                 }
             }
-            ToolbarItem(placement: .status) {
-                if workspace.locked {
-                    Label("Locked", systemImage: "lock.fill")
-                        .help("Locked")
-                } else {
-                    Label("Unlocked", systemImage: "lock.open.fill")
-                        .help("Unlocked")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: {
-                    workspace.queueRun()
-                }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "text.badge.plus")
-                        Text("Queue plan")
-                    }
-                }
-            }
         }
     }
 }
 
 struct WorkspacePage_Previews: PreviewProvider {
     static var previews: some View {
-        WorkspacePage(workspace: Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
+        WorkspacePage()
+            .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
     }
 }
