@@ -77,6 +77,9 @@ class TerraformRun: ObservableObject, Identifiable {
             if let res = res {
                 self.plan = handleNDJsonSuccess(res)
                 self.workspace.isValid = true
+                
+                guard let plan = self.plan else { return }
+                self.workspace.didPlan(run: self, plan: plan)
             }
             
             if let error = error {
@@ -87,7 +90,7 @@ class TerraformRun: ObservableObject, Identifiable {
                 self.status = .errored
             }
             
-            self.workspace.didPlan(run: self, plan: self.plan)
+            // TODO didPlan with errors
             
             completion(self.plan, self.errorMessage)
             self.objectWillChange.send()
@@ -116,6 +119,9 @@ class TerraformRun: ObservableObject, Identifiable {
                     self.changed = changes.changes.change
                     self.destroyed = changes.changes.remove
                 }
+                
+                guard let apply = self.apply else { return }
+                self.workspace.didApply(run: self, apply: apply)
             }
             
             if let error = error {
@@ -125,7 +131,7 @@ class TerraformRun: ObservableObject, Identifiable {
                 self.status = .errored
             }
             
-            self.workspace.didApply(run: self, apply: self.apply)
+            // TODO didApply with errors
             
             completion(self.apply, self.errorMessage)
             self.objectWillChange.send()
