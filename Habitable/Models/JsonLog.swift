@@ -122,11 +122,28 @@ func transformChangeSummary(_ log: JSON) -> ChangeSummaryMessage {
     )
 }
 
-struct Output {
+class Output: Identifiable {
     var id = UUID()
     var key: String
+    var type: String?
     var value: String?
     var sensitive = false
+    init(key: String, type: String?, value: String?, sensitive: Bool) {
+        self.key = key
+        self.type = type
+        self.value = value
+        self.sensitive = sensitive
+    }
+}
+
+extension Output: Hashable {
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self))
+    }
+
+    static func ==(lhs: Output, rhs: Output) -> Bool {
+        return lhs === rhs
+    }
 }
 
 struct OutputsMessage: tfMessage {
@@ -141,7 +158,8 @@ func transformOutputs(_ log: JSON) -> OutputsMessage {
     for (k, out) in log["outputs"] {
         let add = Output(
             key: k,
-            value: out["value"].string,
+            type: out["type"].string,
+            value: out["value"].rawString([.castNilToNSNull: true]),
             sensitive: out["sensitive"].boolValue
         )
         outputs.append(add)
@@ -152,10 +170,33 @@ func transformOutputs(_ log: JSON) -> OutputsMessage {
     )
 }
 
+struct DiagnosticRangeSnippet {
+    var context: String?
+    var code: String?
+    var startLine: Int
+    var highlightStartOffset: Int
+    var highlightEndOffset: Int
+    var values: [String] = []
+}
+
+struct DiagnosticRangeLocation {
+    var line: Int
+    var column: Int
+    var byte: Int
+}
+
+struct DiagnosticRange {
+    var filename: String?
+    var start: DiagnosticRangeLocation?
+    var end: DiagnosticRangeLocation?
+}
+
 struct DiagnosticSummary {
     var severity: String?
     var summary: String?
     var detail: String?
+    var range: DiagnosticRange?
+    var snippet: DiagnosticRangeSnippet?
 }
 
 struct DiagnosticMessage: tfMessage {
@@ -166,12 +207,38 @@ struct DiagnosticMessage: tfMessage {
 }
 
 func transformDiagnostic(_ log: JSON) -> DiagnosticMessage {
+    let r = log["diagnostic"]["range"]
+    let s = log["diagnostic"]["snippet"]
+    let range = DiagnosticRange(
+        filename: r["filename"].string,
+        start: DiagnosticRangeLocation(
+            line: r["start"]["line"].int ?? 0,
+            column: r["start"]["column"].int ?? 0,
+            byte: r["start"]["byte"].int ?? 0
+        ),
+        end: DiagnosticRangeLocation(
+            line: r["end"]["line"].int ?? 0,
+            column: r["end"]["column"].int ?? 0,
+            byte: r["end"]["byte"].int ?? 0
+        )
+    )
     return DiagnosticMessage(
         message: log["@message"].string,
         diagnostic: DiagnosticSummary(
             severity: log["diagnostic"]["severity"].string,
             summary: log["diagnostic"]["summary"].string,
-            detail: log["diagnostic"]["detail"].string
+            detail: log["diagnostic"]["detail"].string,
+            range: range,
+            snippet: DiagnosticRangeSnippet(
+                context: s["context"].string,
+                code: s["code"].string,
+                startLine: r["snippet"]["start_line"].int ?? 0,
+                highlightStartOffset: s["highlight_start_offset"].int ?? 0,
+                highlightEndOffset: s["highlight_end_offset"].int ?? 0,
+                values: s["values"].map({ (v, _) in
+                    v
+                })
+            )
         )
     )
 }
@@ -271,7 +338,8 @@ func transformPlannedChange(_ log: JSON) -> PlannedChangeMessage {
     )
 }
 
-struct ShowResource {
+// "Resources"
+class ShowResource: ObservableObject, Identifiable {
     var id = UUID()
     var address: String?
     var mode: String?
@@ -280,6 +348,26 @@ struct ShowResource {
     var provider_name: String?
     var schema_version: Int?
     var values: [String: JSON]?
+    
+    init(address: String?, mode: String?, type: String?, name: String?, provider_name: String?, schema_version: Int?, values: Dictionary<String, JSON>?) {
+        self.address = address
+        self.mode = mode
+        self.type = type
+        self.name = name
+        self.provider_name = provider_name
+        self.schema_version = schema_version
+        self.values = values
+    }
+}
+
+extension ShowResource: Hashable {
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self))
+    }
+
+    static func ==(lhs: ShowResource, rhs: ShowResource) -> Bool {
+        return lhs === rhs
+    }
 }
 
 struct ShowModule {
@@ -295,7 +383,10 @@ struct ShowMessage {
     var format_version: String?
     var terraform_version: String?
     var values: ShowValues
+    var outputs: [Output]
     var root_module: ShowModule
+    var resources: [ShowResource]
+    let created_at = Date()
 }
 
 func transformShow(_ log: JSON) -> ShowMessage {
@@ -303,7 +394,8 @@ func transformShow(_ log: JSON) -> ShowMessage {
     for (k, out) in log["values"]["outputs"] {
         let add = Output(
             key: k,
-            value: out["value"].string,
+            type: nil, // show has no type
+            value: out["value"].rawString([.castNilToNSNull: true]),
             sensitive: out["sensitive"].boolValue
         )
         outputs.append(add)
@@ -329,8 +421,10 @@ func transformShow(_ log: JSON) -> ShowMessage {
         values: ShowValues(
             outputs: outputs
         ),
+        outputs: outputs,
         root_module: ShowModule(
             resources: resources
-        )
+        ),
+        resources: resources
     )
 }

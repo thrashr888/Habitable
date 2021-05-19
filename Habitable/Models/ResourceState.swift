@@ -82,7 +82,7 @@ struct StageUpdate {
     var errored: Bool?
 }
 
-class ResourceState {
+class ResourceState: ObservableObject {
     var id = UUID()
     var address: String
     var resource: Resource

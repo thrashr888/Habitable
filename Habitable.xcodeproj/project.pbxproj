@@ -10,13 +10,30 @@
 		8A0D9339263E752B001CB06C /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 8A0D9338263E752B001CB06C /* SwiftTerm */; };
 		8A926B4C2648AA1E00FDBA5C /* TextLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4B2648AA1E00FDBA5C /* TextLog.swift */; };
 		8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4D2648AA4100FDBA5C /* Error.swift */; };
+		8A926B542648BC7A00FDBA5C /* terraform in Resources */ = {isa = PBXBuildFile; fileRef = 8A926B532648BC7A00FDBA5C /* terraform */; };
+		8A926B562648BD3700FDBA5C /* terraform in CopyFiles */ = {isa = PBXBuildFile; fileRef = 8A926B532648BC7A00FDBA5C /* terraform */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		8A926B582648C48E00FDBA5C /* ndjson.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B572648C48E00FDBA5C /* ndjson.swift */; };
+		8A926B5A2648C62A00FDBA5C /* RunModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B592648C62A00FDBA5C /* RunModel.swift */; };
+		8A926B5C2649007800FDBA5C /* BlankSlate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B5B2649007800FDBA5C /* BlankSlate.swift */; };
+		8A926B66264E4A5500FDBA5C /* RunPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B65264E4A5500FDBA5C /* RunPage.swift */; };
+		8A926B69264E524C00FDBA5C /* ChangeSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B68264E524C00FDBA5C /* ChangeSummary.swift */; };
+		8A926B6B264E526900FDBA5C /* Diagnostic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B6A264E526900FDBA5C /* Diagnostic.swift */; };
+		8A926B6D264E528700FDBA5C /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B6C264E528700FDBA5C /* Log.swift */; };
+		8A926B6F264E52A800FDBA5C /* Version.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B6E264E52A800FDBA5C /* Version.swift */; };
+		8A926B71264E52BE00FDBA5C /* Output.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B70264E52BE00FDBA5C /* Output.swift */; };
+		8A926B73264E52D600FDBA5C /* Resource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B72264E52D600FDBA5C /* Resource.swift */; };
+		8A926B75264FA12400FDBA5C /* ResourcePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B74264FA12400FDBA5C /* ResourcePage.swift */; };
+		8A926B77264FA29C00FDBA5C /* OutputsListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B76264FA29C00FDBA5C /* OutputsListPage.swift */; };
+		8A926B79264FA36900FDBA5C /* OutputPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B78264FA36900FDBA5C /* OutputPage.swift */; };
+		8A926B7B2650682600FDBA5C /* Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B7A2650682600FDBA5C /* Search.swift */; };
+		8A926B7D2651A89B00FDBA5C /* EnvVarsListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B7C2651A89B00FDBA5C /* EnvVarsListPage.swift */; };
+		8A926B7F2653742000FDBA5C /* VariablesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B7E2653742000FDBA5C /* VariablesModels.swift */; };
 		8AA12B0C26425FB00048A4A9 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0B26425FB00048A4A9 /* WorkspaceModel.swift */; };
-		8AA12B0E264260570048A4A9 /* Runs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0D264260570048A4A9 /* Runs.swift */; };
-		8AA12B10264260820048A4A9 /* Resources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0F264260820048A4A9 /* Resources.swift */; };
-		8AA12B12264260A90048A4A9 /* Variables.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B11264260A90048A4A9 /* Variables.swift */; };
-		8AA12B14264260CB0048A4A9 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B13264260CB0048A4A9 /* Settings.swift */; };
-		8AA12B162642614F0048A4A9 /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B152642614F0048A4A9 /* Workspace.swift */; };
-		8AA12B182642653A0048A4A9 /* SidebarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B172642653A0048A4A9 /* SidebarMenu.swift */; };
+		8AA12B0E264260570048A4A9 /* RunListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0D264260570048A4A9 /* RunListPage.swift */; };
+		8AA12B10264260820048A4A9 /* ResourceListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0F264260820048A4A9 /* ResourceListPage.swift */; };
+		8AA12B12264260A90048A4A9 /* VariablesListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B11264260A90048A4A9 /* VariablesListPage.swift */; };
+		8AA12B14264260CB0048A4A9 /* SettingsListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B13264260CB0048A4A9 /* SettingsListPage.swift */; };
+		8AA12B162642614F0048A4A9 /* WorkspacePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B152642614F0048A4A9 /* WorkspacePage.swift */; };
 		8AA12B1A2642656C0048A4A9 /* StructuredLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B192642656C0048A4A9 /* StructuredLog.swift */; };
 		8AA12B1C26427AC30048A4A9 /* Runner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B1B26427AC30048A4A9 /* Runner.swift */; };
 		8AA12B1E26427AF10048A4A9 /* StructuredLogModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */; };
@@ -25,7 +42,6 @@
 		8AF213292639E8BF009F97C2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AF213282639E8BF009F97C2 /* Assets.xcassets */; };
 		8AF2132C2639E8BF009F97C2 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AF2132B2639E8BF009F97C2 /* Preview Assets.xcassets */; };
 		8AF213362639E9DA009F97C2 /* ShellOut in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF213352639E9DA009F97C2 /* ShellOut */; };
-		8AF213382639F21C009F97C2 /* terraform in Resources */ = {isa = PBXBuildFile; fileRef = 8AF213372639F21C009F97C2 /* terraform */; };
 		8AF2133A2639F75C009F97C2 /* TerraformRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF213392639F75C009F97C2 /* TerraformRunner.swift */; };
 		8AF2133D263A0448009F97C2 /* SwiftyJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF2133C263A0448009F97C2 /* SwiftyJSON */; };
 		8AF2133F263A0CFB009F97C2 /* JsonLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF2133E263A0CFB009F97C2 /* JsonLog.swift */; };
@@ -36,16 +52,45 @@
 		8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF2134B263C97B6009F97C2 /* Ansi.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		8A926B552648BD2700FDBA5C /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				8A926B562648BD3700FDBA5C /* terraform in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		8A926B4B2648AA1E00FDBA5C /* TextLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLog.swift; sourceTree = "<group>"; };
 		8A926B4D2648AA4100FDBA5C /* Error.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Error.swift; sourceTree = "<group>"; };
+		8A926B532648BC7A00FDBA5C /* terraform */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = terraform; sourceTree = "<group>"; };
+		8A926B572648C48E00FDBA5C /* ndjson.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ndjson.swift; sourceTree = "<group>"; };
+		8A926B592648C62A00FDBA5C /* RunModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunModel.swift; sourceTree = "<group>"; };
+		8A926B5B2649007800FDBA5C /* BlankSlate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlankSlate.swift; sourceTree = "<group>"; };
+		8A926B65264E4A5500FDBA5C /* RunPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPage.swift; sourceTree = "<group>"; };
+		8A926B68264E524C00FDBA5C /* ChangeSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeSummary.swift; sourceTree = "<group>"; };
+		8A926B6A264E526900FDBA5C /* Diagnostic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostic.swift; sourceTree = "<group>"; };
+		8A926B6C264E528700FDBA5C /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
+		8A926B6E264E52A800FDBA5C /* Version.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Version.swift; sourceTree = "<group>"; };
+		8A926B70264E52BE00FDBA5C /* Output.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Output.swift; sourceTree = "<group>"; };
+		8A926B72264E52D600FDBA5C /* Resource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Resource.swift; sourceTree = "<group>"; };
+		8A926B74264FA12400FDBA5C /* ResourcePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourcePage.swift; sourceTree = "<group>"; };
+		8A926B76264FA29C00FDBA5C /* OutputsListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputsListPage.swift; sourceTree = "<group>"; };
+		8A926B78264FA36900FDBA5C /* OutputPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputPage.swift; sourceTree = "<group>"; };
+		8A926B7A2650682600FDBA5C /* Search.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Search.swift; sourceTree = "<group>"; };
+		8A926B7C2651A89B00FDBA5C /* EnvVarsListPage.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = EnvVarsListPage.swift; sourceTree = "<group>"; };
+		8A926B7E2653742000FDBA5C /* VariablesModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariablesModels.swift; sourceTree = "<group>"; };
 		8AA12B0B26425FB00048A4A9 /* WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModel.swift; sourceTree = "<group>"; };
-		8AA12B0D264260570048A4A9 /* Runs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Runs.swift; sourceTree = "<group>"; };
-		8AA12B0F264260820048A4A9 /* Resources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Resources.swift; sourceTree = "<group>"; };
-		8AA12B11264260A90048A4A9 /* Variables.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Variables.swift; sourceTree = "<group>"; };
-		8AA12B13264260CB0048A4A9 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
-		8AA12B152642614F0048A4A9 /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
-		8AA12B172642653A0048A4A9 /* SidebarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarMenu.swift; sourceTree = "<group>"; };
+		8AA12B0D264260570048A4A9 /* RunListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunListPage.swift; sourceTree = "<group>"; };
+		8AA12B0F264260820048A4A9 /* ResourceListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceListPage.swift; sourceTree = "<group>"; };
+		8AA12B11264260A90048A4A9 /* VariablesListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariablesListPage.swift; sourceTree = "<group>"; };
+		8AA12B13264260CB0048A4A9 /* SettingsListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsListPage.swift; sourceTree = "<group>"; };
+		8AA12B152642614F0048A4A9 /* WorkspacePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePage.swift; sourceTree = "<group>"; };
 		8AA12B192642656C0048A4A9 /* StructuredLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredLog.swift; sourceTree = "<group>"; };
 		8AA12B1B26427AC30048A4A9 /* Runner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Runner.swift; sourceTree = "<group>"; };
 		8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredLogModel.swift; sourceTree = "<group>"; };
@@ -56,7 +101,6 @@
 		8AF2132B2639E8BF009F97C2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		8AF2132D2639E8BF009F97C2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8AF2132E2639E8BF009F97C2 /* Habitable.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Habitable.entitlements; sourceTree = "<group>"; };
-		8AF213372639F21C009F97C2 /* terraform */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = terraform; sourceTree = "<group>"; };
 		8AF213392639F75C009F97C2 /* TerraformRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformRunner.swift; sourceTree = "<group>"; };
 		8AF2133E263A0CFB009F97C2 /* JsonLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JsonLog.swift; sourceTree = "<group>"; };
 		8AF21342263A2DE9009F97C2 /* ResourceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceState.swift; sourceTree = "<group>"; };
@@ -83,11 +127,12 @@
 		8A0D933C263F717A001CB06C /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				8AA12B1F26427D340048A4A9 /* Pages */,
-				8AA12B172642653A0048A4A9 /* SidebarMenu.swift */,
 				8AA12B192642656C0048A4A9 /* StructuredLog.swift */,
+				8A926B67264E523500FDBA5C /* StructuredLog */,
+				8AA12B1F26427D340048A4A9 /* Pages */,
 				8A926B4B2648AA1E00FDBA5C /* TextLog.swift */,
 				8A926B4D2648AA4100FDBA5C /* Error.swift */,
+				8A926B7A2650682600FDBA5C /* Search.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -95,24 +140,62 @@
 		8A0D933D263F7186001CB06C /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				8A926B572648C48E00FDBA5C /* ndjson.swift */,
 				8AF2133E263A0CFB009F97C2 /* JsonLog.swift */,
 				8AF21342263A2DE9009F97C2 /* ResourceState.swift */,
-				8AF213392639F75C009F97C2 /* TerraformRunner.swift */,
 				8AA12B1B26427AC30048A4A9 /* Runner.swift */,
+				8A926B592648C62A00FDBA5C /* RunModel.swift */,
 				8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */,
+				8AF213392639F75C009F97C2 /* TerraformRunner.swift */,
+				8A926B7E2653742000FDBA5C /* VariablesModels.swift */,
 				8AA12B0B26425FB00048A4A9 /* WorkspaceModel.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
 		};
+		8A926B512648BC3000FDBA5C /* cli */ = {
+			isa = PBXGroup;
+			children = (
+				8A926B522648BC3E00FDBA5C /* 0.15.3 */,
+			);
+			path = cli;
+			sourceTree = "<group>";
+		};
+		8A926B522648BC3E00FDBA5C /* 0.15.3 */ = {
+			isa = PBXGroup;
+			children = (
+				8A926B532648BC7A00FDBA5C /* terraform */,
+			);
+			path = 0.15.3;
+			sourceTree = "<group>";
+		};
+		8A926B67264E523500FDBA5C /* StructuredLog */ = {
+			isa = PBXGroup;
+			children = (
+				8A926B68264E524C00FDBA5C /* ChangeSummary.swift */,
+				8A926B6A264E526900FDBA5C /* Diagnostic.swift */,
+				8A926B6C264E528700FDBA5C /* Log.swift */,
+				8A926B70264E52BE00FDBA5C /* Output.swift */,
+				8A926B72264E52D600FDBA5C /* Resource.swift */,
+				8A926B6E264E52A800FDBA5C /* Version.swift */,
+			);
+			path = StructuredLog;
+			sourceTree = "<group>";
+		};
 		8AA12B1F26427D340048A4A9 /* Pages */ = {
 			isa = PBXGroup;
 			children = (
-				8AA12B152642614F0048A4A9 /* Workspace.swift */,
-				8AA12B0D264260570048A4A9 /* Runs.swift */,
-				8AA12B0F264260820048A4A9 /* Resources.swift */,
-				8AA12B11264260A90048A4A9 /* Variables.swift */,
-				8AA12B13264260CB0048A4A9 /* Settings.swift */,
+				8A926B5B2649007800FDBA5C /* BlankSlate.swift */,
+				8AA12B152642614F0048A4A9 /* WorkspacePage.swift */,
+				8AA12B0D264260570048A4A9 /* RunListPage.swift */,
+				8A926B65264E4A5500FDBA5C /* RunPage.swift */,
+				8AA12B0F264260820048A4A9 /* ResourceListPage.swift */,
+				8A926B74264FA12400FDBA5C /* ResourcePage.swift */,
+				8A926B76264FA29C00FDBA5C /* OutputsListPage.swift */,
+				8A926B78264FA36900FDBA5C /* OutputPage.swift */,
+				8AA12B11264260A90048A4A9 /* VariablesListPage.swift */,
+				8A926B7C2651A89B00FDBA5C /* EnvVarsListPage.swift */,
+				8AA12B13264260CB0048A4A9 /* SettingsListPage.swift */,
 			);
 			path = Pages;
 			sourceTree = "<group>";
@@ -120,8 +203,8 @@
 		8AF213182639E8BC009F97C2 = {
 			isa = PBXGroup;
 			children = (
-				8AF213372639F21C009F97C2 /* terraform */,
 				8AF213232639E8BC009F97C2 /* Habitable */,
+				8A926B512648BC3000FDBA5C /* cli */,
 				8AF213222639E8BC009F97C2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -168,6 +251,7 @@
 				8AF2131D2639E8BC009F97C2 /* Sources */,
 				8AF2131E2639E8BC009F97C2 /* Frameworks */,
 				8AF2131F2639E8BC009F97C2 /* Resources */,
+				8A926B552648BD2700FDBA5C /* CopyFiles */,
 			);
 			buildRules = (
 			);
@@ -231,7 +315,7 @@
 			files = (
 				8AF2132C2639E8BF009F97C2 /* Preview Assets.xcassets in Resources */,
 				8AF213292639E8BF009F97C2 /* Assets.xcassets in Resources */,
-				8AF213382639F21C009F97C2 /* terraform in Resources */,
+				8A926B542648BC7A00FDBA5C /* terraform in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -243,22 +327,37 @@
 			buildActionMask = 2147483647;
 			files = (
 				8AF2133F263A0CFB009F97C2 /* JsonLog.swift in Sources */,
-				8AA12B0E264260570048A4A9 /* Runs.swift in Sources */,
+				8AA12B0E264260570048A4A9 /* RunListPage.swift in Sources */,
+				8A926B69264E524C00FDBA5C /* ChangeSummary.swift in Sources */,
 				8AA12B0C26425FB00048A4A9 /* WorkspaceModel.swift in Sources */,
-				8AA12B10264260820048A4A9 /* Resources.swift in Sources */,
+				8A926B582648C48E00FDBA5C /* ndjson.swift in Sources */,
+				8AA12B10264260820048A4A9 /* ResourceListPage.swift in Sources */,
 				8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */,
 				8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */,
-				8AA12B14264260CB0048A4A9 /* Settings.swift in Sources */,
+				8A926B7B2650682600FDBA5C /* Search.swift in Sources */,
+				8AA12B14264260CB0048A4A9 /* SettingsListPage.swift in Sources */,
+				8A926B5C2649007800FDBA5C /* BlankSlate.swift in Sources */,
 				8AF21343263A2DE9009F97C2 /* ResourceState.swift in Sources */,
-				8AA12B12264260A90048A4A9 /* Variables.swift in Sources */,
-				8AA12B162642614F0048A4A9 /* Workspace.swift in Sources */,
-				8AA12B182642653A0048A4A9 /* SidebarMenu.swift in Sources */,
+				8A926B6B264E526900FDBA5C /* Diagnostic.swift in Sources */,
+				8A926B71264E52BE00FDBA5C /* Output.swift in Sources */,
+				8A926B7F2653742000FDBA5C /* VariablesModels.swift in Sources */,
+				8A926B7D2651A89B00FDBA5C /* EnvVarsListPage.swift in Sources */,
+				8A926B75264FA12400FDBA5C /* ResourcePage.swift in Sources */,
+				8AA12B12264260A90048A4A9 /* VariablesListPage.swift in Sources */,
+				8AA12B162642614F0048A4A9 /* WorkspacePage.swift in Sources */,
+				8A926B77264FA29C00FDBA5C /* OutputsListPage.swift in Sources */,
+				8A926B6D264E528700FDBA5C /* Log.swift in Sources */,
 				8A926B4C2648AA1E00FDBA5C /* TextLog.swift in Sources */,
+				8A926B6F264E52A800FDBA5C /* Version.swift in Sources */,
+				8A926B73264E52D600FDBA5C /* Resource.swift in Sources */,
 				8AA12B1E26427AF10048A4A9 /* StructuredLogModel.swift in Sources */,
 				8AF2133A2639F75C009F97C2 /* TerraformRunner.swift in Sources */,
+				8A926B5A2648C62A00FDBA5C /* RunModel.swift in Sources */,
 				8AA12B1C26427AC30048A4A9 /* Runner.swift in Sources */,
+				8A926B79264FA36900FDBA5C /* OutputPage.swift in Sources */,
 				8AF213252639E8BC009F97C2 /* HabitableApp.swift in Sources */,
 				8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */,
+				8A926B66264E4A5500FDBA5C /* RunPage.swift in Sources */,
 				8AA12B1A2642656C0048A4A9 /* StructuredLog.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

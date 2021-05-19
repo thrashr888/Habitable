@@ -10,112 +10,109 @@ import SwiftTerm
 import SwiftUI
 
 struct ContentView: View {
-    @State var workingDir = URL(fileURLWithPath: "/Users/thrashr888/workspace/Habitable")
-    @ObservedObject var runner = TerraformRunner(dir: URL(fileURLWithPath: "/Users/thrashr888/workspace/Habitable"))
-    @ObservedObject var workspace = Workspace(dir: URL(fileURLWithPath: "/Users/thrashr888/workspace/Habitable"))
-//    @StateObject private var workspace = Workspace(dir: URL(fileURLWithPath: "/Users/thrashr888/workspace/Habitable"))
+    enum NavigationItem: String {
+        case workspace
+        case runs
+        case resources
+        case outputs
+        case variables
+        case envVariables
+        case settings
+    }
 
-//    func addUrl() {
-//        let panel = NSOpenPanel()
-//        panel.allowsMultipleSelection = false
-//        panel.canChooseFiles = false
-//        panel.canChooseDirectories = true
-//        panel.begin { response in
-//            if response == NSApplication.ModalResponse.OK, let fileUrl = panel.url {
-//                runner.updateWorkingDirectory(dir: fileUrl)
-//                workspace.updateWorkingDirectory(dir: fileUrl)
-//            }
-//        }
-//    }
+//    @AppStorage("workingDirectory") private var workingDirectory: URL?
+    @StateObject var workspace = Workspace()
+//    @SceneStorage("menuSelection") private var selection = NavigationItem.workspace
 
+//    @SceneStorage("selection") var selection: String?
+//    @SceneStorage("menuSelection") var menuSelection: Set<NavigationItem> = [.workspace]
+    @State private var selection: Set<NavigationItem> = [.workspace]
+    var showThirdColumn: Bool {
+        selection != [NavigationItem.settings]
+    }
+    
     var body: some View {
-        AppSidebarNavigation(model: runner, workspace: workspace)
+        if workspace.workingDirectory == nil {
+            BlankSlateView().environmentObject(workspace)
+                .onAppear {
+//                    if let dir = workingDirectory {
+//                        workspace.updateWorkingDirectory(dir: dir)
+//                    }
+                }
+        } else {
+            NavigationView {
+                sidebar
+                
+                Text("Content List")
+                
+                if showThirdColumn {
+                    Text("")
+                }
+            }.environmentObject(workspace)
+        }
+    }
+    
+    struct Pocket: View {
+        @EnvironmentObject var workspace: Workspace
+        var body: some View {
+            VStack {
+                if workspace.locked {
+                    Label("Locked", systemImage: "lock.fill")
+                        .help("Locked")
+                } else {
+                    Label("Unlocked", systemImage: "lock.open.fill")
+                        .help("Unlocked")
+                }
+            }.padding()
+        }
+    }
+    
+    var sidebar: some View {
+        List(selection: $selection) {
+            NavigationLink(destination: WorkspacePage()) {
+                Label("Workspace", systemImage: "folder")
+            }
+            .accessibility(label: Text("Workspace"))
+            .tag(NavigationItem.workspace)
 
-//        VStack(alignment: .leading) {
-//            HStack {
-//                Button("Load folder", action: addUrl)
-//                Text("\(runner.workingDirectory)")
-//            }
-//            .padding([.top, .leading, .trailing])
-//
-//            Divider()
-//
-//            HStack {
-//                Button("Runs") {}
-//                Button("State") {}
-//                Button("Variables") {}
-//                Button("Settings") {}
-//                Spacer()
-//                Button("Queue Run") {}
-//            }
-//            .padding(.horizontal)
-//
-//            Divider()
-//
-//            HStack {
-//                Button("init") {
-//                    runner.initialize(workingDirectory: runner.workingDirectory)
-//                }.disabled(runner.locked)
-//                Button("plan") {
-//                    runner.plan(workingDirectory: runner.workingDirectory)
-//                }.disabled(runner.locked)
-//                Button("apply") {
-//                    runner.apply(workingDirectory: runner.workingDirectory)
-//                }.disabled(runner.locked)
-//                Button("show") {
-//                    runner.show(workingDirectory: runner.workingDirectory)
-//                }.disabled(runner.locked)
-//
-//                if runner.locked {
-//                    Text("(locked)")
-//                } else {
-//                    Text("(unlocked)")
-//                }
-//
-//                if runner.isInitialized {
-//                    Text("(initialized)")
-//                } else {
-//                    Text("(uninitialized)")
-//                }
-//
-//                if runner.hasState {
-//                    Text("(has state)")
-//                } else {
-//                    Text("(no state)")
-//                }
-//            }
-//            .padding(.horizontal)
-//
-//            Divider()
-//
-//            VStack(alignment: .leading) {
-//                if runner.locked {
-//                    Text("Running...")
-//                        .padding(.all)
-//                }
-//                if runner.structuredLog != nil {
-//                    Text("Logs")
-//                        .font(.title)
-//                    StructuredLogView(logs: runner.structuredLog!)
-//                }
-//                if runner.showOutput != nil {
-//                    ShowView(show: runner.showOutput!)
-//                }
-//                if runner.textOutput != nil {
-//                    TextView(text: runner.textOutput!)
-//                        .padding(.horizontal)
-//                }
-//                if runner.errorMessage != nil {
-//                    Text("Error")
-//                        .font(.title)
-//                    ErrorView(message: runner.errorMessage!)
-//                }
-//                Spacer()
-//            }
-//
-//            Spacer()
-//        }
-//        .frame(minWidth: 800, minHeight: 500)
+            NavigationLink(destination: RunListPage()) {
+                Label("Runs (\(workspace.runs.count))", systemImage: "list.bullet.rectangle")
+            }
+            .accessibility(label: Text("Runs"))
+            .tag(NavigationItem.runs)
+
+            NavigationLink(destination: ResourceListPage()) {
+                Label("Resources (\(workspace.state?.resources.count ?? 0))", systemImage: "globe")
+            }
+            .accessibility(label: Text("Resources"))
+            .tag(NavigationItem.resources)
+            
+            NavigationLink(destination: OutputsListPage()) {
+                Label("Outputs (\(workspace.state?.outputs.count ?? 0))", systemImage: "chevron.right.square")
+            }
+            .accessibility(label: Text("Outputs"))
+            .tag(NavigationItem.outputs)
+
+            NavigationLink(destination: VariableListPage()) {
+                Label("Variables (\(workspace.terraformVariables.count))", systemImage: "dollarsign.circle")
+            }
+            .accessibility(label: Text("Terraform Variables"))
+            .tag(NavigationItem.variables)
+            
+            NavigationLink(destination: EnvVarListPage()) {
+                Label("Env Vars (\(workspace.environmentVariables.count))", systemImage: "dollarsign.circle")
+            }
+            .accessibility(label: Text("Environment Variables"))
+            .tag(NavigationItem.envVariables)
+
+            NavigationLink(destination: SettingsListPage()) {
+                Label("Settings", systemImage: "gear")
+            }
+            .accessibility(label: Text("Settings"))
+            .tag(NavigationItem.settings)
+        }
+        .overlay(Pocket(), alignment: .bottom)
+        .listStyle(SidebarListStyle())
     }
 }
 
