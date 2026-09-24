@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import SwiftTerm
 import SwiftUI
 
 struct ContentView: View {

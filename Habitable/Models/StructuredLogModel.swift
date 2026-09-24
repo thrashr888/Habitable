@@ -5,6 +5,7 @@
 //  Created by Paul Thrasher on 5/5/21.
 //
 
+import Combine
 import Foundation
 
 class StructuredLog: ObservableObject {

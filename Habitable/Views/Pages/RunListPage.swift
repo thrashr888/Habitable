@@ -42,6 +42,7 @@ struct RunListPage: View {
                     }
                 }
                 .foregroundColor(.accentColor)
+                .disabled(workspace.locked || !workspace.isValid)
             }
         }
     }
@@ -51,8 +52,8 @@ struct RunListPage_Previews: PreviewProvider {
     static let workspace: Workspace = {
         let model = Workspace(dir: URL(fileURLWithPath: "/Users/thrashr888/workspace/Habitable"))
         model.runs = [
-            TerraformRun(workspace: workspace),
-            TerraformRun(workspace: workspace),
+            TerraformRun(workspace: model),
+            TerraformRun(workspace: model),
         ]
         return model
     }()

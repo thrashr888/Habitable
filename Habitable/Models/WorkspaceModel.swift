@@ -5,10 +5,7 @@
 //  Created by Paul Thrasher on 5/4/21.
 //
 
-import Collections
 import Foundation
-import ShellOut
-import SwiftTerm
 import SwiftUI
 import SwiftyJSON
 
@@ -34,7 +31,7 @@ class Workspace: ObservableObject {
     @AppStorage("lastWorkingDirectory") var lastWorkingDirectory: URL?
     @Published var description = ""
     @Published var autoApply = false
-    @Published var terraformVersion = "0.15.3"
+    @Published var terraformVersion = "Checking…"
 
     // data
     @Published var textOutput: String?
@@ -45,6 +42,7 @@ class Workspace: ObservableObject {
     @Published var environmentVariables: [EnvironmentVariable] = []
 
     init(dir: URL? = nil) {
+        refreshTerraformVersion()
         if dir == nil, let lastDir = lastWorkingDirectory {
             workingDirectory = lastDir
             updateWorkingDirectory(dir: lastDir)
@@ -64,6 +62,18 @@ class Workspace: ObservableObject {
 //        }
 //    }
     
+    func refreshTerraformVersion() {
+        runner.version { output, error in
+            if let output = output, let data = output.data(using: .utf8),
+               let json = try? JSON(data: data), let version = json["terraform_version"].string {
+                self.terraformVersion = version
+            } else {
+                self.terraformVersion = "Unavailable"
+                self.errorMessage = error?.message
+            }
+        }
+    }
+
     func reset() {
         textOutput = nil
         errorMessage = nil
@@ -87,6 +97,15 @@ class Workspace: ObservableObject {
     }
 
     func updateWorkingDirectory(dir: URL) {
+        guard !locked else { return }
+        for run in runs { run.doDiscard() }
+        runs = []
+        state = nil
+        isInitialized = false
+        isValid = false
+        hasState = false
+        hasVariables = false
+        terraformVariables = []
         workingDirectory = dir
         lastWorkingDirectory = dir
 
@@ -97,7 +116,6 @@ class Workspace: ObservableObject {
         }
         if fileManager.fileExists(atPath: dir.appendingPathComponent("terraform.tfstate").path, isDirectory: &isDir) {
             hasState = true
-            refreshResources()
         }
         
         checkVariables()
@@ -141,6 +159,7 @@ class Workspace: ObservableObject {
                 let parts = v.split(separator: "=")
                                 
                 let variable = TerraformVariable()
+                guard parts.count > 1 else { continue }
                 variable.key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
                 if parts.count > 1 {
                     // TODO parse json value
@@ -168,7 +187,7 @@ class Workspace: ObservableObject {
     }
 
     func initialize() {
-        guard let workingDirectory = self.workingDirectory else { return }
+        guard !locked, let workingDirectory = self.workingDirectory else { return }
         reset()
         locked = true
         runner.initialize(workingDirectory: workingDirectory, completion: { res, error in
@@ -179,14 +198,15 @@ class Workspace: ObservableObject {
             }
             if let res = res {
                 self.textOutput = self.cleanANSI(res)
-                self.isValid = true
+                self.isInitialized = true
+                self.validate()
             }
             self.objectWillChange.send()
         })
     }
     
     func validate() {
-        guard let workingDirectory = self.workingDirectory else { return }
+        guard !locked, let workingDirectory = self.workingDirectory else { return }
         reset()
         locked = true
         runner.validate(workingDirectory: workingDirectory, completion: { res, error in
@@ -195,8 +215,9 @@ class Workspace: ObservableObject {
                 self.errorMessage = error.message
                 self.isValid = false
             }
-            if let _ = res {
+            if res != nil {
                 self.isValid = true
+                if self.hasState { self.refreshResources() }
             }
             self.objectWillChange.send()
         })
@@ -204,6 +225,7 @@ class Workspace: ObservableObject {
     
     func refreshResources() {
         guard let workingDirectory = workingDirectory else { return }
+        guard !locked else { return }
         lock()
         
         runner.show(workingDirectory: workingDirectory, completion: { res, error in
@@ -212,6 +234,7 @@ class Workspace: ObservableObject {
             if let res = res {
                 let json = parseJsonOutput(res)
                 self.state = transformShow(json)
+                self.hasState = self.state != nil
                 self.isValid = true
             }
             
@@ -263,7 +286,7 @@ class Workspace: ObservableObject {
     }
 
     func queueRun(_: String? = nil) {
-        if locked {
+        if locked || !isValid {
             return
         }
         let run = TerraformRun(workspace: self)

@@ -5,8 +5,8 @@
 //  Created by Paul Thrasher on 5/9/21.
 //
 
+import Combine
 import Foundation
-import ShellOut
 
 enum RunStatus: String {
     case pending = "PENDING"
@@ -47,10 +47,10 @@ class TerraformRun: ObservableObject, Identifiable {
         }
     }
     var canConfirm: Bool {
-        status == .planned && apply == nil
+        status == .planned && apply == nil && !workspace.locked
     }
     var canDiscard: Bool {
-        !isFinished && apply == nil
+        status == .planned && apply == nil && !workspace.locked
     }
 
     init(workspace: Workspace) {
@@ -63,6 +63,7 @@ class TerraformRun: ObservableObject, Identifiable {
     func doDiscard() {
         guard canDiscard else { return }
         status = .discarded
+        workspace.runner.discardPlan(runId: id.uuidString)
     }
     
     func doPlan(_ completion: @escaping (_ plan: StructuredLog?, _ error: String?) -> Void) {
@@ -98,7 +99,7 @@ class TerraformRun: ObservableObject, Identifiable {
     }
     
     func doApply(_ completion: @escaping (_ apply: StructuredLog?, _ error: String?) -> Void) {
-        if status == .discarded { return }
+        guard canConfirm else { return }
         
         status = .confirmed
         
@@ -106,7 +107,7 @@ class TerraformRun: ObservableObject, Identifiable {
         workspace.lock(self)
         status = .applying
         
-        workspace.runner.apply(workingDirectory: workingDirectory, completion: { res, error in
+        workspace.runner.apply(workingDirectory: workingDirectory, runId: id.uuidString, completion: { res, error in
             self.workspace.unlock()
             self.status = .applied
             
@@ -121,6 +122,7 @@ class TerraformRun: ObservableObject, Identifiable {
                 }
                 
                 guard let apply = self.apply else { return }
+                self.workspace.runner.discardPlan(runId: self.id.uuidString)
                 self.workspace.didApply(run: self, apply: apply)
             }
             

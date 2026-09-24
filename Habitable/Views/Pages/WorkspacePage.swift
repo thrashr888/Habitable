@@ -8,8 +8,8 @@
 import SwiftUI
 
 struct CheckView: View {
-    @State var label: String
-    @State var check: Bool
+    let label: String
+    let check: Bool
     var body: some View {
         HStack {
             if check {
@@ -49,6 +49,10 @@ struct WorkspacePage: View {
                 }
             }
             
+            if let error = workspace.errorMessage {
+                ErrorView(message: error)
+            }
+
             Spacer()
 
             if workspace.textOutput != nil {
@@ -59,6 +63,7 @@ struct WorkspacePage: View {
         }
         .padding(.all)
         .navigationTitle("Workspace")
+        .disabled(workspace.locked)
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button(action: { workspace.initialize() }) {

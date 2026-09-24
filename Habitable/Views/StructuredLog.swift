@@ -121,13 +121,13 @@ struct StructuredLogView: View {
 struct StructuredLogView_Previews: PreviewProvider {
     static let log: StructuredLog = {
         let model = StructuredLog()
-        log.resources = [
+        model.resources = [
             ResourceState(PlannedChangeSummary(address: "test-addr", resource: Resource(addr: "test-addr"))),
         ]
-        log.changeSummaries = [
+        model.changeSummaries = [
             ChangeSummaryMessage(changes: ChangeSummaryChanges(add: 1, change: 2, remove: 3))
         ]
-        log.logs = [
+        model.logs = [
             LogMessage(message: "Testing"),
         ]
         return model

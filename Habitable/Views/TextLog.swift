@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct TextLogView: View {
-    @State var text: String
+    let text: String
 //    @State var term = SwiftTerm.TerminalView()
 //
 //    init(text: String?, ansi: Text?){

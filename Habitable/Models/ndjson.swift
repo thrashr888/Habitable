@@ -47,10 +47,13 @@ func handleNDJsonSuccess(_ output: String) -> StructuredLog {
             } else {
                 // already exists
                 guard let hook = transformHook(line) else { continue }
-                guard let index = newLogs.resources.firstIndex(where: { rs -> Bool in
-                    rs.address == hook.address
-                }) else { continue }
-                newLogs.resources[index].update(hook)
+                if let existing = newLogs.resources.first(where: { $0.address == hook.address }) {
+                    existing.update(hook)
+                } else {
+                    let resource = ResourceState(PlannedChangeSummary(address: hook.address, resource: hook.resource, action: hook.action))
+                    resource.update(hook)
+                    newLogs.resources.append(resource)
+                }
             }
             continue
         }
