@@ -14,7 +14,7 @@ struct HabitableApp: App {
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer") {
             ContentView()
-                .frame(minWidth: 800, minHeight: 400)
+                .frame(minWidth: 900, minHeight: 480)
         }
     }
 }

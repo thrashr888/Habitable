@@ -34,7 +34,7 @@ struct ResourceSummaryView: View {
 
 struct ResourceListPage: View {
     @EnvironmentObject var workspace: Workspace
-    @State private var selection: ShowResource?
+    @Binding var selection: String?
     @State var searchText: String = ""
     
     var resources: [ShowResource] {
@@ -49,7 +49,7 @@ struct ResourceListPage: View {
     
     func refresh() {
         workspace.refreshResources()
-        selection = filteredResources.first
+        if selection == nil { selection = filteredResources.first?.address }
     }
 
     var body: some View {
@@ -67,14 +67,9 @@ struct ResourceListPage: View {
                 Text("Searching: \(searchText)")
             }
             ForEach(filteredResources) { resource in
-                NavigationLink(
-                    destination: ShowResourceView(resource: resource),
-                    tag: resource,
-                    selection: $selection
-                ) {
-                    ResourceSummaryView(resource: resource)
-                        .tag(resource)
-                }
+                ResourceSummaryView(resource: resource)
+                    .lineLimit(2)
+                    .tag(resource.address ?? resource.id.uuidString)
             }
         }
         .navigationTitle("Resources")
@@ -96,7 +91,7 @@ struct ResourceListPage: View {
 
 struct ResourceListPage_Previews: PreviewProvider {
     static var previews: some View {
-        ResourceListPage()
+        ResourceListPage(selection: .constant(nil))
             .environmentObject(Workspace(dir: URL(fileURLWithPath: "/Users/thrashr888/workspace/Habitable")))
     }
 }
