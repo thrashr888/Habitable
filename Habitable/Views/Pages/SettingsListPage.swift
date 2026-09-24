@@ -11,46 +11,40 @@ struct SettingsListPage: View {
     @EnvironmentObject var workspace: Workspace
 
     var body: some View {
-        ScrollView {
-            Form {
-                Section {
-                    Text("Working directory")
-                        .font(.headline)
-                        .padding(.bottom, 1)
-                    VStack(alignment: .leading) {
-                        if let workingDirectory = workspace.workingDirectory {
-                            Text("\(workingDirectory.path)")
-                        }
-                        Button("Choose folder", action: workspace.addUrl)
+        Form {
+            Section("Workspace") {
+                LabeledContent("Working directory") {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Text(workspace.workingDirectory?.path ?? "No folder selected")
+                            .textSelection(.enabled)
+                            .multilineTextAlignment(.trailing)
+                        Button("Choose folder…", action: workspace.addUrl)
                             .disabled(workspace.locked)
                     }
-                    
-                    TerraformVersionSettings(workspace: workspace)
-                        .padding(.top)
-
-                    Toggle("Auto apply", isOn: $workspace.autoApply)
-                        .padding(.top)
-                    
-                    Text("Description")
-                        .font(.headline)
-                        .padding(.top)
-                    ZStack {
-                        TextEditor(text: $workspace.description)
-                        Text(workspace.description)
-                            .opacity(0)
-                            .padding(.all, 8) // <- This will solve the issue if it is in the same ZStack
-                    }
+                }
+                LabeledContent("Description") {
+                    TextField("Optional description", text: $workspace.description, axis: .vertical)
+                        .lineLimit(2...4)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
                 }
             }
-            .padding(.all)
 
-        }
-        .navigationTitle("Settings")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Text("")
+            TerraformVersionSettings(workspace: workspace)
+
+            Section {
+                Toggle("Apply automatically after planning", isOn: $workspace.autoApply)
+                    .disabled(workspace.locked)
+            } header: {
+                Text("Execution")
+            } footer: {
+                Text("When enabled, a successful plan applies immediately without a review step.")
             }
         }
+        .formStyle(.grouped)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .navigationTitle("Settings")
     }
 }
 
@@ -68,41 +62,56 @@ struct TerraformVersionSettings: View {
     @State private var selection = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Terraform").font(.headline)
-            Text("Current: \(workspace.terraformVersion)")
-            Text(workspace.runner.executableURL?.path ?? "Terraform not found")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .textSelection(.enabled)
-                .id(workspace.runner.executableURL?.path)
-            Link("Official HashiCorp releases", destination: TerraformReleaseService.sourceURL)
-
-            if let latest = catalog.releases.first {
-                Text("Latest stable: \(latest.version)")
+        Section {
+            LabeledContent("Active version") {
+                Text(workspace.terraformVersion)
+                    .monospacedDigit()
+                Text(workspace.managedTerraformVersion == nil ? "System" : "Managed")
+                    .foregroundStyle(.secondary)
             }
             if !catalog.available.isEmpty {
-                Picker("Version", selection: $selection) {
+                Picker("Release", selection: $selection) {
                     ForEach(catalog.available) { release in
                         Text(release.version + (catalog.installed.contains(release) ? " (installed)" : ""))
                             .tag(release.version)
                     }
                 }
-                .disabled(catalog.isInstalling)
-                Button(catalog.installed.contains(where: { $0.version == selection }) ? "Use selected version" : "Download and use") {
-                    installSelectedVersion()
+                .disabled(workspace.locked || catalog.isInstalling)
+
+                HStack {
+                    if let latest = catalog.releases.first {
+                        Text("Latest stable: \(latest.version)")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(catalog.installed.contains(where: { $0.version == selection }) ? "Use selected version" : "Download and use") {
+                        installSelectedVersion()
+                    }
+                    .disabled(workspace.locked || catalog.isInstalling || selection.isEmpty || selection == workspace.managedTerraformVersion && catalog.service.isInstalled(version: selection))
                 }
-                .disabled(workspace.locked || catalog.isInstalling || selection.isEmpty || selection == workspace.managedTerraformVersion && catalog.service.isInstalled(version: selection))
             }
             HStack {
-                Button("Refresh releases") {
+                Link("HashiCorp releases", destination: TerraformReleaseService.sourceURL)
+                Spacer()
+                Button {
                     Task { await catalog.refresh(); chooseDefault() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(catalog.isLoading || catalog.isInstalling)
                 Button("Use system Terraform") {
                     workspace.useTerraform(version: nil, executableURL: nil)
                 }
                 .disabled(workspace.locked || catalog.isInstalling || workspace.managedTerraformVersion == nil)
+            }
+            DisclosureGroup("Executable location") {
+                Text(workspace.runner.executableURL?.path ?? "Terraform not found")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .id(workspace.runner.executableURL?.path)
             }
             if catalog.isLoading || catalog.isInstalling {
                 HStack {
@@ -111,14 +120,15 @@ struct TerraformVersionSettings: View {
                 }
             }
             if let error = catalog.error {
-                Text(error).foregroundColor(.red).textSelection(.enabled)
+                Text(error).foregroundStyle(.red).textSelection(.enabled)
             }
             if let error = workspace.errorMessage {
-                Text(error).foregroundColor(.red).textSelection(.enabled)
+                Text(error).foregroundStyle(.red).textSelection(.enabled)
             }
-            Text("Downloads are verified and stored by Habitable. Switching versions discards pending plans; queue a new plan before applying.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+        } header: {
+            Text("Terraform")
+        } footer: {
+            Text("Downloads are verified and stored by Habitable. Changing versions discards pending plans; queue a new plan before applying.")
         }
         .task {
             await catalog.refresh()

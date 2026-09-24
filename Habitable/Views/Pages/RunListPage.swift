@@ -30,12 +30,10 @@ struct RunListPage: View {
                     workspace.queueRun()
                     selection = workspace.runs.last?.id
                 }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "text.badge.plus")
-                        Text("Queue plan")
-                    }
+                    Label("Queue plan", systemImage: "text.badge.plus")
                 }
-                .foregroundColor(.accentColor)
+                .labelStyle(.iconOnly)
+                .help("Queue a Terraform plan")
                 .disabled(workspace.locked || !workspace.isValid)
             }
         }
