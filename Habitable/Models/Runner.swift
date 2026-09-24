@@ -1,4 +1,5 @@
 import Combine
+import Darwin
 import Foundation
 
 struct TerraformCommandError: Error {
@@ -13,8 +14,7 @@ final class Runner: ObservableObject {
     private let executableOverride: URL?
     private let environment: [String: String]
     private let searchPaths: [String]
-    private let planDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("Habitable-plans-\(UUID().uuidString)", isDirectory: true)
+    private let planDirectory: URL
 
     init(executableURL: URL? = nil,
          environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -22,9 +22,29 @@ final class Runner: ObservableObject {
         executableOverride = executableURL
         self.environment = environment
         self.searchPaths = searchPaths
+        planDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Habitable-plans-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)",
+                                    isDirectory: true)
+        Self.removeAbandonedPlanDirectories()
     }
 
     deinit { try? FileManager.default.removeItem(at: planDirectory) }
+
+    private static func removeAbandonedPlanDirectories() {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: temporaryDirectory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return }
+        for entry in entries where entry.lastPathComponent.hasPrefix("Habitable-plans-") {
+            let components = entry.lastPathComponent.split(separator: "-", maxSplits: 3)
+            guard components.count == 4, components[0] == "Habitable", components[1] == "plans",
+                  let processID = Int32(components[2]) else { continue }
+            // Never remove another live Runner's input files. PID-scoped names
+            // let a later app launch clean directories left by crashed sessions.
+            if kill(pid_t(processID), 0) != 0 && errno == ESRCH {
+                try? FileManager.default.removeItem(at: entry)
+            }
+        }
+    }
 
     var executableURL: URL? {
         if let override = executableOverride {
@@ -58,9 +78,49 @@ final class Runner: ObservableObject {
         execute(["validate", "-no-color"], workingDirectory: workingDirectory, completion: completion)
     }
 
-    func plan(workingDirectory: URL, runId: String, completion: @escaping Completion) {
-        execute(["plan", "-input=false", "-json", "-out=\(planURL(runId: runId).path)"],
-                workingDirectory: workingDirectory, completion: completion)
+    func plan(workingDirectory: URL, runId: String,
+              variables: [TerraformVariable] = [],
+              environmentVariables: [EnvironmentVariable] = [],
+              completion: @escaping Completion) {
+        var variableFile: URL?
+        do {
+            var values: [String: Any] = [:]
+            for variable in variables {
+                guard values[variable.key] == nil else {
+                    throw VariableInputError.duplicateKey(variable.key)
+                }
+                values[variable.key] = try variable.terraformJSONValue()
+            }
+
+            var environmentOverrides: [String: String] = [:]
+            for variable in environmentVariables {
+                try variable.validate()
+                environmentOverrides[variable.key] = variable.value
+            }
+
+            var arguments = ["plan", "-input=false", "-json"]
+            if !values.isEmpty {
+                try FileManager.default.createDirectory(at: planDirectory, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+                let file = planDirectory.appendingPathComponent("\(UUID().uuidString).tfvars.json")
+                let data = try JSONSerialization.data(withJSONObject: values, options: [.sortedKeys, .fragmentsAllowed])
+                variableFile = file
+                try data.write(to: file, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+                arguments.append("-var-file=\(file.path)")
+            }
+            arguments.append("-out=\(planURL(runId: runId).path)")
+            let inputFileToRemove = variableFile
+            execute(arguments, workingDirectory: workingDirectory, environmentOverrides: environmentOverrides) { output, error in
+                if let inputFileToRemove { try? FileManager.default.removeItem(at: inputFileToRemove) }
+                completion(output, error)
+            }
+        } catch {
+            if let variableFile { try? FileManager.default.removeItem(at: variableFile) }
+            DispatchQueue.main.async {
+                completion(nil, TerraformCommandError(message: error.localizedDescription))
+            }
+        }
     }
 
     func apply(workingDirectory: URL, runId: String, completion: @escaping Completion) {
@@ -68,11 +128,19 @@ final class Runner: ObservableObject {
                 workingDirectory: workingDirectory, completion: completion)
     }
 
+    /// Reads the immutable plan artifact produced for this run. Keep this separate from
+    /// `show`, which reads the current workspace state.
+    func showPlan(workingDirectory: URL, runId: String, completion: @escaping Completion) {
+        execute(["show", "-json", planURL(runId: runId).path],
+                workingDirectory: workingDirectory, completion: completion)
+    }
+
     func show(workingDirectory: URL, completion: @escaping Completion) {
         execute(["show", "-json"], workingDirectory: workingDirectory, completion: completion)
     }
 
-    private func execute(_ arguments: [String], workingDirectory: URL, completion: @escaping Completion) {
+    private func execute(_ arguments: [String], workingDirectory: URL,
+                         environmentOverrides: [String: String] = [:], completion: @escaping Completion) {
         cliQueue.async {
             guard let executable = self.executableURL else {
                 DispatchQueue.main.async {
@@ -100,7 +168,9 @@ final class Runner: ObservableObject {
                 process.executableURL = executable
                 process.arguments = arguments
                 process.currentDirectoryURL = workingDirectory
-                process.environment = self.environment.merging(["TF_IN_AUTOMATION": "1", "TF_INPUT": "0"]) { _, new in new }
+                process.environment = self.environment
+                    .merging(environmentOverrides) { _, new in new }
+                    .merging(["TF_IN_AUTOMATION": "1", "TF_INPUT": "0"]) { _, new in new }
                 process.standardInput = FileHandle.nullDevice
                 process.standardOutput = stdout
                 process.standardError = stderr

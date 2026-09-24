@@ -8,6 +8,136 @@
 import Foundation
 import SwiftUI
 import SwiftyJSON
+import CryptoKit
+import Darwin
+
+/// Serializes Terraform commands across windows and app processes for one canonical directory.
+final class WorkspaceCommandCoordinator {
+    final class Lease {
+        private let descriptor: Int32
+        let metadataURL: URL
+        private let failureMarkerURL: URL
+        private let failureIdentifier: String
+        private var isReleased = false
+        private(set) var generation: Int64
+
+        fileprivate init(descriptor: Int32, metadataURL: URL, failureMarkerURL: URL,
+                        failureIdentifier: String, generation: Int64) {
+            self.descriptor = descriptor
+            self.metadataURL = metadataURL
+            self.failureMarkerURL = failureMarkerURL
+            self.failureIdentifier = failureIdentifier
+            self.generation = generation
+        }
+
+        func invalidatePlans() throws {
+            let nextGeneration = generation + 1
+            do {
+                try saveGeneration(nextGeneration)
+                generation = nextGeneration
+            } catch {
+                WorkspaceCommandCoordinator.markFailed(identifier: failureIdentifier,
+                    marker: failureMarkerURL, reason: error.localizedDescription)
+                throw CoordinatorError.unavailable("Could not invalidate saved plans. Workspace commands are blocked until coordination recovers. \(error.localizedDescription)")
+            }
+        }
+
+        func release() {
+            guard !isReleased else { return }
+            isReleased = true
+            flock(descriptor, LOCK_UN)
+            close(descriptor)
+        }
+
+        private func saveGeneration(_ value: Int64) throws {
+            try Data(String(value).utf8).write(to: metadataURL, options: .atomic)
+        }
+
+        deinit { release() }
+    }
+
+    enum CoordinatorError: LocalizedError {
+        case busy
+        case unavailable(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .busy: return "Another Habitable window or process is using this Terraform workspace. Try again when its command finishes."
+            case .unavailable(let message): return "Workspace command coordination failed: \(message)"
+            }
+        }
+    }
+
+    static let shared = WorkspaceCommandCoordinator()
+    private static let failureLock = NSLock()
+    private static var failedIdentifiers = Set<String>()
+    private let directory: URL
+
+    init(directory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Habitable/CommandCoordination", isDirectory: true)) {
+        self.directory = directory
+    }
+
+    func acquire(workspace: URL, contextIdentity: String) throws -> Lease {
+        let canonicalPath = RunHistoryStore.workspacePath(workspace)
+        let key = SHA256.hash(data: Data(canonicalPath.utf8)).map { String(format: "%02x", $0) }.joined()
+        let folder = directory.appendingPathComponent(key, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let lockURL = folder.appendingPathComponent(".lock")
+        let failureMarkerURL = folder.appendingPathComponent(".failed")
+        let failureIdentifier = folder.standardizedFileURL.path
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+        guard descriptor >= 0 else { throw CoordinatorError.unavailable(POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO).localizedDescription) }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            close(descriptor)
+            if code == EWOULDBLOCK || code == EAGAIN { throw CoordinatorError.busy }
+            throw CoordinatorError.unavailable(POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO).localizedDescription)
+        }
+
+        if Self.isFailed(identifier: failureIdentifier) || FileManager.default.fileExists(atPath: failureMarkerURL.path) {
+            flock(descriptor, LOCK_UN)
+            close(descriptor)
+            throw CoordinatorError.unavailable("Workspace command coordination previously failed. Saved plans cannot be applied safely.")
+        }
+
+        let metadataURL = folder.appendingPathComponent("generation")
+        do {
+            let saved = (try? String(contentsOf: metadataURL, encoding: .utf8))
+                .flatMap { Int64($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            var generation = saved
+            let contextURL = folder.appendingPathComponent("context")
+            let previousContext = try? String(contentsOf: contextURL, encoding: .utf8)
+            if previousContext != contextIdentity {
+                generation += 1
+                try Data(String(generation).utf8).write(to: metadataURL, options: .atomic)
+                try Data(contextIdentity.utf8).write(to: contextURL, options: .atomic)
+            }
+            return Lease(descriptor: descriptor, metadataURL: metadataURL, failureMarkerURL: failureMarkerURL,
+                         failureIdentifier: failureIdentifier, generation: generation)
+        } catch {
+            Self.markFailed(identifier: failureIdentifier, marker: failureMarkerURL, reason: error.localizedDescription)
+            flock(descriptor, LOCK_UN)
+            close(descriptor)
+            throw CoordinatorError.unavailable(error.localizedDescription)
+        }
+    }
+
+    fileprivate static func markFailed(identifier: String, marker: URL, reason: String) {
+        failureLock.lock()
+        failedIdentifiers.insert(identifier)
+        failureLock.unlock()
+        // Keep the failure visible to other app processes when the filesystem still permits writes.
+        try? Data(reason.utf8).write(to: marker, options: .atomic)
+    }
+
+    private static func isFailed(identifier: String) -> Bool {
+        failureLock.lock()
+        defer { failureLock.unlock() }
+        return failedIdentifiers.contains(identifier)
+    }
+}
 
 // break out plan, apply, show, etc runners
 class Workspace: ObservableObject {
@@ -16,6 +146,7 @@ class Workspace: ObservableObject {
     @Published var runner: Runner
     @Published var managedTerraformVersion: String?
     private let preferences: UserDefaults
+    private let commandCoordinator: WorkspaceCommandCoordinator
     let historyStore: RunHistoryStore
     @Published var historyError: String?
     private var unsavedRuns: [UUID: (RunRecord, URL)] = [:]
@@ -37,6 +168,9 @@ class Workspace: ObservableObject {
     @Published var description = ""
     @Published var autoApply = false
     @Published var terraformVersion = "Checking…"
+    @Published var selectedTerraformWorkspace = "default"
+    @Published var backendIdentity = "unknown backend"
+    @Published private(set) var executionContextDisplay = "Workspace: default · Backend: unknown backend"
 
     // data
     @Published var textOutput: String?
@@ -47,9 +181,11 @@ class Workspace: ObservableObject {
     @Published var environmentVariables: [EnvironmentVariable] = []
 
     init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard,
-         historyStore: RunHistoryStore = RunHistoryStore()) {
+         historyStore: RunHistoryStore = RunHistoryStore(),
+         commandCoordinator: WorkspaceCommandCoordinator = .shared) {
         self.historyStore = historyStore
         preferences = defaults
+        self.commandCoordinator = commandCoordinator
         managedTerraformVersion = defaults.string(forKey: TerraformReleaseService.selectionKey)
         runner = Runner(executableURL: TerraformReleaseService.selectedExecutable(defaults: defaults))
         refreshTerraformVersion()
@@ -136,6 +272,7 @@ class Workspace: ObservableObject {
         hasVariables = false
         terraformVariables = []
         workingDirectory = dir
+        refreshExecutionContext()
         lastWorkingDirectory = dir
         reloadRunHistory()
 
@@ -150,6 +287,39 @@ class Workspace: ObservableObject {
         
         checkVariables()
         validate()
+    }
+
+    var executionContextIdentifier: String {
+        let terraform = runner.executableURL?.standardizedFileURL.path ?? "unavailable"
+        return "workspace=\(selectedTerraformWorkspace);backend=\(backendIdentity);terraform=\(terraform)"
+    }
+
+    func acquireCommandLease() throws -> WorkspaceCommandCoordinator.Lease {
+        guard let directory = workingDirectory else {
+            throw WorkspaceCommandCoordinator.CoordinatorError.unavailable("No working directory is selected.")
+        }
+        refreshExecutionContext()
+        return try commandCoordinator.acquire(workspace: directory, contextIdentity: executionContextIdentifier)
+    }
+
+    private func refreshExecutionContext() {
+        guard let directory = workingDirectory else { return }
+        let environmentWorkspace = ProcessInfo.processInfo.environment["TF_WORKSPACE"]
+        let selectionFile = directory.appendingPathComponent(".terraform/environment")
+        let fileWorkspace = try? String(contentsOf: selectionFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        selectedTerraformWorkspace = environmentWorkspace?.isEmpty == false ? environmentWorkspace! : (fileWorkspace?.isEmpty == false ? fileWorkspace! : "default")
+
+        let metadataURL = directory.appendingPathComponent(".terraform/terraform.tfstate")
+        guard let data = try? Data(contentsOf: metadataURL),
+              let json = try? JSON(data: data),
+              let backend = json["backend"]["type"].string else {
+            backendIdentity = "unknown backend"
+            executionContextDisplay = "Workspace: \(selectedTerraformWorkspace) · Backend: \(backendIdentity)"
+            return
+        }
+        let backendHash = json["backend"]["hash"].string ?? json["backend"]["hash"].int.map(String.init)
+        backendIdentity = backendHash.map { "\(backend) #\($0)" } ?? backend
+        executionContextDisplay = "Workspace: \(selectedTerraformWorkspace) · Backend: \(backendIdentity)"
     }
     
     func checkVariables() {
@@ -218,10 +388,14 @@ class Workspace: ObservableObject {
 
     func initialize() {
         guard !locked, let workingDirectory = self.workingDirectory else { return }
+        let lease: WorkspaceCommandCoordinator.Lease
+        do { lease = try acquireCommandLease() }
+        catch { errorMessage = error.localizedDescription; return }
         reset()
         locked = true
         runner.initialize(workingDirectory: workingDirectory, completion: { res, error in
             self.locked = false
+            lease.release()
             if let error = error {
                 self.errorMessage = error.message
                 self.isValid = false
@@ -237,17 +411,24 @@ class Workspace: ObservableObject {
     
     func validate() {
         guard !locked, let workingDirectory = self.workingDirectory else { return }
+        let lease: WorkspaceCommandCoordinator.Lease
+        do { lease = try acquireCommandLease() }
+        catch { errorMessage = error.localizedDescription; return }
         reset()
         locked = true
         runner.validate(workingDirectory: workingDirectory, completion: { res, error in
             self.locked = false
+            lease.release()
             if let error = error {
                 self.errorMessage = error.message
                 self.isValid = false
             }
             if res != nil {
+                // A successful validate proves the directory has completed init, even
+                // when Terraform has no downloaded providers and creates no .terraform folder.
+                self.isInitialized = true
                 self.isValid = true
-                if self.hasState { self.refreshResources() }
+                self.refreshResources()
             }
             self.objectWillChange.send()
         })
@@ -256,21 +437,35 @@ class Workspace: ObservableObject {
     func refreshResources() {
         guard let workingDirectory = workingDirectory else { return }
         guard !locked else { return }
+        let lease: WorkspaceCommandCoordinator.Lease
+        do { lease = try acquireCommandLease() }
+        catch { errorMessage = error.localizedDescription; return }
+        // Clear stale inventory while querying the selected local or remote backend.
+        state = nil
+        hasState = false
         lock()
         
         runner.show(workingDirectory: workingDirectory, completion: { res, error in
             self.unlock()
+            lease.release()
             
             if let res = res {
                 let json = parseJsonOutput(res)
-                self.state = transformShow(json)
-                self.hasState = self.state != nil
-                self.isValid = true
+                if json["values"].dictionary != nil, json["values"]["root_module"].dictionary != nil {
+                    self.state = transformShow(json)
+                    self.hasState = true
+                    self.isValid = true
+                } else {
+                    self.state = nil
+                    self.hasState = false
+                    self.errorMessage = "Terraform returned no state data for the selected backend and workspace."
+                }
             }
             
             if let error = error {
+                // Validation succeeded; a missing state or inaccessible backend should
+                // not make the Terraform configuration itself appear invalid.
                 self.errorMessage = error.message
-                self.isValid = false
             }
         })
     }
@@ -352,8 +547,11 @@ class Workspace: ObservableObject {
 
     func queueRun(_ message: String? = nil) {
         guard !locked, isValid, historyError == nil, let directory = workingDirectory else { return }
+        refreshExecutionContext()
         do {
-            let record = try historyStore.create(workspace: directory, terraformVersion: terraformVersion, message: message)
+            let record = try historyStore.create(workspace: directory, terraformVersion: terraformVersion, message: message,
+                                                 selectedTerraformWorkspace: selectedTerraformWorkspace,
+                                                 backendIdentity: backendIdentity)
             historyError = nil
             let run = TerraformRun(workspace: self, record: record, restored: false)
             runs.append(run)

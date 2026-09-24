@@ -21,11 +21,16 @@ class TerraformRun: ObservableObject, Identifiable {
     private var planOutput: String?
     private var applyOutput: String?
     private var updatedAt = Date()
+    private var planGeneration: Int64?
+    private var planExecutionContext: String?
+    private var selectedTerraformWorkspace = "default"
+    private var backendIdentity = "unknown backend"
 
     @Published var status: RunStatus = .pending
     @Published var textOutput: String?
     @Published var errorMessage: String?
     @Published var plan: StructuredLog?
+    @Published var planDiff: TerraformPlan?
     @Published var apply: StructuredLog?
     @Published var added: Int?
     @Published var changed: Int?
@@ -49,12 +54,17 @@ class TerraformRun: ObservableObject, Identifiable {
     var canDiscard: Bool {
         !isRestored && status == .planned && apply == nil && workspace?.locked == false
     }
+    var executionContextDescription: String {
+        "Terraform workspace: \(selectedTerraformWorkspace) · Backend: \(backendIdentity)"
+    }
 
     // Construction never launches a command: queueRun saves the initial record first.
     init(workspace: Workspace) {
         self.workspace = workspace
         workspaceDirectory = workspace.workingDirectory
         terraformVersion = workspace.terraformVersion
+        selectedTerraformWorkspace = workspace.selectedTerraformWorkspace
+        backendIdentity = workspace.backendIdentity
     }
 
     init(workspace: Workspace, record: RunRecord, restored: Bool) {
@@ -62,6 +72,8 @@ class TerraformRun: ObservableObject, Identifiable {
         id = record.id; number = record.number; createdAt = record.createdAt
         updatedAt = record.updatedAt; message = record.message
         terraformVersion = record.terraformVersion
+        selectedTerraformWorkspace = record.selectedTerraformWorkspace ?? selectedTerraformWorkspace
+        backendIdentity = record.backendIdentity ?? backendIdentity
         workspaceDirectory = URL(fileURLWithPath: record.workspacePath)
         status = record.status; errorMessage = record.errorMessage
         planOutput = record.planOutput; applyOutput = record.applyOutput
@@ -83,10 +95,22 @@ class TerraformRun: ObservableObject, Identifiable {
         updatedAt = Date()
         let record = RunRecord(id: id, number: number, workspacePath: RunHistoryStore.workspacePath(directory),
                                createdAt: createdAt, updatedAt: updatedAt, status: status,
-                               terraformVersion: terraformVersion, message: message,
+                               terraformVersion: terraformVersion,
+                               selectedTerraformWorkspace: selectedTerraformWorkspace,
+                               backendIdentity: backendIdentity, message: message,
                                planOutput: planOutput, applyOutput: applyOutput, errorMessage: errorMessage,
                                added: added, changed: changed, destroyed: destroyed)
         return workspace.persistRun(record, directory: directory)
+    }
+
+    private func redactOutput(_ output: String?, workspace: Workspace) -> String? {
+        guard var output else { return nil }
+        let sensitiveValues = workspace.terraformVariables.filter { $0.isUserInput && $0.sensitive }.map(\.value)
+            + workspace.environmentVariables.filter { $0.isUserInput && $0.sensitive }.map(\.value)
+        for value in sensitiveValues where !value.isEmpty {
+            output = output.replacingOccurrences(of: value, with: "(sensitive)")
+        }
+        return RunHistoryStore.redactSensitiveOutputs(output)
     }
 
     func doDiscard() {
@@ -100,41 +124,115 @@ class TerraformRun: ObservableObject, Identifiable {
         guard !isRestored, status == .pending, let workspace,
               !workspace.locked, let directory = workspaceDirectory,
               workspace.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
+        let lease: WorkspaceCommandCoordinator.Lease
+        do {
+            lease = try workspace.acquireCommandLease()
+        } catch {
+            status = .errored
+            errorMessage = error.localizedDescription
+            persist()
+            completion(nil, errorMessage)
+            return
+        }
+        selectedTerraformWorkspace = workspace.selectedTerraformWorkspace
+        backendIdentity = workspace.backendIdentity
         status = .planning
-        guard persist() else { status = .errored; completion(nil, workspace.historyError); return }
+        guard persist() else {
+            status = .errored
+            lease.release()
+            completion(nil, workspace.historyError)
+            return
+        }
         workspace.lock(self)
         let runner = workspace.runner
-        runner.plan(workingDirectory: directory, runId: id.uuidString) { [self, workspace] output, error in
-            workspace.unlock()
-            planOutput = RunHistoryStore.redactSensitiveOutputs(output ?? error?.output)
+        runner.plan(workingDirectory: directory, runId: id.uuidString,
+                    variables: workspace.terraformVariables.filter(\.isUserInput),
+                    environmentVariables: workspace.environmentVariables.filter(\.isUserInput)) { [self, workspace] output, error in
+            planOutput = redactOutput(output ?? error?.output, workspace: workspace)
             plan = planOutput.map(handleNDJsonSuccess)
-            errorMessage = error?.message
-            status = error == nil ? .planned : .errored
-            workspace.isValid = error == nil
-            if let changes = plan?.changeSummaries.last {
-                added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove
+            guard error == nil else {
+                workspace.unlock()
+                lease.release()
+                errorMessage = redactOutput(error?.message, workspace: workspace)
+                status = .errored
+                workspace.isValid = false
+                runner.discardPlan(runId: id.uuidString)
+                persist()
+                completion(plan, errorMessage)
+                return
             }
-            if error != nil { runner.discardPlan(runId: id.uuidString) }
-            let saved = persist()
-            if saved, error == nil, let plan { workspace.didPlan(run: self, plan: plan) }
-            completion(plan, errorMessage)
+            // Review exactly the saved plan that apply will receive. A plan that cannot
+            // be inspected is retired instead of becoming confirmable.
+            runner.showPlan(workingDirectory: directory, runId: id.uuidString) { [self, workspace] showOutput, showError in
+                workspace.unlock()
+                if let showOutput, let reviewedPlan = parseTerraformPlan(showOutput) {
+                    planDiff = reviewedPlan
+                    planGeneration = lease.generation
+                    planExecutionContext = workspace.executionContextIdentifier
+                    status = .planned
+                    workspace.isValid = true
+                } else {
+                    errorMessage = redactOutput(showError?.message, workspace: workspace)
+                        ?? "Terraform could not inspect the saved plan."
+                    status = .errored
+                    workspace.isValid = false
+                    runner.discardPlan(runId: id.uuidString)
+                }
+                if let changes = plan?.changeSummaries.last {
+                    added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove
+                }
+                let saved = persist()
+                lease.release()
+                if saved, status == .planned, let plan { workspace.didPlan(run: self, plan: plan) }
+                completion(plan, errorMessage)
+            }
         }
     }
 
     func doApply(_ completion: @escaping (StructuredLog?, String?) -> Void) {
         guard canConfirm, let workspace, let directory = workspaceDirectory,
               workspace.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
+        let lease: WorkspaceCommandCoordinator.Lease
+        do {
+            lease = try workspace.acquireCommandLease()
+        } catch {
+            errorMessage = error.localizedDescription
+            completion(nil, errorMessage)
+            return
+        }
+        guard planGeneration == lease.generation, planExecutionContext == workspace.executionContextIdentifier else {
+            lease.release()
+            status = .expired
+            errorMessage = "The workspace changed after this plan was reviewed. Create a new plan before applying."
+            workspace.runner.discardPlan(runId: id.uuidString)
+            persist()
+            completion(nil, errorMessage)
+            return
+        }
         status = .applying
-        guard persist() else { status = .planned; completion(nil, workspace.historyError); return }
+        guard persist() else {
+            status = .planned
+            lease.release()
+            completion(nil, workspace.historyError)
+            return
+        }
         workspace.lock(self)
         let runner = workspace.runner
         runner.apply(workingDirectory: directory, runId: id.uuidString) { [self, workspace] output, error in
             workspace.unlock()
-            applyOutput = RunHistoryStore.redactSensitiveOutputs(output ?? error?.output)
+            let coordinationError: String?
+            do {
+                try lease.invalidatePlans()
+                coordinationError = nil
+            } catch {
+                coordinationError = "Terraform finished, but Habitable could not invalidate reviewed plans in other windows: \(error.localizedDescription)"
+            }
+            lease.release()
+            applyOutput = redactOutput(output ?? error?.output, workspace: workspace)
             apply = applyOutput.map(handleNDJsonSuccess)
-            errorMessage = error?.message
-            status = error == nil ? .applied : .errored
-            workspace.isValid = error == nil
+            errorMessage = coordinationError ?? redactOutput(error?.message, workspace: workspace)
+            status = coordinationError == nil && error == nil ? .applied : .errored
+            workspace.isValid = coordinationError == nil && error == nil
             if let changes = apply?.changeSummaries.last {
                 added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove
             }

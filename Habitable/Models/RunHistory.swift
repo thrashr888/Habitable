@@ -11,6 +11,8 @@ struct RunRecord: Codable {
     var updatedAt: Date
     var status: RunStatus
     var terraformVersion: String
+    var selectedTerraformWorkspace: String?
+    var backendIdentity: String?
     var message: String?
     var planOutput: String?
     var applyOutput: String?
@@ -50,14 +52,16 @@ struct RunHistoryStore {
         return try withLock(folder: folder) { try readRecords(workspace: workspace) }
     }
 
-    func create(workspace: URL, terraformVersion: String, message: String?) throws -> RunRecord {
+    func create(workspace: URL, terraformVersion: String, message: String?,
+                selectedTerraformWorkspace: String? = nil, backendIdentity: String? = nil) throws -> RunRecord {
         try withLock(folder: workspaceDirectory(workspace)) {
             let records = try readRecords(workspace: workspace)
             let now = Date()
             let record = RunRecord(id: UUID(), number: (records.map(\.number).max() ?? 0) + 1,
                                    workspacePath: Self.workspacePath(workspace), createdAt: now,
                                    updatedAt: now, status: .pending, terraformVersion: terraformVersion,
-                                   message: message)
+                                   selectedTerraformWorkspace: selectedTerraformWorkspace,
+                                   backendIdentity: backendIdentity, message: message)
             try write(record, workspace: workspace)
             return record
         }
