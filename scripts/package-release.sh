@@ -13,7 +13,11 @@ ARCHIVE="$BUILD_DIR/artifacts/Habitable-$VERSION-macos-universal.zip"
 xcodebuild -project Habitable.xcodeproj -scheme Habitable \
   -configuration Release -destination 'generic/platform=macOS' \
   -derivedDataPath "$BUILD_DIR" ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
-  CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" build
+  CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+  CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp build
+# Explicit distribution signing prevents local-build entitlements from leaking in.
+codesign --force --options runtime --timestamp --entitlements Habitable/Habitable.entitlements \
+  --sign "$SIGNING_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 ARCHITECTURES="$(lipo -archs "$APP/Contents/MacOS/Habitable")"
 for ARCH in arm64 x86_64; do
