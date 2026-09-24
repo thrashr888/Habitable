@@ -10,7 +10,7 @@ import SwiftUI
 struct StructuredLogView: View {
     var logs: StructuredLog
     @State var showLogs = false
-    @State var selection: Int?
+    @State private var selection = 2
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -62,58 +62,15 @@ struct StructuredLogView: View {
                     }
                 })
             
-//            List {
-//                // TODO try using tabs here too!
-//
-//                if logs.diagnostics.count > 0 {
-//                    ForEach(logs.diagnostics, id: \.id) { log in
-//                        DiagnosticView(diagnostic: log.diagnostic)
-//                    }
-//                    Divider()
-//                }
-//                if logs.changeSummaries.count > 0 {
-//                    ForEach(logs.changeSummaries, id: \.id) { log in
-//                        ChangeSummaryView(changes: log.changes)
-//                    }
-//                }
-//                if !logs.logs.isEmpty {
-//                    Button("show logs") {
-//                        showLogs = !showLogs
-//                    }
-//                }
-//                if showLogs {
-//                    Divider()
-//                    ForEach(logs.logs, id: \.id) { log in
-//                        if let message = log.message {
-//                            LogView(message: message)
-//                        } else {
-//                            LogView(message: "no message")
-//                        }
-//                    }
-//                }
-//                if logs.versions.count > 0 {
-//                    Divider()
-//                    ForEach(logs.versions, id: \.id) { log in
-//                        VersionView(version: log.version!)
-//                    }
-//                }
-//                if logs.resources.count > 0 {
-//                    Divider()
-//                    Text("Resources")
-//                        .fontWeight(.bold)
-//                    ForEach(logs.resources, id: \.id) { log in
-//                        ResourceView(resourceState: log)
-//                    }
-//                }
-//                if logs.outputs.count > 0 {
-//                    Divider()
-//                    Text("Outputs")
-//                        .fontWeight(.bold)
-//                    ForEach(logs.outputs, id: \.id) { log in
-//                        OutputView(outputs: log.outputs)
-//                    }
-//                }
-//            }
+
+        }
+        .onAppear {
+            if !logs.diagnostics.isEmpty { selection = 1 }
+            else if !logs.changeSummaries.isEmpty { selection = 2 }
+            else if !logs.resources.isEmpty { selection = 5 }
+            else if !logs.outputs.isEmpty { selection = 6 }
+            else if !logs.logs.isEmpty { selection = 3 }
+            else { selection = 4 }
         }
     }
 }

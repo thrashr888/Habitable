@@ -49,59 +49,62 @@ struct RunPageView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                Text("RUN #\(run.number)")
-                if run.message != nil {
-                    Text("\(run.message!)")
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Run #\(run.number)").font(.title2.weight(.semibold))
+                    if let message = run.message {
+                        Text(message)
+                    }
+                    Text("\(run.createdAt, formatter: Self.taskDateFormat)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(run.createdAt, formatter: Self.taskDateFormat)")
-                    .foregroundColor(.secondary)
+                Text(run.status.rawValue.localizedCapitalized)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
-            
-            TabView(selection: $selection,
-                content:  {
-                    planView.tabItem {
-                        Label("Plan", systemImage: "questionmark.folder")
-                    }.tag(1)
-                    if run.apply != nil {
-                        applyView.tabItem {
-                            Label("Apply", systemImage: "doc.text")
-                        }.tag(2)
+
+            if run.canDiscard || run.canConfirm {
+                HStack {
+                    Spacer()
+                    if run.canDiscard {
+                        Button("Discard plan", action: run.doDiscard)
                     }
-                    if run.errorMessage != nil {
-                        errorView.tabItem {
-                            Label("Errors", systemImage: "xmark.octagon")
-                        }.tag(3)
-                    }
-                })
-        }
-        .padding(.all)
-        .navigationTitle("Run #\(run.number)")
-        .navigationSubtitle(run.status.rawValue.localizedCapitalized)
-        .toolbar {
-            ToolbarItem(placement: .status) {
-                Text("\(run.status.rawValue.localizedCapitalized)")
-            }
-            ToolbarItem(placement: .cancellationAction) {
-                if run.canDiscard {
-                    Button("Discard plan") {
-                        run.doDiscard()
+                    if run.canConfirm {
+                        Button("Confirm and apply") {
+                            run.doApply { _, error in
+                                selection = error == nil ? 2 : 3
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
                 }
+                .controlSize(.regular)
             }
-            ToolbarItem(placement: .confirmationAction) {
-                if run.canConfirm {
-                    Button("Confirm and apply") {
-                        run.doApply({ apply, error in
-                            self.selection = error == nil ? 2 : 3
-                        })
-                    }
-                    .foregroundColor(.accentColor)
+
+            if run.apply != nil || run.errorMessage != nil {
+                Picker("Run phase", selection: $selection) {
+                    Text("Plan").tag(1)
+                    if run.apply != nil { Text("Apply").tag(2) }
+                    if run.errorMessage != nil { Text("Errors").tag(3) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            Group {
+                switch selection {
+                case 2: applyView
+                case 3: errorView
+                default: planView
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .padding(20)
+        .navigationTitle("Runs")
     }
 }
 
