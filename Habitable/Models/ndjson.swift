@@ -22,7 +22,6 @@ func parseNDJsonOutput(_ output: String) -> [JSON] {
                 ])
                 out.append(json)
             }
-            print(line)
         }
     }
     return out

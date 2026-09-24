@@ -25,7 +25,7 @@ struct RunPageView: View {
             if let plan = run.plan {
                 StructuredLogView(logs: plan)
             } else {
-                Text("Planning...")
+                Text(run.isFinished ? "No plan output was captured for this run." : "Planning…")
             }
         }
     }
@@ -64,6 +64,13 @@ struct RunPageView: View {
                 Text(run.status.rawValue.localizedCapitalized)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+
+            if let notice = run.historyNotice {
+                Text(notice)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if run.canDiscard || run.canConfirm {
@@ -105,6 +112,7 @@ struct RunPageView: View {
         }
         .padding(20)
         .navigationTitle("Runs")
+        .onAppear { selection = run.errorMessage != nil ? 3 : (run.apply != nil ? 2 : 1) }
     }
 }
 

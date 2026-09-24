@@ -41,6 +41,12 @@ Copy `Examples/local-only` to a scratch directory and choose that folder in the 
 cp -R Examples/local-only /tmp/habitable-demo
 ```
 
+## Run history
+
+History is local to this Mac and directory path. Symlink aliases share history; moving a directory gives it a new identity. Each run has an atomic record with owner-only file permissions. Concurrent writers allocate distinct run numbers. A failed write is visible in Runs and blocks new plans/apply until **Reload history** successfully retries it. Corrupt or newer-format history is preserved and reported; the app does not silently replace it with an empty history.
+
+Values explicitly marked as sensitive Terraform outputs are removed before saving. Other Terraform diagnostics and provider/provisioner messages can contain secrets; history is private local data, not encrypted storage. History has no automatic retention/deletion policy yet. Backend and Terraform workspace names within one directory are not yet distinguished (tracked in `Habitable-2u2`).
+
 ## Build and test
 
 ```sh
@@ -52,11 +58,13 @@ HABITABLE_TEST_TERRAFORM="$(command -v terraform)" swift test
 HABITABLE_TEST_RELEASES=1 swift test
 ```
 
-The Swift package compiles the app's actual models. Tests cover missing/invalid CLI installs, literal paths and arguments, large stdout/stderr output, failed commands, and saved-plan application. The opt-in integration test creates a temporary provider-free workspace and checks init, validate, plan, apply, and show, including a configuration change after plan review. Release-manager tests cover architecture filtering, stable numeric ordering, checksum failures, invalid archives, executable-version mismatches, offline reuse, and switching during a run. `HABITABLE_TEST_RELEASES=1` additionally downloads and runs the latest official stable release in a temporary directory.
+The project resolves SwiftyJSON 5.0.2 in both Xcode and SwiftPM. SwiftPM uses tools 6.4 and the existing Swift 5 language mode, matching the app target; full Swift 6 concurrency checking is a separate migration.
+
+The Swift package compiles the app's actual models. Tests cover missing/invalid CLI installs, literal paths and arguments, large stdout/stderr output, failed commands, and saved-plan application. The opt-in integration test creates a temporary provider-free workspace and checks init, validate, plan, apply, and show, including a configuration change after plan review. History tests cover restart recovery, workspace isolation, sensitive output redaction, corrupt/future records, concurrent numbering, disk-write recovery, and failed applies. Release-manager tests cover architecture filtering, stable numeric ordering, checksum failures, invalid archives, executable-version mismatches, offline reuse, and switching during a run. `HABITABLE_TEST_RELEASES=1` additionally downloads and runs the latest official stable release in a temporary directory.
 
 ## Current scope
 
-This is an early preview of the revived app. Runs and settings other than the last folder and selected Terraform version remain in memory. Saved plans are temporary and belong to the current app session. Variable editors are still prototypes; use Terraform files or the process environment for actual input values. The app inherits the environment it is launched with, so Finder/Xcode may have different credentials and `PATH` than your terminal. Long-running commands finish before their logs appear; cancellation and streaming are follow-up work.
+This is an early preview of the revived app. Run history is saved per canonical directory under `~/Library/Application Support/Habitable/RunHistory`. Saved results survive restarts, including timestamps, Terraform version, plan/apply summaries, resource events, and diagnostics. Plans restored from an earlier session are marked **Expired** and cannot be applied; queue a new plan. Runs last recorded during a command are marked **Interrupted**, with an unknown outcome that requires checking state. Settings other than the last folder and selected Terraform version remain in memory. Variable editors are still prototypes; use Terraform files or the process environment for actual input values. The app inherits the environment it is launched with, so Finder/Xcode may have different credentials and `PATH` than your terminal. Long-running commands finish before their logs appear; cancellation and streaming are follow-up work.
 
 The runner uses `Process` with explicit arguments and no shell. Apply executes the saved plan shown for that run, following Terraform's [saved-plan workflow](https://developer.hashicorp.com/terraform/cli/commands/apply#saved-plan-mode).
 

@@ -12,19 +12,35 @@ struct RunListPage: View {
     @Binding var selection: UUID?
 
     var body: some View {
-        List(selection: $selection) {
-            if workspace.runs.count == 0 {
-                Text("No runs yet. Queue a plan to view potential changes.")
+        VStack(spacing: 0) {
+            if let error = workspace.historyError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(error).font(.callout).textSelection(.enabled)
+                    Button("Reload history", action: workspace.reloadRunHistory)
+                        .disabled(workspace.locked)
+                }
+                .padding()
             }
-            
-            ForEach(workspace.runs.sorted { $0.number > $1.number }) { run in
-                RunSummaryView(run: run)
-                    .tag(run.id)
+            List(selection: $selection) {
+                if workspace.runs.isEmpty {
+                    Text("No runs yet. Queue a plan to view potential changes.")
+                }
+                ForEach(workspace.runs.sorted { $0.number > $1.number }) { run in
+                    RunSummaryView(run: run)
+                        .tag(run.id)
+                }
             }
         }
         .navigationTitle("Runs")
-//        .navigationSubtitle("\(workspace.runs.count) runs")
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button(action: workspace.reloadRunHistory) {
+                    Label("Reload history", systemImage: "arrow.clockwise")
+                }
+                .labelStyle(.iconOnly)
+                .help("Reload saved run history")
+                .disabled(workspace.locked)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
                     workspace.queueRun()
@@ -34,7 +50,7 @@ struct RunListPage: View {
                 }
                 .labelStyle(.iconOnly)
                 .help("Queue a Terraform plan")
-                .disabled(workspace.locked || !workspace.isValid)
+                .disabled(workspace.locked || !workspace.isValid || workspace.historyError != nil)
             }
         }
     }
