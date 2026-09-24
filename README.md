@@ -4,14 +4,22 @@ A native macOS app for exploring local Terraform workspaces, reviewing plans, ap
 
 ## Run in Xcode
 
-Requires macOS 13 or later and a locally installed Terraform CLI. The restoration is tested with Xcode 27.0 beta (27A5237l), Apple silicon, and Terraform 1.16.3.
+Requires macOS 13 or later and a Terraform CLI downloaded in Settings or installed locally. The restoration is tested with Xcode 27.0 beta (27A5237l), Apple silicon, and Terraform 1.16.4.
 
 1. Open `Habitable.xcodeproj` in Xcode and let Swift packages resolve.
 2. Select the **Habitable** scheme and **My Mac**, then press **⌘R**. Local builds use **Sign to Run Locally**; no developer team is required.
 3. Choose a Terraform directory, initialize it, then open **Runs → Queue plan**.
 4. Review the plan and select **Confirm and apply** to execute that saved plan.
 
-Habitable finds Terraform on `PATH`, then in `/opt/homebrew/bin` and `/usr/local/bin`. For a different install, set `HABITABLE_TERRAFORM_PATH` to the full executable path under **Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables**. Settings shows the detected path and actual version. No Terraform binary is bundled or downloaded by the app.
+## Terraform versions
+
+Open **Settings → Terraform** to load compatible stable releases from HashiCorp's [official release catalog](https://releases.hashicorp.com/terraform/). The app reads its `index.json`, sorts versions numerically, and offers macOS builds for the running app's architecture. Prereleases and versions older than 0.15 are excluded. **Refresh releases** checks for new releases; upgrading is explicit, never automatic.
+
+Choose a version and click **Download and use**. Habitable downloads the archive and SHA-256 checksum list over HTTPS from `releases.hashicorp.com`, verifies the archive, extracts only the Terraform executable, and checks its reported version before activating it. Downloads live under `~/Library/Application Support/Habitable/Terraform/<version>/<architecture>/terraform`. Installed versions remain available offline. Failed downloads leave the active CLI unchanged. This checks the published SHA-256 digest; it does not verify the separate GPG signature.
+
+The chosen managed version persists as the default for newly opened workspaces. Existing windows retain their active CLI until changed or reopened. Switching is disabled during a run and discards pending plans in that workspace, requiring a fresh plan with the selected CLI. A missing selected executable reports an error instead of silently falling back to another version.
+
+**Use system Terraform** returns to CLI discovery: `HABITABLE_TERRAFORM_PATH`, then `PATH`, `/opt/homebrew/bin`, and `/usr/local/bin`. For a custom executable, set `HABITABLE_TERRAFORM_PATH` under **Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables**. Settings shows the active path and actual version. Managed installs do not alter Homebrew or your shell's Terraform installation.
 
 If Xcode reports missing first-launch components, run `xcodebuild -runFirstLaunch` and finish any setup requested by Xcode.
 
@@ -31,12 +39,13 @@ xcodebuild -project Habitable.xcodeproj -scheme Habitable \
   -derivedDataPath /tmp/habitable-build build
 swift test
 HABITABLE_TEST_TERRAFORM="$(command -v terraform)" swift test
+HABITABLE_TEST_RELEASES=1 swift test
 ```
 
-The Swift package compiles the app's actual models. Tests cover missing/invalid CLI installs, literal paths and arguments, large stdout/stderr output, failed commands, and saved-plan application. The opt-in integration test creates a temporary provider-free workspace and checks init, validate, plan, apply, and show, including a configuration change after plan review.
+The Swift package compiles the app's actual models. Tests cover missing/invalid CLI installs, literal paths and arguments, large stdout/stderr output, failed commands, and saved-plan application. The opt-in integration test creates a temporary provider-free workspace and checks init, validate, plan, apply, and show, including a configuration change after plan review. Release-manager tests cover architecture filtering, stable numeric ordering, checksum failures, invalid archives, executable-version mismatches, offline reuse, and switching during a run. `HABITABLE_TEST_RELEASES=1` additionally downloads and runs the latest official stable release in a temporary directory.
 
 ## Current scope
 
-This is a revived local development app, not a notarized distribution. Runs and settings other than the last folder remain in memory. Saved plans are temporary and belong to the current app session. Variable editors are still prototypes; use Terraform files or the process environment for actual input values. The app inherits the environment it is launched with, so Finder/Xcode may have different credentials and `PATH` than your terminal. Long-running commands finish before their logs appear; cancellation and streaming are follow-up work.
+This is a revived local development app, not a notarized distribution. Runs and settings other than the last folder and selected Terraform version remain in memory. Saved plans are temporary and belong to the current app session. Variable editors are still prototypes; use Terraform files or the process environment for actual input values. The app inherits the environment it is launched with, so Finder/Xcode may have different credentials and `PATH` than your terminal. Long-running commands finish before their logs appear; cancellation and streaming are follow-up work.
 
 The runner uses `Process` with explicit arguments and no shell. Apply executes the saved plan shown for that run, following Terraform's [saved-plan workflow](https://developer.hashicorp.com/terraform/cli/commands/apply#saved-plan-mode).

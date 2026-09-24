@@ -77,7 +77,7 @@ final class Runner: ObservableObject {
             guard let executable = self.executableURL else {
                 DispatchQueue.main.async {
                     completion(nil, TerraformCommandError(message:
-                        "Terraform was not found. Install Terraform in /opt/homebrew/bin or /usr/local/bin, or set HABITABLE_TERRAFORM_PATH in the Xcode scheme to its executable path."))
+                        "Terraform was not found. Download a release in Settings, use system Terraform, or set HABITABLE_TERRAFORM_PATH in the Xcode scheme."))
                 }
                 return
             }
