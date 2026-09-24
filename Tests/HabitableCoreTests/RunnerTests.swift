@@ -68,6 +68,14 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(output?.split(separator: "\n").map(String.init), ["apply", "-input=false", "-json", runner.planURL(runId: "reviewed").path])
     }
 
+    func testShowPlanUsesTheSameSavedArtifactAsApply() async throws {
+        let executable = try fakeCLI("printf '%s\\n' \"$@\"\n")
+        let runner = Runner(executableURL: executable)
+        let (output, error) = await result { runner.showPlan(workingDirectory: directory, runId: "reviewed", completion: $0) }
+        XCTAssertNil(error)
+        XCTAssertEqual(output?.split(separator: "\n").map(String.init), ["show", "-json", runner.planURL(runId: "reviewed").path])
+    }
+
     func testRealTerraformLocalWorkflow() async throws {
         guard let path = ProcessInfo.processInfo.environment["HABITABLE_TEST_TERRAFORM"] else {
             throw XCTSkip("Set HABITABLE_TEST_TERRAFORM to run the local-only integration test.")
@@ -82,6 +90,9 @@ final class RunnerTests: XCTestCase {
         let (plan, planError) = await result { runner.plan(workingDirectory: directory, runId: "integration", completion: $0) }
         XCTAssertNil(planError)
         XCTAssertFalse(handleNDJsonSuccess(try XCTUnwrap(plan)).versions.isEmpty)
+        let (savedPlan, savedPlanError) = await result { runner.showPlan(workingDirectory: directory, runId: "integration", completion: $0) }
+        XCTAssertNil(savedPlanError)
+        XCTAssertEqual(parseTerraformPlan(try XCTUnwrap(savedPlan))?.resourceChanges.first?.address, "terraform_data.example")
         // The configuration changes after review; Apply must still use the saved plan.
         try "output \"greeting\" { value = \"unreviewed change\" }\n".write(to: config, atomically: true, encoding: .utf8)
         let (apply, applyError) = await result { runner.apply(workingDirectory: directory, runId: "integration", completion: $0) }

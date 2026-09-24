@@ -22,12 +22,14 @@ struct SettingsListPage: View {
                             .disabled(workspace.locked)
                     }
                 }
-                LabeledContent("Description") {
-                    TextField("Optional description", text: $workspace.description, axis: .vertical)
-                        .lineLimit(2...4)
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 360)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Description")
+                    TextEditor(text: $workspace.description)
+                        .accessibilityLabel("Description")
+                        .multilineTextAlignment(.leading)
+                        .frame(height: 64)
+                        .padding(4)
+                        .background(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
                 }
             }
 

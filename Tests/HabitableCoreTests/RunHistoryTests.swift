@@ -15,7 +15,8 @@ final class RunHistoryTests: XCTestCase {
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: root) }
 
     func testRoundTripPreservesResultsAndPrivatePermissions() throws {
-        var record = try store.create(workspace: directory, terraformVersion: "1.16.4", message: "First deployment")
+        var record = try store.create(workspace: directory, terraformVersion: "1.16.4", message: "First deployment",
+                                      selectedTerraformWorkspace: "production", backendIdentity: "remote #12345")
         record.status = .applied
         record.planOutput = #"{"type":"change_summary","changes":{"add":1,"change":0,"remove":0}}"#
         record.applyOutput = #"{"type":"outputs","outputs":{"greeting":{"sensitive":false,"value":"hello"},"token":{"sensitive":true,"value":"never-persist-this"}}}"#
@@ -27,6 +28,8 @@ final class RunHistoryTests: XCTestCase {
         XCTAssertEqual(loaded.createdAt, record.createdAt)
         XCTAssertEqual(loaded.number, 1)
         XCTAssertEqual(loaded.status, .applied)
+        XCTAssertEqual(loaded.selectedTerraformWorkspace, "production")
+        XCTAssertEqual(loaded.backendIdentity, "remote #12345")
         XCTAssertEqual(loaded.added, 1)
         XCTAssertTrue(loaded.applyOutput?.contains("hello") == true)
         XCTAssertFalse(loaded.applyOutput?.contains("never-persist-this") == true)
@@ -34,6 +37,22 @@ final class RunHistoryTests: XCTestCase {
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
         let folderAttributes = try FileManager.default.attributesOfItem(atPath: store.workspaceDirectory(directory).path)
         XCTAssertEqual((folderAttributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+    }
+
+    func testLegacyRunRecordWithoutExecutionContextStillDecodes() throws {
+        let record = try store.create(workspace: directory, terraformVersion: "1.16.4", message: nil)
+        let file = store.recordURL(id: record.id, workspace: directory)
+        let encoded = try JSONEncoder().encode(record)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "selectedTerraformWorkspace")
+        object.removeValue(forKey: "backendIdentity")
+        let legacyData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        try legacyData.write(to: file)
+
+        let decoded = try XCTUnwrap(store.load(workspace: directory).first)
+        XCTAssertEqual(decoded.id, record.id)
+        XCTAssertNil(decoded.selectedTerraformWorkspace)
+        XCTAssertNil(decoded.backendIdentity)
     }
 
     func testCanonicalWorkspaceIdentityAndIndependentNumbering() throws {
@@ -198,14 +217,13 @@ final class RunHistoryTests: XCTestCase {
     @MainActor
     func testFailedApplyRetiresOtherPlansAndPersistsError() async throws {
         let executable = root.appendingPathComponent("fake-terraform")
-        try "#!/bin/sh\ncase \"$1\" in\nversion) echo '{\"terraform_version\":\"1.16.4\"}' ;;\napply) echo 'partial apply failed' >&2; exit 1 ;;\nshow) echo '{\"values\":{\"root_module\":{\"resources\":[]}}}' ;;\nesac\n"
+        try "#!/bin/sh\ncase \"$1\" in\nversion) echo '{\"terraform_version\":\"1.16.4\"}' ;;\nplan) echo '{\"type\":\"change_summary\",\"changes\":{\"add\":1,\"change\":0,\"remove\":0}}' ;;\napply) echo 'partial apply failed' >&2; exit 1 ;;\nshow) case \"$3\" in *.tfplan) echo '{\"format_version\":\"1.0\",\"resource_changes\":[{\"address\":\"terraform_data.example\",\"change\":{\"actions\":[\"create\"],\"before\":null,\"after\":{\"input\":\"x\"},\"after_unknown\":{}}}]}' ;; *) echo '{\"values\":{\"root_module\":{\"resources\":[]}}}' ;; esac ;;\nesac\n"
             .write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let workspace = Workspace(restoreLastDirectory: false, historyStore: store)
         workspace.runner = Runner(executableURL: executable)
         workspace.workingDirectory = directory
-        var record = try store.create(workspace: directory, terraformVersion: "1.16.4", message: nil)
-        record.status = .planned
+        let record = try store.create(workspace: directory, terraformVersion: "1.16.4", message: nil)
         try store.save(record, workspace: directory)
         let run = TerraformRun(workspace: workspace, record: record, restored: false)
         var otherRecord = try store.create(workspace: directory, terraformVersion: "1.16.4", message: nil)
@@ -213,6 +231,14 @@ final class RunHistoryTests: XCTestCase {
         try store.save(otherRecord, workspace: directory)
         let other = TerraformRun(workspace: workspace, record: otherRecord, restored: false)
         workspace.runs = [run, other]
+        await withCheckedContinuation { continuation in
+            run.doPlan { _, error in
+                XCTAssertNil(error)
+                continuation.resume()
+            }
+        }
+        try await waitUntil { !workspace.locked }
+        XCTAssertEqual(run.status, .planned)
         await withCheckedContinuation { continuation in
             run.doApply { _, error in
                 XCTAssertTrue(error?.contains("partial apply failed") == true)

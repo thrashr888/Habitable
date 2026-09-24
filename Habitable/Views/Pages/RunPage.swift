@@ -23,7 +23,7 @@ struct RunPageView: View {
     var planView: some View {
         Group {
             if let plan = run.plan {
-                StructuredLogView(logs: plan)
+                PlanReviewView(plan: plan, diff: run.planDiff)
             } else {
                 Text(run.isFinished ? "No plan output was captured for this run." : "Planning…")
             }
@@ -57,6 +57,9 @@ struct RunPageView: View {
                         Text(message)
                     }
                     Text("\(run.createdAt, formatter: Self.taskDateFormat)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(run.executionContextDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -113,6 +116,75 @@ struct RunPageView: View {
         .padding(20)
         .navigationTitle("Runs")
         .onAppear { selection = run.errorMessage != nil ? 3 : (run.apply != nil ? 2 : 1) }
+    }
+}
+
+private struct PlanReviewView: View {
+    let plan: StructuredLog
+    let diff: TerraformPlan?
+    @State private var selection = 0
+
+    var body: some View {
+        TabView(selection: $selection) {
+            if let diff {
+                List {
+                    if diff.resourceChanges.allSatisfy({ $0.action == "no-op" }) {
+                        Text("No resource changes in this plan.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(diff.resourceChanges.filter { $0.action != "no-op" }) { change in
+                        Section {
+                            if change.attributes.isEmpty {
+                                Text("Terraform reported no attribute changes.")
+                                    .foregroundStyle(.secondary)
+                            }
+                            ForEach(change.attributes) { attribute in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(attribute.path.isEmpty ? "value" : attribute.path)
+                                        .font(.headline)
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text("Before").foregroundStyle(.secondary)
+                                        Text(attribute.before.displayValue)
+                                            .textSelection(.enabled)
+                                    }
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text("After").foregroundStyle(.secondary)
+                                        Text(attribute.after.displayValue)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                                .padding(.vertical, 3)
+                            }
+                            if !change.replacementPaths.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Replacement required by")
+                                        .font(.headline)
+                                    Text(change.replacementPaths.joined(separator: ", "))
+                                        .textSelection(.enabled)
+                                }
+                                .padding(.vertical, 3)
+                            }
+                        } header: {
+                            HStack {
+                                Text(change.address)
+                                Spacer()
+                                Text(change.action.capitalized).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .tabItem { Label("Review", systemImage: "arrow.left.arrow.right") }
+                .tag(0)
+            }
+
+            StructuredLogView(logs: plan)
+                .tabItem { Label("Events", systemImage: "list.bullet") }
+                .tag(1)
+        }
+        .onAppear { selection = diff == nil ? 1 : 0 }
+        .onChange(of: diff != nil) { available in
+            if available { selection = 0 }
+        }
     }
 }
 

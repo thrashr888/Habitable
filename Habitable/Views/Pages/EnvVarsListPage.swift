@@ -10,7 +10,7 @@ import SwiftUI
 struct EnvironmentVariableSummaryView: View {
     @ObservedObject var variable: EnvironmentVariable
     var body: some View {
-        Text("\(variable.key) = \(variable.value)\(variable.sensitive ? " (sensitive)" : "")")
+        Text("\(variable.key) = \(variable.sensitive ? "(sensitive value)" : variable.value)")
         Text("\(variable.description)")
     }
 }
@@ -20,6 +20,10 @@ struct EnvVarListPage: View {
     
     @State var environmentVariableModal: Bool = false
     @State var newEV: EnvironmentVariable = EnvironmentVariable()
+
+    private var variableDuplicate: Bool {
+        workspace.environmentVariables.contains { $0.isUserInput && $0.key == newEV.key }
+    }
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -50,10 +54,27 @@ struct EnvVarListPage: View {
         }
         .sheet(isPresented: $environmentVariableModal) {
             Form {
-                Section(header: Text("Add an environment variable")
+                Section(header: Text("Save an environment variable")
                             .font(.headline)) {
+                    Text("Saved values apply to plans started in this app session.")
+                        .font(.caption).foregroundColor(.secondary)
                     TextField("Key", text: $newEV.key)
-                    TextField("Value", text: $newEV.value)
+                    Toggle("Sensitive", isOn: $newEV.sensitive)
+                    Text("Hides this value in Habitable. Terraform plan output follows the sensitivity declared in your Terraform configuration.")
+                        .font(.caption).foregroundColor(.secondary)
+                    if newEV.sensitive {
+                        SecureField("Value", text: $newEV.value)
+                    } else {
+                        TextField("Value", text: $newEV.value)
+                            .multilineTextAlignment(.leading)
+                    }
+                    TextField("Description", text: $newEV.description)
+                        .multilineTextAlignment(.leading)
+                    if let validationError = newEV.validationError {
+                        Text(validationError).foregroundColor(.red)
+                    } else if variableDuplicate {
+                        Text("An environment variable with this key already exists.").foregroundColor(.red)
+                    }
                     
                     HStack {
                         Button("Cancel") {
@@ -61,11 +82,14 @@ struct EnvVarListPage: View {
                             environmentVariableModal = false
                         }
                         Spacer()
-                        Button("Add") {
+                        Button("Save") {
+                            guard newEV.validationError == nil, !variableDuplicate else { return }
+                            newEV.isUserInput = true
                             workspace.addEnvironmentVariable(newEV)
                             newEV = EnvironmentVariable()
                             environmentVariableModal = false
                         }
+                        .disabled(newEV.validationError != nil || variableDuplicate)
                     }
                 }
             }.padding(.all)

@@ -31,9 +31,15 @@ struct WorkspacePage: View {
                 .font(.largeTitle)
                 .padding(.bottom, 1)
 
+            Text(workspace.executionContextDisplay)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .padding(.bottom, 8)
+
             CheckView(label: "Initialized", check: workspace.isInitialized)
             CheckView(label: "Config is valid", check: workspace.isValid)
-            CheckView(label: "State file exists", check: workspace.hasState)
+            CheckView(label: "State available", check: workspace.hasState)
             CheckView(label: ".tfvars file exists", check: workspace.hasVariables)
 
             if workspace.workingDirectory == nil {

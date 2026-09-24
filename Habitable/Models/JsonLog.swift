@@ -402,19 +402,31 @@ func transformShow(_ log: JSON) -> ShowMessage {
         outputs.append(add)
     }
 
-    var resources: [ShowResource] = []
-    for (_, res) in log["values"]["root_module"]["resources"] {
-        let add = ShowResource(
-            address: res["address"].string,
-            mode: res["mode"].string,
-            type: res["type"].string,
-            name: res["name"].string,
-            provider_name: res["provider_name"].string,
-            schema_version: res["schema_version"].int,
-            values: res["values"].dictionary
-        )
-        resources.append(add)
+    func collectResources(from module: JSON) -> [ShowResource] {
+        var moduleResources: [ShowResource] = []
+        for (_, res) in module["resources"] {
+            let add = ShowResource(
+                address: res["address"].string,
+                mode: res["mode"].string,
+                type: res["type"].string,
+                name: res["name"].string,
+                provider_name: res["provider_name"].string,
+                schema_version: res["schema_version"].int,
+                values: res["values"].dictionary
+            )
+            moduleResources.append(add)
+        }
+
+        for (_, childModule) in module["child_modules"] {
+            moduleResources.append(contentsOf: collectResources(from: childModule))
+        }
+        return moduleResources
     }
+
+    // Terraform's state JSON stores each module's resources at that module
+    // level. Resource addresses already include the complete module path (and
+    // any count/for_each key), so retain them as emitted while walking the tree.
+    let resources = collectResources(from: log["values"]["root_module"])
 
     return ShowMessage(
         format_version: log["format_version"].string,

@@ -23,7 +23,7 @@ struct TerraformVariableSummaryView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            Text("\(variable.value)")
+            Text(variable.sensitive ? "(sensitive value)" : variable.value)
                 .foregroundColor(.secondary)
         }
     }
@@ -37,6 +37,10 @@ struct VariableListPage: View {
     
     @State var newTV: TerraformVariable = TerraformVariable()
     @State var newEV: EnvironmentVariable = EnvironmentVariable()
+
+    private var variableDuplicate: Bool {
+        workspace.terraformVariables.contains { $0.isUserInput && $0.key == newTV.key }
+    }
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -68,22 +72,44 @@ struct VariableListPage: View {
         }
         .sheet(isPresented: $terraformVariableModal) {
             Form {
-                Section(header: Text("Add a Terraform variable")
+                Section(header: Text("Save a Terraform variable")
                             .font(.headline)) {
+                    Text("Saved values apply to plans started in this app session.")
+                        .font(.caption).foregroundColor(.secondary)
                     TextField("Key", text: $newTV.key)
-                    TextField("Value", text: $newTV.value)
-                    
+                    Text("Value")
+                    if newTV.sensitive {
+                        SecureField("Value", text: $newTV.value)
+                    } else {
+                        TextEditor(text: $newTV.value)
+                            .frame(minHeight: 72)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Toggle("Value is JSON (list, map, number, boolean, or null)", isOn: $newTV.hcl)
+                    Toggle("Sensitive", isOn: $newTV.sensitive)
+                    Text("Hides this value in Habitable. Mark the Terraform variable sensitive in your configuration to hide it from Terraform plan output.")
+                        .font(.caption).foregroundColor(.secondary)
+                    TextField("Description", text: $newTV.description)
+                        .multilineTextAlignment(.leading)
+                    if let validationError = newTV.validationError {
+                        Text(validationError).foregroundColor(.red)
+                    } else if variableDuplicate {
+                        Text("A variable with this key already exists.").foregroundColor(.red)
+                    }
                     HStack {
                         Button("Cancel") {
                             newTV = TerraformVariable()
                             terraformVariableModal = false
                         }
                         Spacer()
-                        Button("Add variable") {
+                        Button("Save variable") {
+                            guard newTV.validationError == nil, !variableDuplicate else { return }
+                            newTV.isUserInput = true
                             workspace.addTerraformVariable(newTV)
                             newTV = TerraformVariable()
                             terraformVariableModal = false
                         }
+                        .disabled(newTV.validationError != nil || variableDuplicate)
                     }
                 }
             }.padding(/*@START_MENU_TOKEN@*/.all/*@END_MENU_TOKEN@*/)
