@@ -15,7 +15,13 @@ xcodebuild -project Habitable.xcodeproj -scheme Habitable \
   -derivedDataPath "$BUILD_DIR" ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
   CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" build
 codesign --verify --deep --strict "$APP"
-lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/Habitable"
+ARCHITECTURES="$(lipo -archs "$APP/Contents/MacOS/Habitable")"
+for ARCH in arm64 x86_64; do
+  case " $ARCHITECTURES " in
+    *" $ARCH "*) ;;
+    *) echo "Missing release architecture: $ARCH" >&2; exit 1 ;;
+  esac
+done
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
 xcrun notarytool submit "$ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$APP"

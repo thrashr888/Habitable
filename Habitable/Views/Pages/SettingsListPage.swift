@@ -25,6 +25,7 @@ struct SettingsListPage: View {
                 LabeledContent("Description") {
                     TextField("Optional description", text: $workspace.description, axis: .vertical)
                         .lineLimit(2...4)
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 360)
                 }
