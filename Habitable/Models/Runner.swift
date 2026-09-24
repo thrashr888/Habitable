@@ -1,158 +1,121 @@
-//
-//  Runner.swift
-//  Habitable
-//
-//  Created by Paul Thrasher on 5/5/21.
-//
-
-import Collections
+import Combine
 import Foundation
-import ShellOut
-import SwiftTerm
-import SwiftUI
-import SwiftyJSON
 
-class Runner: ObservableObject {
-    var runnerQueue: Deque<TerraformRun> = []
-    let cliQueue = DispatchQueue(label: "Terraform Runner")
-    let cliDir = Bundle.main.url(forResource: "terraform", withExtension: nil)!
-
-    func initialize(workingDirectory: URL, completion: @escaping (_ res: String?, _ error: ShellOutError?) -> Void) {
-        cliQueue.async {
-            do {
-                print(self.cliDir)
-                let out = try shellOut(to: .terraformInit(self.cliDir.path), at: workingDirectory.path)
-                DispatchQueue.main.async {
-                    completion(out, nil)
-                }
-            } catch {
-                let error = error as! ShellOutError
-                DispatchQueue.main.async {
-                    completion(nil, error)
-                }
-            }
-        }
-    }
-    
-    func validate(workingDirectory: URL, completion: @escaping (_ res: String?, _ error: ShellOutError?) -> Void) {
-        cliQueue.async {
-            do {
-                let out = try shellOut(to: .terraformValidate(self.cliDir.path), at: workingDirectory.path)
-                DispatchQueue.main.async {
-                    completion(out, nil)
-                }
-            } catch {
-                let error = error as! ShellOutError
-                DispatchQueue.main.async {
-                    completion(nil, error)
-                }
-            }
-        }
-    }
-
-    func plan(workingDirectory: URL, runId: String? = nil, completion: @escaping (_ res: String?, _ error: ShellOutError?) -> Void) {
-        cliQueue.async {
-            do {
-                var tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-                if let runId = runId {
-                    tmp = tmp.appendingPathComponent("\(runId).plan")
-                } else {
-                    tmp = tmp.appendingPathComponent("tf.plan")
-                }
-                
-                let out = try shellOut(to: .terraformPlan(self.cliDir.path, tmp.relativePath), at: workingDirectory.path)
-                DispatchQueue.main.async {
-                    completion(out, nil)
-                }
-            } catch {
-                let error = error as! ShellOutError
-                DispatchQueue.main.async {
-                    completion(nil, error)
-                }
-            }
-        }
-    }
-
-    func apply(workingDirectory: URL, completion: @escaping (_ res: String?, _ error: ShellOutError?) -> Void) {
-        cliQueue.async {
-            do {
-                let out = try shellOut(to: .terraformApply(self.cliDir.path), at: workingDirectory.path)
-                DispatchQueue.main.async {
-                    completion(out, nil)
-                }
-            } catch {
-                let error = error as! ShellOutError
-                DispatchQueue.main.async {
-                    completion(nil, error)
-                }
-            }
-        }
-    }
-
-    func show(workingDirectory: URL, completion: @escaping (_ res: String?, _ error: ShellOutError?) -> Void) {
-        cliQueue.async {
-            do {
-                let out = try shellOut(to: .terraformShow(self.cliDir.path), at: workingDirectory.path)
-                DispatchQueue.main.async {
-                    completion(out, nil)
-                }
-            } catch {
-                let error = error as! ShellOutError
-                DispatchQueue.main.async {
-                    completion(nil, error)
-                }
-            }
-        }
-    }
+struct TerraformCommandError: Error {
+    let message: String
+    var output = ""
 }
 
-public extension ShellOutCommand {
-    static func terraformInit(_ cliDir: String) -> ShellOutCommand {
-        let command = cliDir + " init"
-        print(command)
-        return ShellOutCommand(string: command)
+/// Runs Terraform directly, without a shell, on a serial background queue.
+final class Runner: ObservableObject {
+    typealias Completion = (String?, TerraformCommandError?) -> Void
+    private let cliQueue = DispatchQueue(label: "Terraform Runner")
+    private let executableOverride: URL?
+    private let environment: [String: String]
+    private let searchPaths: [String]
+    private let planDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Habitable-plans-\(UUID().uuidString)", isDirectory: true)
+
+    init(executableURL: URL? = nil,
+         environment: [String: String] = ProcessInfo.processInfo.environment,
+         searchPaths: [String] = ["/opt/homebrew/bin", "/usr/local/bin"]) {
+        executableOverride = executableURL
+        self.environment = environment
+        self.searchPaths = searchPaths
     }
 
-    static func terraformPlan(_ cliDir: String, _ planFile: String? = nil) -> ShellOutCommand {
-        var command = cliDir + " plan"
-            .appending(" -json")
-        if let planFile = planFile {
-            command = command.appending(" -out=\(planFile)")
+    deinit { try? FileManager.default.removeItem(at: planDirectory) }
+
+    var executableURL: URL? {
+        if let override = executableOverride {
+            return FileManager.default.isExecutableFile(atPath: override.path) ? override : nil
         }
-        print(command)
-        return ShellOutCommand(string: command)
-    }
-
-    // TODO write JSON and stdout to files
-    // keep a folder per-run so we can reload them later
-    // essentially persist the run list w/ plans and applies
-    static func terraformApply(_ cliDir: String, _ planFile: String? = nil) -> ShellOutCommand {
-        var command = cliDir + " apply"
-            .appending(" -json")
-            .appending(" -auto-approve")
-        if let planFile = planFile {
-            command = command.appending(" \(planFile)")
+        if let path = environment["HABITABLE_TERRAFORM_PATH"], !path.isEmpty {
+            return FileManager.default.isExecutableFile(atPath: path) ? URL(fileURLWithPath: path) : nil
         }
-        print(command)
-        return ShellOutCommand(string: command)
+        let directories = (environment["PATH"] ?? "").split(separator: ":").map(String.init) + searchPaths
+        return directories.map { URL(fileURLWithPath: $0).appendingPathComponent("terraform") }
+            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
-    static func terraformShow(_ cliDir: String) -> ShellOutCommand {
-        let command = cliDir + " show"
-            .appending(" -json")
-        print(command)
-        return ShellOutCommand(string: command)
-    }
-    
-    static func terraformValidate(_ cliDir: String) -> ShellOutCommand {
-        let command = cliDir + " validate"
-        print(command)
-        return ShellOutCommand(string: command)
+    func planURL(runId: String) -> URL {
+        planDirectory.appendingPathComponent(runId).appendingPathExtension("tfplan")
     }
 
-    static func terraformDestroy(_ cliDir: String) -> ShellOutCommand {
-        let command = cliDir + " destroy"
-        print(command)
-        return ShellOutCommand(string: command)
+    func discardPlan(runId: String) {
+        try? FileManager.default.removeItem(at: planURL(runId: runId))
+    }
+
+    func version(completion: @escaping Completion) {
+        execute(["version", "-json"], workingDirectory: FileManager.default.temporaryDirectory, completion: completion)
+    }
+
+    func initialize(workingDirectory: URL, completion: @escaping Completion) {
+        execute(["init", "-input=false", "-no-color"], workingDirectory: workingDirectory, completion: completion)
+    }
+
+    func validate(workingDirectory: URL, completion: @escaping Completion) {
+        execute(["validate", "-no-color"], workingDirectory: workingDirectory, completion: completion)
+    }
+
+    func plan(workingDirectory: URL, runId: String, completion: @escaping Completion) {
+        execute(["plan", "-input=false", "-json", "-out=\(planURL(runId: runId).path)"],
+                workingDirectory: workingDirectory, completion: completion)
+    }
+
+    func apply(workingDirectory: URL, runId: String, completion: @escaping Completion) {
+        execute(["apply", "-input=false", "-json", planURL(runId: runId).path],
+                workingDirectory: workingDirectory, completion: completion)
+    }
+
+    func show(workingDirectory: URL, completion: @escaping Completion) {
+        execute(["show", "-json"], workingDirectory: workingDirectory, completion: completion)
+    }
+
+    private func execute(_ arguments: [String], workingDirectory: URL, completion: @escaping Completion) {
+        cliQueue.async {
+            guard let executable = self.executableURL else {
+                DispatchQueue.main.async {
+                    completion(nil, TerraformCommandError(message:
+                        "Terraform was not found. Install Terraform in /opt/homebrew/bin or /usr/local/bin, or set HABITABLE_TERRAFORM_PATH in the Xcode scheme to its executable path."))
+                }
+                return
+            }
+            do {
+                try FileManager.default.createDirectory(at: self.planDirectory, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+                // Files keep stdout and stderr separate without blocking on full pipe buffers.
+                let outputURL = self.planDirectory.appendingPathComponent(UUID().uuidString)
+                let errorURL = self.planDirectory.appendingPathComponent(UUID().uuidString)
+                defer {
+                    try? FileManager.default.removeItem(at: outputURL)
+                    try? FileManager.default.removeItem(at: errorURL)
+                }
+                FileManager.default.createFile(atPath: outputURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+                FileManager.default.createFile(atPath: errorURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+                let stdout = try FileHandle(forWritingTo: outputURL)
+                let stderr = try FileHandle(forWritingTo: errorURL)
+                defer { try? stdout.close(); try? stderr.close() }
+                let process = Process()
+                process.executableURL = executable
+                process.arguments = arguments
+                process.currentDirectoryURL = workingDirectory
+                process.environment = self.environment.merging(["TF_IN_AUTOMATION": "1", "TF_INPUT": "0"]) { _, new in new }
+                process.standardInput = FileHandle.nullDevice
+                process.standardOutput = stdout
+                process.standardError = stderr
+                try process.run()
+                process.waitUntilExit()
+                let output = String(decoding: try Data(contentsOf: outputURL), as: UTF8.self)
+                let errorOutput = String(decoding: try Data(contentsOf: errorURL), as: UTF8.self)
+                let failure: TerraformCommandError? = process.terminationStatus == 0 ? nil : TerraformCommandError(
+                    message: errorOutput.isEmpty ? (output.isEmpty ? "Terraform exited with status \(process.terminationStatus)." : output) : errorOutput,
+                    output: output)
+                DispatchQueue.main.async { completion(failure == nil ? output : nil, failure) }
+            } catch {
+                let failure = TerraformCommandError(message: error.localizedDescription)
+                DispatchQueue.main.async { completion(nil, failure) }
+            }
+        }
     }
 }

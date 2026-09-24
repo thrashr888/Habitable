@@ -5,6 +5,7 @@
 //  Created by Paul Thrasher on 4/28/21.
 //
 
+import Combine
 import Foundation
 import SwiftyJSON
 
@@ -410,7 +411,7 @@ func transformShow(_ log: JSON) -> ShowMessage {
             name: res["name"].string,
             provider_name: res["provider_name"].string,
             schema_version: res["schema_version"].int,
-            values: res["schema_version"].dictionary
+            values: res["values"].dictionary
         )
         resources.append(add)
     }

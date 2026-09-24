@@ -11,7 +11,7 @@ struct RunPageView: View {
     @EnvironmentObject var workspace: Workspace
     @ObservedObject var run: TerraformRun
     
-    @State var selection: Int?
+    @State var selection: Int = 1
     
     static let taskDateFormat: DateFormatter = {
         let formatter = DateFormatter()
@@ -95,7 +95,7 @@ struct RunPageView: View {
                 if run.canConfirm {
                     Button("Confirm and apply") {
                         run.doApply({ apply, error in
-                            self.selection = error == nil ? 3 : 2
+                            self.selection = error == nil ? 2 : 3
                         })
                     }
                     .foregroundColor(.accentColor)

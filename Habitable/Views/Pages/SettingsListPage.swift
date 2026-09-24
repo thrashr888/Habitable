@@ -22,19 +22,17 @@ struct SettingsListPage: View {
                             Text("\(workingDirectory.path)")
                         }
                         Button("Choose folder", action: workspace.addUrl)
+                            .disabled(workspace.locked)
                     }
                     
                     Text("Terraform Version")
                         .font(.headline)
                         .padding(.top)
-                    Picker("Terraform version", selection: $workspace.terraformVersion) {
-
-                        Text("0.15.3 (latest)")
-                            .accessibility(label: Text("0.15.3"))
-                            .tag("0.15.3")
-
-                    }.pickerStyle(MenuPickerStyle())
-                        .labelsHidden()
+                    Text(workspace.terraformVersion)
+                    Text(workspace.runner.executableURL?.path ?? "Terraform not found")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button("Refresh Terraform", action: workspace.refreshTerraformVersion)
                     
                     Toggle("Auto apply", isOn: $workspace.autoApply)
                         .padding(.top)

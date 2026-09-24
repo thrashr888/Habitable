@@ -5,7 +5,7 @@
 //  Created by Paul Thrasher on 4/28/21.
 //
 
-import Collections
+import Combine
 import Foundation
 
 enum States: String {
@@ -29,7 +29,7 @@ enum States: String {
     case UpdateErrored = "update failed"
 }
 
-let actionToState: OrderedDictionary<ChangeActions, States> = [
+let actionToState: [ChangeActions: States] = [
     ChangeActions.NoOp: States.NoOp,
     ChangeActions.Create: States.Created,
     ChangeActions.Read: States.Refreshed,
@@ -38,19 +38,19 @@ let actionToState: OrderedDictionary<ChangeActions, States> = [
     ChangeActions.Delete: States.Deleted,
 ]
 
-let applyStartActionToState: OrderedDictionary<ChangeActions, States> = [
+let applyStartActionToState: [ChangeActions: States] = [
     ChangeActions.Create: States.Creating,
     ChangeActions.Update: States.Updating,
     ChangeActions.Delete: States.Deleting,
 ]
 
-let applyCompleteActionToState: OrderedDictionary<ChangeActions, States> = [
+let applyCompleteActionToState: [ChangeActions: States] = [
     ChangeActions.Create: States.Created,
     ChangeActions.Update: States.Updated,
     ChangeActions.Delete: States.Deleted,
 ]
 
-let applyErroredActionToState: OrderedDictionary<ChangeActions, States> = [
+let applyErroredActionToState: [ChangeActions: States] = [
     ChangeActions.Create: States.CreateErrored,
     ChangeActions.Update: States.UpdateErrored,
     ChangeActions.Delete: States.DeleteErrored,
@@ -119,7 +119,7 @@ class ResourceState: ObservableObject {
 
         case MessageTypes.ApplyComplete:
             var state = States.Applied
-            if let found = applyStartActionToState[hook.action] {
+            if let found = applyCompleteActionToState[hook.action] {
                 state = found
             }
             updateLatestStage(StageUpdate(
@@ -131,7 +131,7 @@ class ResourceState: ObservableObject {
 
         case MessageTypes.ApplyErrored:
             var state = States.ApplyErrored
-            if let found = applyStartActionToState[hook.action] {
+            if let found = applyErroredActionToState[hook.action] {
                 state = found
             }
             updateLatestStage(StageUpdate(
@@ -175,5 +175,6 @@ class ResourceState: ObservableObject {
         if let errored = attrs.errored {
             stage.errored = errored
         }
+        stages[stages.count - 1] = stage
     }
 }

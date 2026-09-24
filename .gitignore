@@ -7,3 +7,10 @@ terraform.tfstate*
 .dolt/
 *.db
 .beads-credential-key
+
+# Local build products
+.build/
+DerivedData/
+.swiftpm/
+**/xcuserdata/
+.beads.gate.lock
