@@ -16,6 +16,9 @@ class Workspace: ObservableObject {
     @Published var runner: Runner
     @Published var managedTerraformVersion: String?
     private let preferences: UserDefaults
+    let historyStore: RunHistoryStore
+    @Published var historyError: String?
+    private var unsavedRuns: [UUID: (RunRecord, URL)] = [:]
 
     // state
     @Published var locked = false
@@ -43,7 +46,9 @@ class Workspace: ObservableObject {
     @Published var terraformVariables: [TerraformVariable] = []
     @Published var environmentVariables: [EnvironmentVariable] = []
 
-    init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard) {
+    init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard,
+         historyStore: RunHistoryStore = RunHistoryStore()) {
+        self.historyStore = historyStore
         preferences = defaults
         managedTerraformVersion = defaults.string(forKey: TerraformReleaseService.selectionKey)
         runner = Runner(executableURL: TerraformReleaseService.selectedExecutable(defaults: defaults))
@@ -119,8 +124,11 @@ class Workspace: ObservableObject {
 
     func updateWorkingDirectory(dir: URL) {
         guard !locked else { return }
+        guard retryUnsavedRuns() else { return }
         for run in runs { run.doDiscard() }
+        guard retryUnsavedRuns() else { return }
         runs = []
+        historyError = nil
         state = nil
         isInitialized = false
         isValid = false
@@ -129,6 +137,7 @@ class Workspace: ObservableObject {
         terraformVariables = []
         workingDirectory = dir
         lastWorkingDirectory = dir
+        reloadRunHistory()
 
         var isDir: ObjCBool = false
         let fileManager = FileManager.default
@@ -306,15 +315,54 @@ class Workspace: ObservableObject {
         locked = false
     }
 
-    func queueRun(_: String? = nil) {
-        if locked || !isValid {
-            return
+    func reloadRunHistory() {
+        guard !locked, let directory = workingDirectory else { return }
+        guard retryUnsavedRuns() else { return }
+        do {
+            let records = try historyStore.load(workspace: directory)
+            // Preserve live runs and their saved-plan capabilities when refreshing the list.
+            let live = Dictionary(uniqueKeysWithValues: runs.filter { !$0.isRestored }.map { ($0.id, $0) })
+            runs = records.map { live[$0.id] ?? TerraformRun(workspace: self, record: $0, restored: true) }
+            historyError = nil
+        } catch {
+            historyError = error.localizedDescription
         }
-        let run = TerraformRun(workspace: self)
-        run.number = runs.count + 1
-        runs.append(run)
     }
-    
+
+    @discardableResult
+    func persistRun(_ record: RunRecord, directory: URL) -> Bool {
+        do {
+            try historyStore.save(record, workspace: directory)
+            unsavedRuns.removeValue(forKey: record.id)
+            if unsavedRuns.isEmpty { historyError = nil }
+            return true
+        } catch {
+            unsavedRuns[record.id] = (record, directory)
+            historyError = "Run history could not be saved. \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func retryUnsavedRuns() -> Bool {
+        for (record, directory) in Array(unsavedRuns.values) {
+            if !persistRun(record, directory: directory) { return false }
+        }
+        return true
+    }
+
+    func queueRun(_ message: String? = nil) {
+        guard !locked, isValid, historyError == nil, let directory = workingDirectory else { return }
+        do {
+            let record = try historyStore.create(workspace: directory, terraformVersion: terraformVersion, message: message)
+            historyError = nil
+            let run = TerraformRun(workspace: self, record: record, restored: false)
+            runs.append(run)
+            run.doPlan { _, _ in }
+        } catch {
+            historyError = "Cannot start a run until its history can be saved. \(error.localizedDescription)"
+        }
+    }
+
     func addTerraformVariable(_ variable: TerraformVariable) {
         terraformVariables.append(variable)
     }

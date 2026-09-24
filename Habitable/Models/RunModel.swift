@@ -1,152 +1,153 @@
-//
-//  RunModel.swift
-//  Habitable
-//
-//  Created by Paul Thrasher on 5/9/21.
-//
-
 import Combine
 import Foundation
 
-enum RunStatus: String {
-    case pending = "PENDING"
-    case planning = "PLANNING"
-    case planned = "PLANNED"
-    case confirmed = "CONFIRMED"
-    case applying = "APPLYING"
-    case applied = "APPLIED"
-    case discarded = "DISCARDED"
-    case errored = "ERRORED"
-    case canceled = "CANCELED"
+enum RunStatus: String, Codable {
+    case pending = "PENDING", planning = "PLANNING", planned = "PLANNED"
+    case confirmed = "CONFIRMED", applying = "APPLYING", applied = "APPLIED"
+    case discarded = "DISCARDED", errored = "ERRORED", canceled = "CANCELED"
+    case expired = "EXPIRED", interrupted = "INTERRUPTED"
 }
 
 class TerraformRun: ObservableObject, Identifiable {
     var id = UUID()
     var number = 0
-    var workspace: Workspace
+    private weak var workspace: Workspace?
     var createdAt = Date()
-    var autoApply = false
     var message: String?
-    
+    var terraformVersion = "Unknown"
+    private(set) var isRestored = false
+    private var stored = false
+    private var workspaceDirectory: URL?
+    private var planOutput: String?
+    private var applyOutput: String?
+    private var updatedAt = Date()
+
     @Published var status: RunStatus = .pending
     @Published var textOutput: String?
     @Published var errorMessage: String?
     @Published var plan: StructuredLog?
     @Published var apply: StructuredLog?
-    
     @Published var added: Int?
     @Published var changed: Int?
     @Published var destroyed: Int?
-    
-    var isFinished: Bool {
+
+    var historyNotice: String? {
         switch status {
-        case .applied, .errored, .discarded, .canceled:
-            return true
-        default:
-            return false
+        case .expired: return "This plan is from an earlier session. Queue a new plan before applying."
+        case .interrupted: return "This run was recorded before its command finished. Its outcome is unknown; refresh state and review a new plan. It may still be running in another session."
+        default: return isRestored ? "Saved run history · Terraform \(terraformVersion)" : nil
         }
     }
+
+    var isFinished: Bool {
+        [.applied, .errored, .discarded, .canceled, .expired, .interrupted].contains(status)
+    }
     var canConfirm: Bool {
-        status == .planned && apply == nil && !workspace.locked
+        !isRestored && status == .planned && apply == nil && workspace?.locked == false
+            && workspace?.historyError == nil
     }
     var canDiscard: Bool {
-        status == .planned && apply == nil && !workspace.locked
+        !isRestored && status == .planned && apply == nil && workspace?.locked == false
     }
 
+    // Construction never launches a command: queueRun saves the initial record first.
     init(workspace: Workspace) {
         self.workspace = workspace
-        doPlan({ plan, error in
-            
-        })
+        workspaceDirectory = workspace.workingDirectory
+        terraformVersion = workspace.terraformVersion
     }
-    
+
+    init(workspace: Workspace, record: RunRecord, restored: Bool) {
+        self.workspace = workspace
+        id = record.id; number = record.number; createdAt = record.createdAt
+        updatedAt = record.updatedAt; message = record.message
+        terraformVersion = record.terraformVersion
+        workspaceDirectory = URL(fileURLWithPath: record.workspacePath)
+        status = record.status; errorMessage = record.errorMessage
+        planOutput = record.planOutput; applyOutput = record.applyOutput
+        plan = record.planOutput.map(handleNDJsonSuccess)
+        apply = record.applyOutput.map(handleNDJsonSuccess)
+        added = record.added; changed = record.changed; destroyed = record.destroyed
+        isRestored = restored; stored = true
+        if restored {
+            switch status {
+            case .planned: status = .expired
+            case .pending, .planning, .confirmed, .applying: status = .interrupted
+            default: break
+            }
+        }
+    }
+
+    @discardableResult private func persist() -> Bool {
+        guard stored, !isRestored, let workspace, let directory = workspaceDirectory else { return !stored }
+        updatedAt = Date()
+        let record = RunRecord(id: id, number: number, workspacePath: RunHistoryStore.workspacePath(directory),
+                               createdAt: createdAt, updatedAt: updatedAt, status: status,
+                               terraformVersion: terraformVersion, message: message,
+                               planOutput: planOutput, applyOutput: applyOutput, errorMessage: errorMessage,
+                               added: added, changed: changed, destroyed: destroyed)
+        return workspace.persistRun(record, directory: directory)
+    }
+
     func doDiscard() {
-        guard canDiscard else { return }
+        guard canDiscard, let workspace else { return }
         status = .discarded
         workspace.runner.discardPlan(runId: id.uuidString)
+        persist()
     }
-    
-    func doPlan(_ completion: @escaping (_ plan: StructuredLog?, _ error: String?) -> Void) {
-        guard let workingDirectory = workspace.workingDirectory else { return }
-        workspace.lock(self)
+
+    func doPlan(_ completion: @escaping (StructuredLog?, String?) -> Void) {
+        guard !isRestored, status == .pending, let workspace,
+              !workspace.locked, let directory = workspaceDirectory,
+              workspace.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
         status = .planning
-        
-        self.workspace.runner.plan(workingDirectory: workingDirectory, runId: self.id.uuidString, completion: { res, error in
-            self.workspace.unlock()
-            self.status = .planned
-            
-            if let res = res {
-                self.plan = handleNDJsonSuccess(res)
-                self.workspace.isValid = true
-                
-                guard let plan = self.plan else { return }
-                self.workspace.didPlan(run: self, plan: plan)
-            }
-            
-            if let error = error {
-                self.errorMessage = error.message
-                self.plan = handleNDJsonSuccess(error.output)
-                print(error)
-                self.workspace.isValid = false
-                self.status = .errored
-            }
-            
-            // TODO didPlan with errors
-            
-            completion(self.plan, self.errorMessage)
-            self.objectWillChange.send()
-        })
-    }
-    
-    func doApply(_ completion: @escaping (_ apply: StructuredLog?, _ error: String?) -> Void) {
-        guard canConfirm else { return }
-        
-        status = .confirmed
-        
-        guard let workingDirectory = workspace.workingDirectory else { return }
+        guard persist() else { status = .errored; completion(nil, workspace.historyError); return }
         workspace.lock(self)
+        let runner = workspace.runner
+        runner.plan(workingDirectory: directory, runId: id.uuidString) { [self, workspace] output, error in
+            workspace.unlock()
+            planOutput = RunHistoryStore.redactSensitiveOutputs(output ?? error?.output)
+            plan = planOutput.map(handleNDJsonSuccess)
+            errorMessage = error?.message
+            status = error == nil ? .planned : .errored
+            workspace.isValid = error == nil
+            if let changes = plan?.changeSummaries.last {
+                added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove
+            }
+            if error != nil { runner.discardPlan(runId: id.uuidString) }
+            let saved = persist()
+            if saved, error == nil, let plan { workspace.didPlan(run: self, plan: plan) }
+            completion(plan, errorMessage)
+        }
+    }
+
+    func doApply(_ completion: @escaping (StructuredLog?, String?) -> Void) {
+        guard canConfirm, let workspace, let directory = workspaceDirectory,
+              workspace.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
         status = .applying
-        
-        workspace.runner.apply(workingDirectory: workingDirectory, runId: id.uuidString, completion: { res, error in
-            self.workspace.unlock()
-            self.status = .applied
-            
-            if let res = res {
-                self.apply = handleNDJsonSuccess(res)
-                self.workspace.isValid = true
-                
-                if let changes = self.apply?.changeSummaries.last {
-                    self.added = changes.changes.add
-                    self.changed = changes.changes.change
-                    self.destroyed = changes.changes.remove
-                }
-                
-                guard let apply = self.apply else { return }
-                self.workspace.runner.discardPlan(runId: self.id.uuidString)
-                self.workspace.didApply(run: self, apply: apply)
+        guard persist() else { status = .planned; completion(nil, workspace.historyError); return }
+        workspace.lock(self)
+        let runner = workspace.runner
+        runner.apply(workingDirectory: directory, runId: id.uuidString) { [self, workspace] output, error in
+            workspace.unlock()
+            applyOutput = RunHistoryStore.redactSensitiveOutputs(output ?? error?.output)
+            apply = applyOutput.map(handleNDJsonSuccess)
+            errorMessage = error?.message
+            status = error == nil ? .applied : .errored
+            workspace.isValid = error == nil
+            if let changes = apply?.changeSummaries.last {
+                added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove
             }
-            
-            if let error = error {
-                self.errorMessage = error.message
-                self.apply = handleNDJsonSuccess(error.output)
-                self.workspace.isValid = false
-                self.status = .errored
-            }
-            
-            // TODO didApply with errors
-            
-            completion(self.apply, self.errorMessage)
-            self.objectWillChange.send()
-        })
+            runner.discardPlan(runId: id.uuidString)
+            persist()
+            // Failed applies can partially change state too. Retire other plans and refresh.
+            workspace.didApply(run: self, apply: apply ?? StructuredLog())
+            completion(apply, errorMessage)
+        }
     }
 }
 
 extension TerraformRun: Hashable {
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(self))
-    }
-
-    static func ==(lhs: TerraformRun, rhs: TerraformRun) -> Bool {
-        return lhs === rhs
-    }
+    func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+    static func ==(lhs: TerraformRun, rhs: TerraformRun) -> Bool { lhs === rhs }
 }

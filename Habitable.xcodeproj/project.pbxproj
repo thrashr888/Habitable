@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        BC2200000000000000000001 /* RunHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2200000000000000000002 /* RunHistory.swift */; };
 		BB1100000000000000000001 /* TerraformReleases.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1100000000000000000002 /* TerraformReleases.swift */; };
 		8A926B4C2648AA1E00FDBA5C /* TextLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4B2648AA1E00FDBA5C /* TextLog.swift */; };
 		8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4D2648AA4100FDBA5C /* Error.swift */; };
@@ -49,6 +50,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+        BC2200000000000000000002 /* RunHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunHistory.swift; sourceTree = "<group>"; };
 		BB1100000000000000000002 /* TerraformReleases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformReleases.swift; sourceTree = "<group>"; };
 		8A926B4B2648AA1E00FDBA5C /* TextLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLog.swift; sourceTree = "<group>"; };
 		8A926B4D2648AA4100FDBA5C /* Error.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Error.swift; sourceTree = "<group>"; };
@@ -122,6 +124,7 @@
 				8AF21342263A2DE9009F97C2 /* ResourceState.swift */,
 				8AA12B1B26427AC30048A4A9 /* Runner.swift */,
 				BB1100000000000000000002 /* TerraformReleases.swift */,
+                BC2200000000000000000002 /* RunHistory.swift */,
 				8A926B592648C62A00FDBA5C /* RunModel.swift */,
 				8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */,
 				8A926B7E2653742000FDBA5C /* VariablesModels.swift */,
@@ -231,7 +234,7 @@
 			isa = PBXProject;
 			attributes = {
 				LastSwiftUpdateCheck = 1250;
-				LastUpgradeCheck = 1250;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					8AF213202639E8BC009F97C2 = {
 						CreatedOnToolsVersion = 12.5;
@@ -304,6 +307,7 @@
 				8A926B5A2648C62A00FDBA5C /* RunModel.swift in Sources */,
 				8AA12B1C26427AC30048A4A9 /* Runner.swift in Sources */,
 				BB1100000000000000000001 /* TerraformReleases.swift in Sources */,
+                BC2200000000000000000001 /* RunHistory.swift in Sources */,
 				8A926B79264FA36900FDBA5C /* OutputPage.swift in Sources */,
 				8AF213252639E8BC009F97C2 /* HabitableApp.swift in Sources */,
 				8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */,
@@ -509,7 +513,7 @@
 			repositoryURL = "https://github.com/SwiftyJSON/SwiftyJSON.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 5.0.0;
+				minimumVersion = 5.0.2;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
