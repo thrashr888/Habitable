@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BB1100000000000000000001 /* TerraformReleases.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1100000000000000000002 /* TerraformReleases.swift */; };
 		8A926B4C2648AA1E00FDBA5C /* TextLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4B2648AA1E00FDBA5C /* TextLog.swift */; };
 		8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4D2648AA4100FDBA5C /* Error.swift */; };
 		8A926B582648C48E00FDBA5C /* ndjson.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B572648C48E00FDBA5C /* ndjson.swift */; };
@@ -48,6 +49,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		BB1100000000000000000002 /* TerraformReleases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformReleases.swift; sourceTree = "<group>"; };
 		8A926B4B2648AA1E00FDBA5C /* TextLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLog.swift; sourceTree = "<group>"; };
 		8A926B4D2648AA4100FDBA5C /* Error.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Error.swift; sourceTree = "<group>"; };
 		8A926B572648C48E00FDBA5C /* ndjson.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ndjson.swift; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 				8AF2133E263A0CFB009F97C2 /* JsonLog.swift */,
 				8AF21342263A2DE9009F97C2 /* ResourceState.swift */,
 				8AA12B1B26427AC30048A4A9 /* Runner.swift */,
+				BB1100000000000000000002 /* TerraformReleases.swift */,
 				8A926B592648C62A00FDBA5C /* RunModel.swift */,
 				8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */,
 				8A926B7E2653742000FDBA5C /* VariablesModels.swift */,
@@ -300,6 +303,7 @@
 				8AA12B1E26427AF10048A4A9 /* StructuredLogModel.swift in Sources */,
 				8A926B5A2648C62A00FDBA5C /* RunModel.swift in Sources */,
 				8AA12B1C26427AC30048A4A9 /* Runner.swift in Sources */,
+				BB1100000000000000000001 /* TerraformReleases.swift in Sources */,
 				8A926B79264FA36900FDBA5C /* OutputPage.swift in Sources */,
 				8AF213252639E8BC009F97C2 /* HabitableApp.swift in Sources */,
 				8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */,

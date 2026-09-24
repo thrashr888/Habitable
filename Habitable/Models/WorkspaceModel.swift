@@ -13,7 +13,9 @@ import SwiftyJSON
 class Workspace: ObservableObject {
     var id = UUID()
 
-    @Published var runner = Runner()
+    @Published var runner: Runner
+    @Published var managedTerraformVersion: String?
+    private let preferences: UserDefaults
 
     // state
     @Published var locked = false
@@ -41,9 +43,12 @@ class Workspace: ObservableObject {
     @Published var terraformVariables: [TerraformVariable] = []
     @Published var environmentVariables: [EnvironmentVariable] = []
 
-    init(dir: URL? = nil) {
+    init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard) {
+        preferences = defaults
+        managedTerraformVersion = defaults.string(forKey: TerraformReleaseService.selectionKey)
+        runner = Runner(executableURL: TerraformReleaseService.selectedExecutable(defaults: defaults))
         refreshTerraformVersion()
-        if dir == nil, let lastDir = lastWorkingDirectory {
+        if restoreLastDirectory, dir == nil, let lastDir = lastWorkingDirectory {
             workingDirectory = lastDir
             updateWorkingDirectory(dir: lastDir)
             return
@@ -62,8 +67,24 @@ class Workspace: ObservableObject {
 //        }
 //    }
     
+    func useTerraform(version: String?, executableURL: URL?) {
+        guard !locked else { return }
+        // Saved plans belong to the CLI that created them. Require a fresh plan after switching.
+        for run in runs { run.doDiscard() }
+        managedTerraformVersion = version
+        preferences.set(version, forKey: TerraformReleaseService.selectionKey)
+        runner = Runner(executableURL: executableURL)
+        terraformVersion = "Checking…"
+        state = nil
+        isValid = false
+        refreshTerraformVersion()
+        if workingDirectory != nil { validate() }
+    }
+
     func refreshTerraformVersion() {
+        let currentRunner = runner
         runner.version { output, error in
+            guard self.runner === currentRunner else { return }
             if let output = output, let data = output.data(using: .utf8),
                let json = try? JSON(data: data), let version = json["terraform_version"].string {
                 self.terraformVersion = version
