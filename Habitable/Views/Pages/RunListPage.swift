@@ -9,7 +9,7 @@ import SwiftUI
 
 struct RunListPage: View {
     @EnvironmentObject var workspace: Workspace
-    @State private var selection: UUID?
+    @Binding var selection: UUID?
 
     var body: some View {
         List(selection: $selection) {
@@ -18,14 +18,8 @@ struct RunListPage: View {
             }
             
             ForEach(workspace.runs.sorted { $0.number > $1.number }) { run in
-                NavigationLink(
-                    destination: RunPageView(run: run).environmentObject(workspace),
-                    tag: run.id,
-                    selection: $selection
-                ) {
-                    RunSummaryView(run: run)
-                }
-                .tag(run.id)
+                RunSummaryView(run: run)
+                    .tag(run.id)
             }
         }
         .navigationTitle("Runs")
@@ -59,7 +53,7 @@ struct RunListPage_Previews: PreviewProvider {
     }()
     
     static var previews: some View {
-        RunListPage()
+        RunListPage(selection: .constant(nil))
             .environmentObject(workspace)
     }
 }

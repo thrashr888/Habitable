@@ -78,7 +78,7 @@ struct RunPageView: View {
                 })
         }
         .padding(.all)
-        .navigationTitle("Run #\(run.id)")
+        .navigationTitle("Run #\(run.number)")
         .navigationSubtitle(run.status.rawValue.localizedCapitalized)
         .toolbar {
             ToolbarItem(placement: .status) {
@@ -122,11 +122,12 @@ struct RunSummaryView: View {
                     Label("#\(run.number) \(run.message ?? "run")", systemImage: run.isFinished ? "circle.fill" : "circle")
                         .font(.headline)
                         .lineLimit(1)
-                    Spacer()
-                    Text("\(run.createdAt, formatter: Self.taskDateFormat)")
-                        .foregroundColor(.secondary)
                 }
-                
+                Text("\(run.createdAt, formatter: Self.taskDateFormat)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
                 HStack(alignment: .center) {
                     if let add = run.added {
                         Text("+\(add)")

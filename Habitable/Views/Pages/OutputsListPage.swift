@@ -26,7 +26,7 @@ struct OutputSummaryView: View {
 
 struct OutputsListPage: View {
     @EnvironmentObject var workspace: Workspace
-    @State private var selection: Output?
+    @Binding var selection: String?
     @State var searchText: String = ""
     
     var outputs: [Output] {
@@ -41,7 +41,7 @@ struct OutputsListPage: View {
     
     func refresh() {
         workspace.refreshResources()
-        selection = filteredOutputs.first
+        if selection == nil { selection = filteredOutputs.first?.key }
     }
 
     var body: some View {
@@ -56,14 +56,8 @@ struct OutputsListPage: View {
             }
             
             ForEach(outputs.sorted { $0.key > $1.key }) { output in
-                NavigationLink(
-                    destination: OutputPageView(output: output),
-                    tag: output,
-                    selection: $selection
-                ) {
-                    OutputSummaryView(output: output)
-                        .tag(output)
-                }
+                OutputSummaryView(output: output)
+                    .tag(output.key)
             }
         }
         .navigationTitle("Outputs")
@@ -85,7 +79,7 @@ struct OutputsListPage: View {
 
 struct OutputsListPage_Previews: PreviewProvider {
     static var previews: some View {
-        ResourceListPage()
+        OutputsListPage(selection: .constant(nil))
             .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
     }
 }

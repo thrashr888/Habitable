@@ -1,122 +1,123 @@
-//
-//  ContentView.swift
-//  Habitable
-//
-//  Created by Paul Thrasher on 4/28/21.
-//
-
-import Foundation
 import SwiftUI
 
 struct ContentView: View {
     enum NavigationItem: String {
-        case workspace
-        case runs
-        case resources
-        case outputs
-        case variables
-        case envVariables
-        case settings
+        case workspace, runs, resources, outputs, variables, envVariables, settings
+
+        var hasDetailList: Bool {
+            self == .runs || self == .resources || self == .outputs
+        }
     }
 
-//    @AppStorage("workingDirectory") private var workingDirectory: URL?
     @StateObject var workspace = Workspace()
-//    @SceneStorage("menuSelection") private var selection = NavigationItem.workspace
+    @State private var selection: NavigationItem? = .workspace
+    @State private var selectedRun: UUID?
+    @State private var selectedResource: String?
+    @State private var selectedOutput: String?
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
-//    @SceneStorage("selection") var selection: String?
-//    @SceneStorage("menuSelection") var menuSelection: Set<NavigationItem> = [.workspace]
-    @State private var selection: Set<NavigationItem> = [.workspace]
-    var showThirdColumn: Bool {
-        selection != [NavigationItem.settings]
-    }
-    
     var body: some View {
-        if workspace.workingDirectory == nil {
-            BlankSlateView().environmentObject(workspace)
-                .onAppear {
-//                    if let dir = workingDirectory {
-//                        workspace.updateWorkingDirectory(dir: dir)
-//                    }
+        Group {
+            if workspace.workingDirectory == nil {
+                BlankSlateView()
+            } else if selection?.hasDetailList == true {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebar
+                } content: {
+                    collection
+                        .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
+                } detail: {
+                    detail
+                        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 }
-        } else {
-            NavigationView {
-                sidebar
-                
-                Text("Content List")
-                
-                if showThirdColumn {
-                    Text("")
+                .navigationSplitViewStyle(.balanced)
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebar
+                } detail: {
+                    page
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            }.environmentObject(workspace)
+                .navigationSplitViewStyle(.balanced)
+            }
+        }
+        .environmentObject(workspace)
+        .onChange(of: workspace.workingDirectory) { _ in
+            selectedRun = nil
+            selectedResource = nil
+            selectedOutput = nil
         }
     }
-    
-    struct Pocket: View {
-        @EnvironmentObject var workspace: Workspace
-        var body: some View {
-            VStack {
-                if workspace.locked {
-                    Label("Locked", systemImage: "lock.fill")
-                        .help("Locked")
-                } else {
-                    Label("Unlocked", systemImage: "lock.open.fill")
-                        .help("Unlocked")
-                }
-            }.padding()
-        }
-    }
-    
-    var sidebar: some View {
+
+    private var sidebar: some View {
         List(selection: $selection) {
-            NavigationLink(destination: WorkspacePage()) {
-                Label("Workspace", systemImage: "folder")
-            }
-            .accessibility(label: Text("Workspace"))
-            .tag(NavigationItem.workspace)
-
-            NavigationLink(destination: RunListPage()) {
-                Label("Runs (\(workspace.runs.count))", systemImage: "list.bullet.rectangle")
-            }
-            .accessibility(label: Text("Runs"))
-            .tag(NavigationItem.runs)
-
-            NavigationLink(destination: ResourceListPage()) {
-                Label("Resources (\(workspace.state?.resources.count ?? 0))", systemImage: "globe")
-            }
-            .accessibility(label: Text("Resources"))
-            .tag(NavigationItem.resources)
-            
-            NavigationLink(destination: OutputsListPage()) {
-                Label("Outputs (\(workspace.state?.outputs.count ?? 0))", systemImage: "chevron.right.square")
-            }
-            .accessibility(label: Text("Outputs"))
-            .tag(NavigationItem.outputs)
-
-            NavigationLink(destination: VariableListPage()) {
-                Label("Variables (\(workspace.terraformVariables.count))", systemImage: "dollarsign.circle")
-            }
-            .accessibility(label: Text("Terraform Variables"))
-            .tag(NavigationItem.variables)
-            
-            NavigationLink(destination: EnvVarListPage()) {
-                Label("Env Vars (\(workspace.environmentVariables.count))", systemImage: "dollarsign.circle")
-            }
-            .accessibility(label: Text("Environment Variables"))
-            .tag(NavigationItem.envVariables)
-
-            NavigationLink(destination: SettingsListPage()) {
-                Label("Settings", systemImage: "gear")
-            }
-            .accessibility(label: Text("Settings"))
-            .tag(NavigationItem.settings)
+            Label("Workspace", systemImage: "folder").tag(NavigationItem.workspace)
+            Label("Runs (\(workspace.runs.count))", systemImage: "list.bullet.rectangle").tag(NavigationItem.runs)
+            Label("Resources (\(workspace.state?.resources.count ?? 0))", systemImage: "globe").tag(NavigationItem.resources)
+            Label("Outputs (\(workspace.state?.outputs.count ?? 0))", systemImage: "chevron.right.square").tag(NavigationItem.outputs)
+            Label("Variables (\(workspace.terraformVariables.count))", systemImage: "dollarsign.circle").tag(NavigationItem.variables)
+            Label("Env Vars (\(workspace.environmentVariables.count))", systemImage: "dollarsign.circle").tag(NavigationItem.envVariables)
+            Label("Settings", systemImage: "gear").tag(NavigationItem.settings)
         }
-        .overlay(Pocket(), alignment: .bottom)
-        .listStyle(SidebarListStyle())
+        .listStyle(.sidebar)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+        .safeAreaInset(edge: .bottom) {
+            Label(workspace.locked ? "Locked" : "Unlocked", systemImage: workspace.locked ? "lock.fill" : "lock.open.fill")
+                .padding()
+        }
+    }
+
+    @ViewBuilder private var collection: some View {
+        switch selection {
+        case .runs: RunListPage(selection: $selectedRun)
+        case .resources: ResourceListPage(selection: $selectedResource)
+        case .outputs: OutputsListPage(selection: $selectedOutput)
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder private var detail: some View {
+        switch selection {
+        case .runs:
+            if let run = workspace.runs.first(where: { $0.id == selectedRun }) {
+                RunPageView(run: run).id(run.id)
+            } else {
+                placeholder("Select a run", message: "Choose a run to review its plan, results, and logs.")
+            }
+        case .resources:
+            if let address = selectedResource, let resource = workspace.state?.resources.first(where: { ($0.address ?? $0.id.uuidString) == address }) {
+                ShowResourceView(resource: resource)
+            } else {
+                placeholder("Select a resource", message: "Choose a resource to inspect its details.")
+            }
+        case .outputs:
+            if let key = selectedOutput, let output = workspace.state?.outputs.first(where: { $0.key == key }) {
+                OutputPageView(output: output)
+            } else {
+                placeholder("Select an output", message: "Choose an output to inspect its value.")
+            }
+        default: EmptyView()
+        }
+    }
+
+    @ViewBuilder private var page: some View {
+        switch selection {
+        case .variables: VariableListPage()
+        case .envVariables: EnvVarListPage()
+        case .settings: SettingsListPage()
+        default: WorkspacePage()
+        }
+    }
+
+    private func placeholder(_ title: String, message: String) -> some View {
+        VStack(spacing: 8) {
+            Text(title).font(.title2)
+            Text(message).foregroundColor(.secondary)
+        }
+        .padding()
     }
 }
 
 struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
+    static var previews: some View { ContentView() }
 }
