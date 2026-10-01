@@ -135,8 +135,69 @@ final class WorkspaceModelTests: XCTestCase {
 
         XCTAssertThrowsError(try lease.invalidatePlans())
         XCTAssertEqual(lease.generation, generation)
+        XCTAssertThrowsError(try coordinator.recover(workspace: directory)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("using this Terraform workspace"))
+        }
+        XCTAssertTrue(coordinator.recoveryRequired(workspace: directory))
         lease.release()
         XCTAssertThrowsError(try coordinator.acquire(workspace: directory, contextIdentity: "workspace=default;backend=local"))
+
+        try FileManager.default.removeItem(at: lease.metadataURL)
+        try String(generation).write(to: lease.metadataURL, atomically: true, encoding: .utf8)
+        let recoveredGeneration = try coordinator.recover(workspace: directory)
+        XCTAssertGreaterThan(recoveredGeneration, generation)
+        XCTAssertFalse(coordinator.recoveryRequired(workspace: directory))
+
+        let recoveredLease = try coordinator.acquire(workspace: directory, contextIdentity: "workspace=default;backend=local")
+        XCTAssertEqual(recoveredLease.generation, recoveredGeneration)
+        recoveredLease.release()
+    }
+
+    func testRecoveryKeepsFailureMarkerWhenGenerationIsMissingOrCorrupt() throws {
+        for invalidGeneration in [false, true] {
+            let coordinator = WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination-\(invalidGeneration)"))
+            let lease = try coordinator.acquire(workspace: directory, contextIdentity: "workspace=default;backend=local")
+            try FileManager.default.removeItem(at: lease.metadataURL)
+            try FileManager.default.createDirectory(at: lease.metadataURL, withIntermediateDirectories: false)
+            XCTAssertThrowsError(try lease.invalidatePlans())
+            lease.release()
+
+            try FileManager.default.removeItem(at: lease.metadataURL)
+            if invalidGeneration {
+                try "not-a-generation".write(to: lease.metadataURL, atomically: true, encoding: .utf8)
+            }
+            XCTAssertThrowsError(try coordinator.recover(workspace: directory))
+            XCTAssertTrue(coordinator.recoveryRequired(workspace: directory))
+            XCTAssertThrowsError(try coordinator.acquire(workspace: directory, contextIdentity: "workspace=default;backend=local"))
+        }
+    }
+
+    @MainActor
+    func testWorkspaceRecoveryRevalidatesBeforeNewPlans() async throws {
+        let coordinator = WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination"))
+        let workspace = Workspace(restoreLastDirectory: false, commandCoordinator: coordinator)
+        workspace.workingDirectory = directory
+        workspace.runner = Runner(executableURL: try fakeTerraform("""
+        case "$1" in
+          version) echo '{"terraform_version":"fixture"}' ;;
+          validate) echo 'valid' ;;
+          show) echo '{"values":{"root_module":{"resources":[]}}}' ;;
+        esac
+        """))
+        let lease = try workspace.acquireCommandLease()
+        let generation = lease.generation
+        try FileManager.default.removeItem(at: lease.metadataURL)
+        try FileManager.default.createDirectory(at: lease.metadataURL, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try lease.invalidatePlans())
+        lease.release()
+        try FileManager.default.removeItem(at: lease.metadataURL)
+        try String(generation).write(to: lease.metadataURL, atomically: true, encoding: .utf8)
+        XCTAssertFalse(workspace.isValid)
+        workspace.recoverCoordination()
+        try await waitUntil { !workspace.locked }
+        XCTAssertTrue(workspace.isValid)
+        XCTAssertFalse(workspace.coordinationRecoveryRequired)
+        XCTAssertNotNil(workspace.coordinationRecoveryNotice)
     }
 
     @MainActor

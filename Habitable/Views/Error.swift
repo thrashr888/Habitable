@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ErrorView: View {
-    @State var message: String = ""
+    let message: String
     var body: some View {
         VStack(alignment: .leading) {
             Text(message)

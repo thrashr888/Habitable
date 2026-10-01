@@ -50,7 +50,7 @@ final class WorkspaceCommandCoordinator {
         }
 
         private func saveGeneration(_ value: Int64) throws {
-            try Data(String(value).utf8).write(to: metadataURL, options: .atomic)
+            try WorkspaceCommandCoordinator.writeDurably(Data(String(value).utf8), to: metadataURL)
         }
 
         deinit { release() }
@@ -79,9 +79,7 @@ final class WorkspaceCommandCoordinator {
     }
 
     func acquire(workspace: URL, contextIdentity: String) throws -> Lease {
-        let canonicalPath = RunHistoryStore.workspacePath(workspace)
-        let key = SHA256.hash(data: Data(canonicalPath.utf8)).map { String(format: "%02x", $0) }.joined()
-        let folder = directory.appendingPathComponent(key, isDirectory: true)
+        let folder = coordinationFolder(for: workspace)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
         let lockURL = folder.appendingPathComponent(".lock")
@@ -104,15 +102,25 @@ final class WorkspaceCommandCoordinator {
 
         let metadataURL = folder.appendingPathComponent("generation")
         do {
-            let saved = (try? String(contentsOf: metadataURL, encoding: .utf8))
-                .flatMap { Int64($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
-            var generation = saved
+            let savedGeneration: Int64
+            if FileManager.default.fileExists(atPath: metadataURL.path) {
+                guard let saved = try? String(contentsOf: metadataURL, encoding: .utf8),
+                      let parsed = Int64(saved.trimmingCharacters(in: .whitespacesAndNewlines)), parsed >= 0 else {
+                    throw CoordinatorError.unavailable("The saved-plan generation could not be read safely.")
+                }
+                savedGeneration = parsed
+            } else {
+                savedGeneration = 0
+            }
+            var generation = savedGeneration
             let contextURL = folder.appendingPathComponent("context")
             let previousContext = try? String(contentsOf: contextURL, encoding: .utf8)
             if previousContext != contextIdentity {
-                generation += 1
-                try Data(String(generation).utf8).write(to: metadataURL, options: .atomic)
-                try Data(contextIdentity.utf8).write(to: contextURL, options: .atomic)
+                let (nextGeneration, overflow) = generation.addingReportingOverflow(1)
+                guard !overflow else { throw CoordinatorError.unavailable("The saved-plan generation is exhausted.") }
+                generation = nextGeneration
+                try Self.writeDurably(Data(String(generation).utf8), to: metadataURL)
+                try Self.writeDurably(Data(contextIdentity.utf8), to: contextURL)
             }
             return Lease(descriptor: descriptor, metadataURL: metadataURL, failureMarkerURL: failureMarkerURL,
                          failureIdentifier: failureIdentifier, generation: generation)
@@ -124,12 +132,109 @@ final class WorkspaceCommandCoordinator {
         }
     }
 
+    /// Returns whether this workspace has a persistent or in-process failed marker.
+    func recoveryRequired(workspace: URL) -> Bool {
+        let folder = coordinationFolder(for: workspace)
+        return Self.isFailed(identifier: folder.standardizedFileURL.path)
+            || FileManager.default.fileExists(atPath: folder.appendingPathComponent(".failed").path)
+    }
+
+    /// Advances saved-plan generation under the workspace lock, then clears the failure marker.
+    /// The new generation and its directory entry are synced before the marker is removed.
+    @discardableResult
+    func recover(workspace: URL) throws -> Int64 {
+        let folder = coordinationFolder(for: workspace)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let lockURL = folder.appendingPathComponent(".lock")
+        let markerURL = folder.appendingPathComponent(".failed")
+        let identifier = folder.standardizedFileURL.path
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+        guard descriptor >= 0 else {
+            throw CoordinatorError.unavailable(POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO).localizedDescription)
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            close(descriptor)
+            if code == EWOULDBLOCK || code == EAGAIN { throw CoordinatorError.busy }
+            throw CoordinatorError.unavailable(POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO).localizedDescription)
+        }
+        defer {
+            flock(descriptor, LOCK_UN)
+            close(descriptor)
+        }
+
+        guard recoveryRequired(workspace: workspace) else {
+            throw CoordinatorError.unavailable("Workspace coordination does not need recovery.")
+        }
+
+        let metadataURL = folder.appendingPathComponent("generation")
+        guard FileManager.default.fileExists(atPath: metadataURL.path),
+              let saved = try? String(contentsOf: metadataURL, encoding: .utf8),
+              let savedGeneration = Int64(saved.trimmingCharacters(in: .whitespacesAndNewlines)), savedGeneration >= 0 else {
+            throw CoordinatorError.unavailable("The saved-plan generation could not be read safely. The failure marker remains in place.")
+        }
+        let (nextGeneration, overflow) = savedGeneration.addingReportingOverflow(1)
+        guard !overflow else {
+            throw CoordinatorError.unavailable("The saved-plan generation is exhausted. The failure marker remains in place.")
+        }
+
+        try Self.writeDurably(Data(String(nextGeneration).utf8), to: metadataURL)
+        do {
+            if FileManager.default.fileExists(atPath: markerURL.path) {
+                try FileManager.default.removeItem(at: markerURL)
+            }
+            try Self.syncDirectory(folder)
+        } catch {
+            // Keep this process fail-closed if marker removal could not be made durable.
+            Self.markFailed(identifier: identifier, marker: markerURL, reason: error.localizedDescription)
+            throw CoordinatorError.unavailable("The new generation was saved, but the failure marker could not be cleared safely. \(error.localizedDescription)")
+        }
+        Self.failureLock.lock()
+        Self.failedIdentifiers.remove(identifier)
+        Self.failureLock.unlock()
+        return nextGeneration
+    }
+
+    private func coordinationFolder(for workspace: URL) -> URL {
+        let canonicalPath = RunHistoryStore.workspacePath(workspace)
+        let key = SHA256.hash(data: Data(canonicalPath.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(key, isDirectory: true)
+    }
+
+    fileprivate static func writeDurably(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
+        let descriptor = open(url.path, O_RDONLY)
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(descriptor) }
+        guard fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        try syncDirectory(url.deletingLastPathComponent())
+    }
+
+    private static func syncDirectory(_ directory: URL) throws {
+        let descriptor = open(directory.path, O_RDONLY)
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(descriptor) }
+        guard fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
     fileprivate static func markFailed(identifier: String, marker: URL, reason: String) {
-        failureLock.lock()
-        failedIdentifiers.insert(identifier)
-        failureLock.unlock()
         // Keep the failure visible to other app processes when the filesystem still permits writes.
-        try? Data(reason.utf8).write(to: marker, options: .atomic)
+        do {
+            try Data(reason.utf8).write(to: marker, options: .atomic)
+        } catch {
+            failureLock.lock()
+            failedIdentifiers.insert(identifier)
+            failureLock.unlock()
+        }
     }
 
     private static func isFailed(identifier: String) -> Bool {
@@ -149,11 +254,32 @@ class Workspace: ObservableObject {
     private let commandCoordinator: WorkspaceCommandCoordinator
     let historyStore: RunHistoryStore
     @Published var historyError: String?
+    @Published private(set) var coordinationRecoveryNotice: String?
     private var unsavedRuns: [UUID: (RunRecord, URL)] = [:]
 
     // state
     @Published var locked = false
     @Published var lockedBy: TerraformRun?
+    @Published private(set) var isCancelingCommand = false
+    @Published private var activeCommand: TerraformCommandHandle?
+
+    var canCancelCommand: Bool { activeCommand != nil }
+
+    func cancelCommand() {
+        guard let activeCommand, !isCancelingCommand else { return }
+        isCancelingCommand = true
+        activeCommand.cancel()
+    }
+
+    private func appendCommandOutput(_ text: String, redactor: SensitiveInputRedactor) {
+        let safe = redactor.redact(text)
+        textOutput = String(((textOutput ?? "") + safe).suffix(262_144))
+    }
+
+    private func finishCommand() {
+        activeCommand = nil
+        isCancelingCommand = false
+    }
 
     // config
     @Published var isValid = false
@@ -260,6 +386,7 @@ class Workspace: ObservableObject {
 
     func updateWorkingDirectory(dir: URL) {
         guard !locked else { return }
+        coordinationRecoveryNotice = nil
         guard retryUnsavedRuns() else { return }
         for run in runs { run.doDiscard() }
         guard retryUnsavedRuns() else { return }
@@ -300,6 +427,25 @@ class Workspace: ObservableObject {
         }
         refreshExecutionContext()
         return try commandCoordinator.acquire(workspace: directory, contextIdentity: executionContextIdentifier)
+    }
+
+    var coordinationRecoveryRequired: Bool {
+        guard let directory = workingDirectory else { return false }
+        return commandCoordinator.recoveryRequired(workspace: directory)
+    }
+
+    func recoverCoordination() {
+        guard !locked, let directory = workingDirectory else { return }
+        do {
+            _ = try commandCoordinator.recover(workspace: directory)
+            for run in runs { run.doDiscard() }
+            coordinationRecoveryNotice = "Coordination recovered. Create a new plan before applying."
+            errorMessage = nil
+            validate()
+        } catch {
+            coordinationRecoveryNotice = nil
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func refreshExecutionContext() {
@@ -393,15 +539,20 @@ class Workspace: ObservableObject {
         catch { errorMessage = error.localizedDescription; return }
         reset()
         locked = true
-        runner.initialize(workingDirectory: workingDirectory, completion: { res, error in
+        let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
+        textOutput = ""
+        activeCommand = runner.initialize(workingDirectory: workingDirectory, onOutput: { _, text in
+            self.appendCommandOutput(text, redactor: redactor)
+        }, completion: { res, error in
+            self.finishCommand()
             self.locked = false
             lease.release()
             if let error = error {
-                self.errorMessage = error.message
+                self.errorMessage = redactor.redact(error.message)
                 self.isValid = false
             }
             if let res = res {
-                self.textOutput = self.cleanANSI(res)
+                self.textOutput = redactor.redact(self.cleanANSI(res))
                 self.isInitialized = true
                 self.validate()
             }
@@ -416,11 +567,15 @@ class Workspace: ObservableObject {
         catch { errorMessage = error.localizedDescription; return }
         reset()
         locked = true
-        runner.validate(workingDirectory: workingDirectory, completion: { res, error in
+        let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
+        activeCommand = runner.validate(workingDirectory: workingDirectory, onOutput: { _, text in
+            self.appendCommandOutput(text, redactor: redactor)
+        }, completion: { res, error in
+            self.finishCommand()
             self.locked = false
             lease.release()
             if let error = error {
-                self.errorMessage = error.message
+                self.errorMessage = redactor.redact(error.message)
                 self.isValid = false
             }
             if res != nil {
@@ -445,7 +600,9 @@ class Workspace: ObservableObject {
         hasState = false
         lock()
         
-        runner.show(workingDirectory: workingDirectory, completion: { res, error in
+        let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
+        activeCommand = runner.show(workingDirectory: workingDirectory, completion: { res, error in
+            self.finishCommand()
             self.unlock()
             lease.release()
             
@@ -453,6 +610,7 @@ class Workspace: ObservableObject {
                 let json = parseJsonOutput(res)
                 if json["values"].dictionary != nil, json["values"]["root_module"].dictionary != nil {
                     self.state = transformShow(json)
+                    self.errorMessage = nil
                     self.hasState = true
                     self.isValid = true
                 } else {
@@ -465,7 +623,7 @@ class Workspace: ObservableObject {
             if let error = error {
                 // Validation succeeded; a missing state or inaccessible backend should
                 // not make the Terraform configuration itself appear invalid.
-                self.errorMessage = error.message
+                self.errorMessage = redactor.redact(error.message)
             }
         })
     }
@@ -480,7 +638,7 @@ class Workspace: ObservableObject {
 //                self.isValid = false
 //            }
 //            if let res = res {
-//                self.textOutput = self.cleanANSI(res)
+//                self.textOutput = redactor.redact(self.cleanANSI(res))
 //                self.isValid = true
 //            }
 //        })

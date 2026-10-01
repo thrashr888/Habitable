@@ -18,19 +18,18 @@ struct TextLogView: View {
 //    }
 //
     var body: some View {
-        VStack(alignment: .leading) {
-            Group {
-                Text(text)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.leading)
-            }.frame(maxWidth: .infinity)
-            Spacer()
+        ScrollView([.vertical, .horizontal]) {
+            Text(text)
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
         }
-        .frame(minWidth: 400, idealWidth: 650, maxWidth: .infinity, minHeight: 150, maxHeight: .infinity)
-        .padding(.all)
-        .background(Color.black)
+        .frame(maxWidth: .infinity, minHeight: 150, maxHeight: .infinity)
+        .background(.background)
     }
+
 }
 
 struct TextLogView_Previews: PreviewProvider {

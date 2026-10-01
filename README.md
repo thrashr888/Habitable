@@ -45,7 +45,11 @@ cp -R Examples/local-only /tmp/habitable-demo
 
 History is local to this Mac and directory path. Symlink aliases share history; moving a directory gives it a new identity. Each run has an atomic record with owner-only file permissions. Concurrent writers allocate distinct run numbers. A failed write is visible in Runs and blocks new plans/apply until **Reload history** successfully retries it. Corrupt or newer-format history is preserved and reported; the app does not silently replace it with an empty history.
 
-Values explicitly marked as sensitive Terraform outputs are removed before saving. Other Terraform diagnostics and provider/provisioner messages can contain secrets; history is private local data, not encrypted storage. History has no automatic retention/deletion policy yet. Backend and Terraform workspace names within one directory are not yet distinguished (tracked in `Habitable-2u2`).
+Values marked Sensitive in Habitable are snapshotted before planning and redacted from run logs, errors, saved history, and plan reviews, including nested JSON input values. Terraform-sensitive outputs are also redacted. The saved binary plan stays unchanged so Apply uses the exact reviewed artifact. Redaction matches known input values; transformed values and unrelated provider secrets can still appear. History is private local data, not encrypted storage, and has no automatic retention/deletion policy yet. Each run records its backend and Terraform workspace context.
+
+Init, validate, plan, and apply show live output. **Cancel** requests a graceful Terraform stop; the workspace stays locked until the process exits. A canceled apply can leave partial changes, so Habitable invalidates earlier plans and refreshes state. Logs are bounded; oversized lines are omitted and a truncated command result requires a new plan before applying. State and saved-plan inspection retain complete JSON.
+
+If coordination metadata fails to save, commands are blocked. **Settings → Recover coordination** takes the workspace lock, advances the saved generation durably, then clears the failure marker. Queue a fresh plan after recovery.
 
 ## Build and test
 

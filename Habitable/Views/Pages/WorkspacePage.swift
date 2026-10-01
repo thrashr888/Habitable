@@ -47,14 +47,27 @@ struct WorkspacePage: View {
                     .font(.headline)
                     .padding(.top)
                 Button("Choose folder", action: workspace.addUrl)
+                    .disabled(workspace.locked)
             }
 
             if workspace.workingDirectory != nil && !workspace.isInitialized {
                 Button("Initialize workspace") {
                     workspace.initialize()
                 }
+                .disabled(workspace.locked)
             }
             
+            if workspace.canCancelCommand {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(workspace.isCancelingCommand ? "Stopping Terraform…" : "Terraform is running…")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel", action: workspace.cancelCommand)
+                        .disabled(workspace.isCancelingCommand)
+                }
+            }
+
             if let error = workspace.errorMessage {
                 ErrorView(message: error)
             }
@@ -69,19 +82,20 @@ struct WorkspacePage: View {
         }
         .padding(.all)
         .navigationTitle("Workspace")
-        .disabled(workspace.locked)
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button(action: { workspace.initialize() }) {
                     Label("Initialize", systemImage: "chevron.right.square")
                         .help("Initialize")
                 }
+                .disabled(workspace.locked)
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { workspace.validate() }) {
                     Label("Validate", systemImage: "checkmark.seal")
                         .help("Validate")
                 }
+                .disabled(workspace.locked)
             }
         }
     }
