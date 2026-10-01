@@ -2,15 +2,77 @@ import Combine
 import Darwin
 import Foundation
 
+enum TerraformOutputStream: Equatable {
+    case stdout
+    case stderr
+}
+
 struct TerraformCommandError: Error {
     let message: String
     var output = ""
+    var cancelled = false
 }
 
-/// Runs Terraform directly, without a shell, on a serial background queue.
+/// A cancellable reference to one Terraform command. Cancellation is cooperative:
+/// Terraform receives SIGINT and the command completes only after it exits and its
+/// output streams have been drained.
+final class TerraformCommandHandle {
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancellationRequested = false
+    private var finished = false
+
+    var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancellationRequested
+    }
+
+    var isFinished: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return finished
+    }
+
+    func cancel() {
+        let activeProcess: Process?
+        lock.lock()
+        cancellationRequested = true
+        activeProcess = process
+        lock.unlock()
+        guard let activeProcess, activeProcess.isRunning else { return }
+        // Terraform treats SIGINT as a graceful cancellation and can perform
+        // provider cleanup before exiting. Never escalate apply to SIGKILL.
+        activeProcess.interrupt()
+    }
+
+    fileprivate func attach(_ process: Process) {
+        lock.lock()
+        self.process = process
+        let shouldCancel = cancellationRequested
+        lock.unlock()
+        if shouldCancel, process.isRunning {
+            process.interrupt()
+        }
+    }
+
+    fileprivate func finish() {
+        lock.lock()
+        finished = true
+        process = nil
+        lock.unlock()
+    }
+}
+
+/// Runs Terraform directly, without a shell, on a serial command queue.
 final class Runner: ObservableObject {
     typealias Completion = (String?, TerraformCommandError?) -> Void
+    typealias OutputHandler = (TerraformOutputStream, String) -> Void
+
+    private static let captureLimit = 1024 * 1024
+    private static let lineLimit = 64 * 1024
+    private static let omittedLine = "[Terraform output line omitted: line exceeded 64 KiB]\n"
+
     private let cliQueue = DispatchQueue(label: "Terraform Runner")
+    private let lifecycleQueue = DispatchQueue(label: "Terraform Runner lifecycle")
     private let executableOverride: URL?
     private let environment: [String: String]
     private let searchPaths: [String]
@@ -66,22 +128,33 @@ final class Runner: ObservableObject {
         try? FileManager.default.removeItem(at: planURL(runId: runId))
     }
 
-    func version(completion: @escaping Completion) {
-        execute(["version", "-json"], workingDirectory: FileManager.default.temporaryDirectory, completion: completion)
+    @discardableResult
+    func version(onOutput: OutputHandler? = nil, completion: @escaping Completion) -> TerraformCommandHandle {
+        execute(["version", "-json"], workingDirectory: FileManager.default.temporaryDirectory,
+                onOutput: onOutput, completion: completion)
     }
 
-    func initialize(workingDirectory: URL, completion: @escaping Completion) {
-        execute(["init", "-input=false", "-no-color"], workingDirectory: workingDirectory, completion: completion)
+    @discardableResult
+    func initialize(workingDirectory: URL, onOutput: OutputHandler? = nil,
+                    completion: @escaping Completion) -> TerraformCommandHandle {
+        execute(["init", "-input=false", "-no-color"], workingDirectory: workingDirectory,
+                onOutput: onOutput, completion: completion)
     }
 
-    func validate(workingDirectory: URL, completion: @escaping Completion) {
-        execute(["validate", "-no-color"], workingDirectory: workingDirectory, completion: completion)
+    @discardableResult
+    func validate(workingDirectory: URL, onOutput: OutputHandler? = nil,
+                  completion: @escaping Completion) -> TerraformCommandHandle {
+        execute(["validate", "-no-color"], workingDirectory: workingDirectory,
+                onOutput: onOutput, completion: completion)
     }
 
+    @discardableResult
     func plan(workingDirectory: URL, runId: String,
               variables: [TerraformVariable] = [],
               environmentVariables: [EnvironmentVariable] = [],
-              completion: @escaping Completion) {
+              onOutput: OutputHandler? = nil,
+              completion: @escaping Completion) -> TerraformCommandHandle {
+        let handle = TerraformCommandHandle()
         var variableFile: URL?
         do {
             var values: [String: Any] = [:]
@@ -111,60 +184,76 @@ final class Runner: ObservableObject {
             }
             arguments.append("-out=\(planURL(runId: runId).path)")
             let inputFileToRemove = variableFile
-            execute(arguments, workingDirectory: workingDirectory, environmentOverrides: environmentOverrides) { output, error in
+            execute(arguments, workingDirectory: workingDirectory, environmentOverrides: environmentOverrides,
+                    onOutput: onOutput, handle: handle) { output, error in
                 if let inputFileToRemove { try? FileManager.default.removeItem(at: inputFileToRemove) }
                 completion(output, error)
             }
         } catch {
             if let variableFile { try? FileManager.default.removeItem(at: variableFile) }
+            handle.finish()
             DispatchQueue.main.async {
                 completion(nil, TerraformCommandError(message: error.localizedDescription))
             }
         }
+        return handle
     }
 
-    func apply(workingDirectory: URL, runId: String, completion: @escaping Completion) {
+    @discardableResult
+    func apply(workingDirectory: URL, runId: String, onOutput: OutputHandler? = nil,
+               completion: @escaping Completion) -> TerraformCommandHandle {
         execute(["apply", "-input=false", "-json", planURL(runId: runId).path],
-                workingDirectory: workingDirectory, completion: completion)
+                workingDirectory: workingDirectory, onOutput: onOutput, completion: completion)
     }
 
     /// Reads the immutable plan artifact produced for this run. Keep this separate from
     /// `show`, which reads the current workspace state.
-    func showPlan(workingDirectory: URL, runId: String, completion: @escaping Completion) {
+    @discardableResult
+    func showPlan(workingDirectory: URL, runId: String, onOutput: OutputHandler? = nil,
+                  completion: @escaping Completion) -> TerraformCommandHandle {
         execute(["show", "-json", planURL(runId: runId).path],
-                workingDirectory: workingDirectory, completion: completion)
+                workingDirectory: workingDirectory, onOutput: onOutput, completion: completion)
     }
 
-    func show(workingDirectory: URL, completion: @escaping Completion) {
-        execute(["show", "-json"], workingDirectory: workingDirectory, completion: completion)
+    @discardableResult
+    func show(workingDirectory: URL, onOutput: OutputHandler? = nil,
+              completion: @escaping Completion) -> TerraformCommandHandle {
+        execute(["show", "-json"], workingDirectory: workingDirectory,
+                onOutput: onOutput, completion: completion)
     }
 
+    @discardableResult
     private func execute(_ arguments: [String], workingDirectory: URL,
-                         environmentOverrides: [String: String] = [:], completion: @escaping Completion) {
+                         environmentOverrides: [String: String] = [:],
+                         onOutput: OutputHandler? = nil,
+                         handle: TerraformCommandHandle = TerraformCommandHandle(),
+                         completion: @escaping Completion) -> TerraformCommandHandle {
+        let delivery = onOutput.map(OutputDelivery.init)
         cliQueue.async {
+            let commandFinished = DispatchSemaphore(value: 0)
+            guard !handle.isCancelled else {
+                handle.finish()
+                DispatchQueue.main.async {
+                    completion(nil, TerraformCommandError(message: "Terraform command was canceled before it started.", cancelled: true))
+                }
+                return
+            }
             guard let executable = self.executableURL else {
+                handle.finish()
                 DispatchQueue.main.async {
                     completion(nil, TerraformCommandError(message:
                         "Terraform was not found. Download a release in Settings, use system Terraform, or set HABITABLE_TERRAFORM_PATH in the Xcode scheme."))
                 }
                 return
             }
+
+            let retainsFullOutput = arguments.first == "show"
+            let process = Process()
             do {
                 try FileManager.default.createDirectory(at: self.planDirectory, withIntermediateDirectories: true,
                                                         attributes: [.posixPermissions: 0o700])
-                // Files keep stdout and stderr separate without blocking on full pipe buffers.
-                let outputURL = self.planDirectory.appendingPathComponent(UUID().uuidString)
-                let errorURL = self.planDirectory.appendingPathComponent(UUID().uuidString)
-                defer {
-                    try? FileManager.default.removeItem(at: outputURL)
-                    try? FileManager.default.removeItem(at: errorURL)
-                }
-                FileManager.default.createFile(atPath: outputURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
-                FileManager.default.createFile(atPath: errorURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
-                let stdout = try FileHandle(forWritingTo: outputURL)
-                let stderr = try FileHandle(forWritingTo: errorURL)
-                defer { try? stdout.close(); try? stderr.close() }
-                let process = Process()
+                let stdoutPipe = Pipe()
+                let stderrPipe = Pipe()
                 process.executableURL = executable
                 process.arguments = arguments
                 process.currentDirectoryURL = workingDirectory
@@ -172,19 +261,266 @@ final class Runner: ObservableObject {
                     .merging(environmentOverrides) { _, new in new }
                     .merging(["TF_IN_AUTOMATION": "1", "TF_INPUT": "0"]) { _, new in new }
                 process.standardInput = FileHandle.nullDevice
-                process.standardOutput = stdout
-                process.standardError = stderr
+                process.standardOutput = stdoutPipe
+                process.standardError = stderrPipe
+
+                let state = CommandState(
+                    runner: self, process: process, handle: handle,
+                    stdout: stdoutPipe.fileHandleForReading, stderr: stderrPipe.fileHandleForReading,
+                    retainsFullOutput: retainsFullOutput,
+                    streamsOutput: onOutput != nil && ["init", "validate", "plan", "apply"].contains(arguments.first ?? ""),
+                    onOutput: delivery.map { delivery in { stream, text in delivery.receive(stream, text) } },
+                    completion: completion, finished: { commandFinished.signal() })
+
+                process.terminationHandler = { process in
+                    self.lifecycleQueue.async { state.processExited(status: process.terminationStatus) }
+                }
                 try process.run()
-                process.waitUntilExit()
-                let output = String(decoding: try Data(contentsOf: outputURL), as: UTF8.self)
-                let errorOutput = String(decoding: try Data(contentsOf: errorURL), as: UTF8.self)
-                let failure: TerraformCommandError? = process.terminationStatus == 0 ? nil : TerraformCommandError(
-                    message: errorOutput.isEmpty ? (output.isEmpty ? "Terraform exited with status \(process.terminationStatus)." : output) : errorOutput,
-                    output: output)
-                DispatchQueue.main.async { completion(failure == nil ? output : nil, failure) }
+                handle.attach(process)
+                // Close the parent's write descriptors so EOF arrives once the
+                // child and its inherited writers exit.
+                try? stdoutPipe.fileHandleForWriting.close()
+                try? stderrPipe.fileHandleForWriting.close()
+                // Both descriptors are drained concurrently before completion. This
+                // avoids deadlock even when Terraform fills both pipe buffers.
+                stdoutPipe.fileHandleForReading.readabilityHandler = { file in
+                    let data = file.availableData
+                    self.lifecycleQueue.async { state.consume(data, stream: .stdout) }
+                }
+                stderrPipe.fileHandleForReading.readabilityHandler = { file in
+                    let data = file.availableData
+                    self.lifecycleQueue.async { state.consume(data, stream: .stderr) }
+                }
+                commandFinished.wait()
             } catch {
-                let failure = TerraformCommandError(message: error.localizedDescription)
+                // A failed launch never calls terminationHandler, so release its
+                // captured command state explicitly.
+                process.terminationHandler = nil
+                handle.finish()
+                let failure = TerraformCommandError(message: error.localizedDescription, cancelled: handle.isCancelled)
                 DispatchQueue.main.async { completion(nil, failure) }
+                commandFinished.signal()
+            }
+        }
+        return handle
+    }
+
+    /// Coalesces bursts into one pending main-thread delivery, bounding queued UI
+    /// updates as well as retained logs. Only complete lines enter this buffer.
+    private final class OutputDelivery {
+        private let lock = NSLock()
+        private let callback: OutputHandler
+        private var pending: [(TerraformOutputStream, String)] = []
+        private var bytes = 0
+        private var scheduled = false
+        private var omitted = false
+
+        init(_ callback: @escaping OutputHandler) { self.callback = callback }
+
+        func receive(_ stream: TerraformOutputStream, _ text: String) {
+            lock.lock()
+            if bytes + text.utf8.count > 262_144 {
+                pending.removeAll(keepingCapacity: true)
+                bytes = 0
+                omitted = true
+            }
+            pending.append((stream, text))
+            bytes += text.utf8.count
+            let shouldSchedule = !scheduled
+            scheduled = true
+            lock.unlock()
+            if shouldSchedule { DispatchQueue.main.async { self.deliver() } }
+        }
+
+        private func deliver() {
+            lock.lock()
+            let events = pending
+            let didOmit = omitted
+            pending.removeAll(keepingCapacity: true)
+            bytes = 0
+            omitted = false
+            scheduled = false
+            lock.unlock()
+            if didOmit { callback(.stdout, "[Earlier live output omitted; consult the completed run events]\n") }
+            var batch: (TerraformOutputStream, String)?
+            for (stream, text) in events {
+                if batch?.0 == stream {
+                    batch?.1 += text
+                } else {
+                    if let batch { callback(batch.0, batch.1) }
+                    batch = (stream, text)
+                }
+            }
+            if let batch { callback(batch.0, batch.1) }
+        }
+    }
+
+    /// Mutable command state is confined to `lifecycleQueue` after launch.
+    private final class CommandState {
+        private let runner: Runner
+        private let process: Process
+        private let handle: TerraformCommandHandle
+        private let stdout: FileHandle
+        private let stderr: FileHandle
+        private let retainsFullOutput: Bool
+        private let streamsOutput: Bool
+        private let onOutput: OutputHandler?
+        private let completion: Completion
+        private let finished: () -> Void
+        private var stdoutState = StreamState()
+        private var stderrState = StreamState()
+        private var exitStatus: Int32?
+        private var completionDelivered = false
+
+        init(runner: Runner, process: Process, handle: TerraformCommandHandle,
+             stdout: FileHandle, stderr: FileHandle, retainsFullOutput: Bool,
+             streamsOutput: Bool, onOutput: OutputHandler?, completion: @escaping Completion,
+             finished: @escaping () -> Void) {
+            self.runner = runner
+            self.process = process
+            self.handle = handle
+            self.stdout = stdout
+            self.stderr = stderr
+            self.retainsFullOutput = retainsFullOutput
+            self.streamsOutput = streamsOutput
+            self.onOutput = onOutput
+            self.completion = completion
+            self.finished = finished
+        }
+
+        func consume(_ data: Data, stream: TerraformOutputStream) {
+            var state = stream == .stdout ? stdoutState : stderrState
+            guard !state.eof else { return }
+            if data.isEmpty {
+                if !state.pending.isEmpty {
+                    state.finishPartialLine(stream: stream,
+                                            retainsFullOutput: retainsFullOutput && stream == .stdout,
+                                            streamsOutput: streamsOutput, onOutput: onOutput)
+                }
+                state.eof = true
+                if stream == .stdout { stdoutState = state } else { stderrState = state }
+                if stream == .stdout { stdout.readabilityHandler = nil; try? stdout.close() }
+                else { stderr.readabilityHandler = nil; try? stderr.close() }
+                completeIfDrained()
+                return
+            }
+
+            state.pending.append(data)
+            state.processCompleteLines(stream: stream,
+                                       retainsFullOutput: retainsFullOutput && stream == .stdout,
+                                       streamsOutput: streamsOutput, onOutput: onOutput)
+            if stream == .stdout { stdoutState = state } else { stderrState = state }
+        }
+
+        func processExited(status: Int32) {
+            exitStatus = status
+            process.terminationHandler = nil
+            completeIfDrained()
+        }
+
+        private func completeIfDrained() {
+            guard !completionDelivered, exitStatus != nil, stdoutState.eof, stderrState.eof else { return }
+            completionDelivered = true
+            stdout.readabilityHandler = nil
+            stderr.readabilityHandler = nil
+            let stdoutText = String(decoding: stdoutState.capture, as: UTF8.self)
+            let stderrText = String(decoding: stderrState.capture, as: UTF8.self)
+            let wasCancelled = handle.isCancelled
+            let outputOverflow = stdoutState.truncated
+            let status = exitStatus ?? -1
+            let failure: TerraformCommandError?
+            if wasCancelled {
+                let message = stderrText.isEmpty ? "Terraform command was canceled."
+                    : "Terraform command was canceled. \(stderrText)"
+                failure = TerraformCommandError(message: message, output: stdoutText, cancelled: true)
+            } else if outputOverflow {
+                failure = TerraformCommandError(message: "Terraform output exceeded the bounded capture; the command result was not accepted.",
+                                                output: stdoutText)
+            } else if status != 0 {
+                failure = TerraformCommandError(
+                    message: stderrText.isEmpty ? (stdoutText.isEmpty ? "Terraform exited with status \(status)." : stdoutText) : stderrText,
+                    output: stdoutText)
+            } else {
+                failure = nil
+            }
+            handle.finish()
+            finished()
+            DispatchQueue.main.async { [completion] in completion(failure == nil ? stdoutText : nil, failure) }
+        }
+    }
+
+    /// One stream's bounded capture and line decoder, copied back into CommandState
+    /// after every read so all mutations remain serialized.
+    private struct StreamState {
+        var pending = Data()
+        var capture = Data()
+        var truncated = false
+        var captureLimitReached = false
+        var droppingLine = false
+        var eof = false
+
+        mutating func processCompleteLines(stream: TerraformOutputStream, retainsFullOutput: Bool,
+                                           streamsOutput: Bool, onOutput: OutputHandler?) {
+            while let newline = pending.firstIndex(of: 0x0A) {
+                let end = pending.index(after: newline)
+                let line = Data(pending[..<end])
+                pending.removeSubrange(..<end)
+                if droppingLine {
+                    emit(Data(Runner.omittedLine.utf8), stream: stream, retainsFullOutput: retainsFullOutput,
+                         streamsOutput: streamsOutput, onOutput: onOutput)
+                    droppingLine = false
+                } else {
+                    emit(line, stream: stream, retainsFullOutput: retainsFullOutput,
+                         streamsOutput: streamsOutput, onOutput: onOutput)
+                }
+            }
+            if !retainsFullOutput && pending.count > Runner.lineLimit {
+                // Keep scanning for the next newline without retaining an unbounded
+                // line. The marker is emitted only once that line is complete.
+                pending.removeAll(keepingCapacity: true)
+                droppingLine = true
+                truncated = true
+            }
+        }
+
+        mutating func finishPartialLine(stream: TerraformOutputStream, retainsFullOutput: Bool,
+                                        streamsOutput: Bool,
+                                        onOutput: OutputHandler?) {
+            if droppingLine {
+                emit(Data(Runner.omittedLine.utf8), stream: stream, retainsFullOutput: false,
+                     streamsOutput: streamsOutput, onOutput: onOutput)
+            } else {
+                emit(pending, stream: stream, retainsFullOutput: retainsFullOutput,
+                     streamsOutput: streamsOutput, onOutput: onOutput)
+            }
+            pending.removeAll()
+            droppingLine = false
+        }
+
+        private mutating func emit(_ line: Data, stream: TerraformOutputStream, retainsFullOutput: Bool,
+                                   streamsOutput: Bool, onOutput: OutputHandler?) {
+            let completeLine: Data
+            if !retainsFullOutput && line.count > Runner.lineLimit {
+                completeLine = Data(Runner.omittedLine.utf8)
+                truncated = true
+            } else {
+                completeLine = line
+            }
+            if retainsFullOutput {
+                if stream == .stdout { capture.append(completeLine) }
+            } else if !captureLimitReached {
+                if capture.count + completeLine.count <= Runner.captureLimit {
+                    capture.append(completeLine)
+                } else {
+                    truncated = true
+                    captureLimitReached = true
+                    let marker = Data("[Terraform output truncated at 1 MiB]\n".utf8)
+                    if capture.count + marker.count <= Runner.captureLimit { capture.append(marker) }
+                }
+            }
+            if streamsOutput, let onOutput {
+                let text = String(decoding: completeLine, as: UTF8.self)
+                onOutput(stream, text)
             }
         }
     }

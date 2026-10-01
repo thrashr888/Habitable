@@ -60,6 +60,65 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(error?.message.components(separatedBy: "stderr-line").count, 5001)
     }
 
+    func testStreamsCompleteUTF8LinesOnMainQueue() async throws {
+        let executable = try fakeCLI("printf '\\342'; sleep 0.05; printf '\\202\\254 done'; printf '\\nlast line'")
+        let runner = Runner(executableURL: executable)
+        let (output, error) = await withCheckedContinuation { continuation in
+            runner.validate(workingDirectory: directory, onOutput: { stream, chunk in
+                XCTAssertTrue(Thread.isMainThread)
+                XCTAssertEqual(stream, .stdout)
+                XCTAssertTrue(chunk.hasSuffix("\n") || chunk == "last line")
+            }, completion: { output, error in
+                continuation.resume(returning: (output, error))
+            })
+        }
+        XCTAssertNil(error)
+        XCTAssertEqual(output, "€ done\nlast line")
+    }
+
+    func testOutputCaptureIsBoundedAndFailsClosed() async throws {
+        let executable = try fakeCLI("head -c 1100000 /dev/zero | tr '\\000' x; printf '\\n'")
+        let runner = Runner(executableURL: executable)
+        let (output, error) = await result { runner.plan(workingDirectory: directory, runId: "too-large", completion: $0) }
+        XCTAssertNil(output)
+        XCTAssertTrue(error?.message.contains("not accepted") == true)
+        XCTAssertLessThanOrEqual(error?.output.utf8.count ?? .max, 1024 * 1024)
+        XCTAssertTrue(error?.output.contains("output line omitted") == true)
+    }
+
+    func testShowPreservesLargeSingleLineJSON() async throws {
+        let executable = try fakeCLI("printf '%s' '{\"value\":\"'; head -c 1100000 /dev/zero | tr '\\000' x; printf '%s' '\"}'")
+        let runner = Runner(executableURL: executable)
+        let (output, error) = await result { runner.show(workingDirectory: directory, completion: $0) }
+        XCTAssertNil(error)
+        let text = try XCTUnwrap(output)
+        XCTAssertGreaterThan(text.utf8.count, 1024 * 1024)
+        XCTAssertTrue(text.hasPrefix("{\"value\":\""))
+        XCTAssertTrue(text.hasSuffix("\"}"))
+    }
+
+    func testCancellationWaitsForTrapOutputToDrain() async throws {
+        let executable = try fakeCLI("trap 'echo cleanup-complete; exit 130' INT\necho started\nwhile :; do :; done\n")
+        let runner = Runner(executableURL: executable)
+        let completed = expectation(description: "canceled command completed after cleanup")
+        var observedOutput = ""
+        var command: TerraformCommandHandle?
+        command = runner.validate(workingDirectory: directory, onOutput: { stream, chunk in
+            guard stream == .stdout else { return }
+            observedOutput += chunk
+            if chunk == "started\n" { command?.cancel() }
+        }, completion: { output, error in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertNil(output)
+            XCTAssertTrue(error?.cancelled == true)
+            XCTAssertTrue(error?.output.contains("cleanup-complete") == true)
+            XCTAssertTrue(observedOutput.contains("cleanup-complete"))
+            XCTAssertTrue(command?.isFinished == true)
+            completed.fulfill()
+        })
+        await fulfillment(of: [completed], timeout: 10)
+    }
+
     func testApplyUsesSavedPlanWithoutAutoApprove() async throws {
         let executable = try fakeCLI("printf '%s\\n' \"$@\"\n")
         let runner = Runner(executableURL: executable)

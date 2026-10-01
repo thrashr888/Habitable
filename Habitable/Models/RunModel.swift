@@ -1,5 +1,137 @@
 import Combine
+import CoreFoundation
 import Foundation
+
+/// Captures app-marked inputs at the start of a run and removes their literal
+/// representations from every user-visible or persisted Terraform result.
+/// The snapshot is immutable so edits made while a command is running cannot
+/// change which values are protected.
+struct SensitiveInputRedactor {
+    private let literals: [(value: String, replacement: String)]
+    private let numbers: Set<String>
+    private let booleans: Set<Bool>
+    private let numberTokens: Set<String>
+    private let booleanTokens: Set<String>
+
+    init(variables: [TerraformVariable], environmentVariables: [EnvironmentVariable]) {
+        var values: [String] = []
+        var numbers: Set<String> = []
+        var booleans: Set<Bool> = []
+        for variable in variables where variable.isUserInput && variable.sensitive {
+            Self.collect(variable.value, structured: variable.hcl, strings: &values,
+                         numbers: &numbers, booleans: &booleans)
+        }
+        for variable in environmentVariables where variable.isUserInput && variable.sensitive {
+            values.append(variable.value)
+        }
+        let valuesAndLineFragments = values.flatMap { value in
+            [value] + value.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        }
+        self.literals = Array(Set(valuesAndLineFragments.filter { !$0.isEmpty })).map { value in
+            (value, "(sensitive)")
+        }.sorted { $0.value.count > $1.value.count }
+        self.numbers = numbers
+        self.booleans = booleans
+        self.numberTokens = numbers
+        self.booleanTokens = Set(booleans.map { $0 ? "true" : "false" })
+    }
+
+    func redact(_ text: String) -> String {
+        let outputSafe = RunHistoryStore.redactSensitiveOutputs(text) ?? text
+        return outputSafe.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let source = String(line)
+            if let data = source.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+               let sanitized = sanitizeJSON(json, inPayload: false),
+               let encoded = try? JSONSerialization.data(withJSONObject: sanitized,
+                                                          options: [.sortedKeys, .fragmentsAllowed]),
+               let result = String(data: encoded, encoding: .utf8) {
+                return result
+            }
+            return redactScalarTokens(redactLiterals(source))
+        }.joined(separator: "\n")
+    }
+
+    private func redactLiterals(_ text: String) -> String {
+        literals.reduce(text) { result, literal in
+            result.replacingOccurrences(of: literal.value, with: literal.replacement)
+        }
+    }
+
+    func redact(_ text: String?) -> String? {
+        text.map(redact)
+    }
+
+    private func sanitizeJSON(_ value: Any, inPayload: Bool) -> Any? {
+        if let string = value as? String {
+            let sanitized = redactLiterals(string)
+            return inPayload ? redactScalarTokens(sanitized) : sanitized
+        }
+        if let object = value as? [String: Any] {
+            let metadataKeys: Set<String> = [
+                "type", "changes", "add", "change", "remove", "operation", "address", "actions",
+                "format_version", "terraform_version", "sensitive", "before_sensitive", "after_sensitive",
+                "after_unknown", "resource_changes", "filename", "range", "start", "end", "line",
+                "column", "byte", "severity"
+            ]
+            var sanitized: [String: Any] = [:]
+            for (key, value) in object {
+                let safeKey = redactLiterals(key)
+                let payloadKey = ["value", "before", "after", "input", "output", "detail", "code", "context", "message", "@message"].contains(key)
+                let childIsMetadata = metadataKeys.contains(key)
+                sanitized[safeKey] = sanitizeJSON(value, inPayload: !childIsMetadata && (inPayload || !metadataKeys.contains(key) || payloadKey)) ?? value
+            }
+            return sanitized
+        }
+        if let array = value as? [Any] { return array.map { sanitizeJSON($0, inPayload: inPayload) ?? $0 } }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                let boolean = number.boolValue
+                return inPayload && booleans.contains(boolean) ? "(sensitive)" : number
+            }
+            return inPayload && numbers.contains(number.stringValue) ? "(sensitive)" : number
+        }
+        return value
+    }
+
+    private func redactScalarTokens(_ text: String) -> String {
+        let tokens = numberTokens.union(booleanTokens).sorted { $0.count > $1.count }
+        return tokens.reduce(text) { result, token in
+            guard let regex = try? NSRegularExpression(pattern: "(?<![A-Za-z0-9_.])\(NSRegularExpression.escapedPattern(for: token))(?![A-Za-z0-9_.])") else {
+                return result
+            }
+            let range = NSRange(result.startIndex..<result.endIndex, in: result)
+            return regex.stringByReplacingMatches(in: result, range: range, withTemplate: "(sensitive)")
+        }
+    }
+
+    private static func collect(_ value: String, structured: Bool, strings: inout [String],
+                                numbers: inout Set<String>, booleans: inout Set<Bool>) {
+        guard structured, let data = value.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+            strings.append(value)
+            return
+        }
+
+        strings.append(value)
+        func collect(_ value: Any) {
+            if let string = value as? String {
+                strings.append(string)
+            } else if let object = value as? [String: Any] {
+                object.values.forEach(collect)
+            } else if let array = value as? [Any] {
+                array.forEach(collect)
+            } else if let number = value as? NSNumber {
+                if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                    booleans.insert(number.boolValue)
+                } else {
+                    numbers.insert(number.stringValue)
+                }
+            }
+        }
+        collect(json)
+    }
+}
 
 enum RunStatus: String, Codable {
     case pending = "PENDING", planning = "PLANNING", planned = "PLANNED"
@@ -25,8 +157,36 @@ class TerraformRun: ObservableObject, Identifiable {
     private var planExecutionContext: String?
     private var selectedTerraformWorkspace = "default"
     private var backendIdentity = "unknown backend"
+    private var sensitiveInputRedactor = SensitiveInputRedactor(variables: [], environmentVariables: [])
 
     @Published var status: RunStatus = .pending
+    @Published private var activeCommand: TerraformCommandHandle?
+    @Published private(set) var isCanceling = false
+
+    var canCancel: Bool { activeCommand != nil && [.planning, .applying].contains(status) }
+
+    func cancel() {
+        guard canCancel, !isCanceling else { return }
+        isCanceling = true
+        activeCommand?.cancel()
+    }
+
+    private func appendOutput(_ text: String) {
+        let safe = sensitiveInputRedactor.redact(text)
+        let lines = safe.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+            guard let data = line.data(using: .utf8),
+                  let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let message = event["@message"] as? String else { return String(line) }
+            return message
+        }.joined(separator: "\n")
+        textOutput = String(((textOutput ?? "") + lines).suffix(262_144))
+    }
+
+    private func finishCommand() {
+        activeCommand = nil
+        isCanceling = false
+    }
+
     @Published var textOutput: String?
     @Published var errorMessage: String?
     @Published var plan: StructuredLog?
@@ -103,14 +263,8 @@ class TerraformRun: ObservableObject, Identifiable {
         return workspace.persistRun(record, directory: directory)
     }
 
-    private func redactOutput(_ output: String?, workspace: Workspace) -> String? {
-        guard var output else { return nil }
-        let sensitiveValues = workspace.terraformVariables.filter { $0.isUserInput && $0.sensitive }.map(\.value)
-            + workspace.environmentVariables.filter { $0.isUserInput && $0.sensitive }.map(\.value)
-        for value in sensitiveValues where !value.isEmpty {
-            output = output.replacingOccurrences(of: value, with: "(sensitive)")
-        }
-        return RunHistoryStore.redactSensitiveOutputs(output)
+    private func redactOutput(_ output: String?) -> String? {
+        RunHistoryStore.redactSensitiveOutputs(sensitiveInputRedactor.redact(output))
     }
 
     func doDiscard() {
@@ -136,6 +290,10 @@ class TerraformRun: ObservableObject, Identifiable {
         }
         selectedTerraformWorkspace = workspace.selectedTerraformWorkspace
         backendIdentity = workspace.backendIdentity
+        let variables = workspace.terraformVariables.filter(\.isUserInput)
+        let environmentVariables = workspace.environmentVariables.filter(\.isUserInput)
+        sensitiveInputRedactor = SensitiveInputRedactor(variables: variables,
+                                                        environmentVariables: environmentVariables)
         status = .planning
         guard persist() else {
             status = .errored
@@ -145,17 +303,20 @@ class TerraformRun: ObservableObject, Identifiable {
         }
         workspace.lock(self)
         let runner = workspace.runner
-        runner.plan(workingDirectory: directory, runId: id.uuidString,
-                    variables: workspace.terraformVariables.filter(\.isUserInput),
-                    environmentVariables: workspace.environmentVariables.filter(\.isUserInput)) { [self, workspace] output, error in
-            planOutput = redactOutput(output ?? error?.output, workspace: workspace)
+        textOutput = ""
+        activeCommand = runner.plan(workingDirectory: directory, runId: id.uuidString,
+                    variables: variables,
+                    environmentVariables: environmentVariables,
+                    onOutput: { [self] _, text in appendOutput(text) }) { [self, workspace] output, error in
+            planOutput = redactOutput(output ?? error?.output)
             plan = planOutput.map(handleNDJsonSuccess)
             guard error == nil else {
                 workspace.unlock()
                 lease.release()
-                errorMessage = redactOutput(error?.message, workspace: workspace)
-                status = .errored
-                workspace.isValid = false
+                errorMessage = redactOutput(error?.message)
+                finishCommand()
+                status = error?.cancelled == true ? .canceled : .errored
+                if error?.cancelled != true { workspace.isValid = false }
                 runner.discardPlan(runId: id.uuidString)
                 persist()
                 completion(plan, errorMessage)
@@ -163,19 +324,21 @@ class TerraformRun: ObservableObject, Identifiable {
             }
             // Review exactly the saved plan that apply will receive. A plan that cannot
             // be inspected is retired instead of becoming confirmable.
-            runner.showPlan(workingDirectory: directory, runId: id.uuidString) { [self, workspace] showOutput, showError in
+            activeCommand = runner.showPlan(workingDirectory: directory, runId: id.uuidString) { [self, workspace] showOutput, showError in
+                finishCommand()
                 workspace.unlock()
-                if let showOutput, let reviewedPlan = parseTerraformPlan(showOutput) {
+                if showError == nil, let showOutput = sensitiveInputRedactor.redact(showOutput),
+                   let reviewedPlan = parseTerraformPlan(showOutput) {
                     planDiff = reviewedPlan
                     planGeneration = lease.generation
                     planExecutionContext = workspace.executionContextIdentifier
                     status = .planned
                     workspace.isValid = true
                 } else {
-                    errorMessage = redactOutput(showError?.message, workspace: workspace)
+                    errorMessage = redactOutput(showError?.message)
                         ?? "Terraform could not inspect the saved plan."
-                    status = .errored
-                    workspace.isValid = false
+                    status = showError?.cancelled == true ? .canceled : .errored
+                    if showError?.cancelled != true { workspace.isValid = false }
                     runner.discardPlan(runId: id.uuidString)
                 }
                 if let changes = plan?.changeSummaries.last {
@@ -218,7 +381,10 @@ class TerraformRun: ObservableObject, Identifiable {
         }
         workspace.lock(self)
         let runner = workspace.runner
-        runner.apply(workingDirectory: directory, runId: id.uuidString) { [self, workspace] output, error in
+        textOutput = ""
+        activeCommand = runner.apply(workingDirectory: directory, runId: id.uuidString,
+                                    onOutput: { [self] _, text in appendOutput(text) }) { [self, workspace] output, error in
+            finishCommand()
             workspace.unlock()
             let coordinationError: String?
             do {
@@ -228,10 +394,10 @@ class TerraformRun: ObservableObject, Identifiable {
                 coordinationError = "Terraform finished, but Habitable could not invalidate reviewed plans in other windows: \(error.localizedDescription)"
             }
             lease.release()
-            applyOutput = redactOutput(output ?? error?.output, workspace: workspace)
+            applyOutput = redactOutput(output ?? error?.output)
             apply = applyOutput.map(handleNDJsonSuccess)
-            errorMessage = coordinationError ?? redactOutput(error?.message, workspace: workspace)
-            status = coordinationError == nil && error == nil ? .applied : .errored
+            errorMessage = redactOutput(coordinationError ?? error?.message)
+            status = coordinationError != nil ? .errored : (error?.cancelled == true ? .canceled : (error == nil ? .applied : .errored))
             workspace.isValid = coordinationError == nil && error == nil
             if let changes = apply?.changeSummaries.last {
                 added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove

@@ -33,6 +33,22 @@ struct SettingsListPage: View {
                 }
             }
 
+            if workspace.coordinationRecoveryRequired || workspace.coordinationRecoveryNotice != nil {
+                Section("Workspace coordination") {
+                    if workspace.coordinationRecoveryRequired {
+                        Text("A previous write failed while updating saved-plan coordination. Recovery checks that no Terraform command is using this workspace, advances its generation, and then clears the failure marker. Existing saved plans will no longer be usable; create a new plan before applying.")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Recover coordination", action: workspace.recoverCoordination)
+                            .disabled(workspace.locked)
+                    }
+                    if let notice = workspace.coordinationRecoveryNotice {
+                        Label(notice, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+
             TerraformVersionSettings(workspace: workspace)
 
             Section {

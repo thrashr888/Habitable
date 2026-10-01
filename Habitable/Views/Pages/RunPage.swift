@@ -76,6 +76,17 @@ struct RunPageView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if run.canCancel {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(run.isCanceling ? "Stopping Terraform…" : "Terraform is running…")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel", action: run.cancel)
+                        .disabled(run.isCanceling)
+                }
+            }
+
             if run.canDiscard || run.canConfirm {
                 HStack {
                     Spacer()
@@ -105,10 +116,14 @@ struct RunPageView: View {
             }
 
             Group {
-                switch selection {
-                case 2: applyView
-                case 3: errorView
-                default: planView
+                if run.canCancel {
+                    TextLogView(text: run.textOutput ?? "Waiting for Terraform output…")
+                } else {
+                    switch selection {
+                    case 2: applyView
+                    case 3: errorView
+                    default: planView
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

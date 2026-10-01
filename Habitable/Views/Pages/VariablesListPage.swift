@@ -87,7 +87,7 @@ struct VariableListPage: View {
                     }
                     Toggle("Value is JSON (list, map, number, boolean, or null)", isOn: $newTV.hcl)
                     Toggle("Sensitive", isOn: $newTV.sensitive)
-                    Text("Hides this value in Habitable. Mark the Terraform variable sensitive in your configuration to hide it from Terraform plan output.")
+                    Text("Hides this value and redacts matching input values from Habitable run logs and reviews. Also mark it sensitive in your Terraform configuration for Terraform’s own output.")
                         .font(.caption).foregroundColor(.secondary)
                     TextField("Description", text: $newTV.description)
                         .multilineTextAlignment(.leading)

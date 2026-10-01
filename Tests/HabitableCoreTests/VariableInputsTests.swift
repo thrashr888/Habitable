@@ -56,6 +56,60 @@ final class VariableInputsTests: XCTestCase {
         XCTAssertThrowsError(try variable.validate())
     }
 
+    func testSensitiveInputRedactorProtectsStringsEnvironmentAndNestedJSON() throws {
+        let string = TerraformVariable()
+        string.isUserInput = true
+        string.sensitive = true
+        string.value = "string-secret-value"
+
+        let structured = TerraformVariable()
+        structured.isUserInput = true
+        structured.sensitive = true
+        structured.hcl = true
+        structured.value = #"{"profile":{"token":"nested-secret-value","count":42,"enabled":false,"items":["deep-secret-value"]}}"#
+
+        let environment = EnvironmentVariable()
+        environment.isUserInput = true
+        environment.sensitive = true
+        environment.value = "environment-secret-value"
+
+        let multiline = EnvironmentVariable()
+        multiline.isUserInput = true
+        multiline.sensitive = true
+        multiline.value = "first-secret-line\nsecond-secret-line"
+
+        let visible = TerraformVariable()
+        visible.isUserInput = true
+        visible.value = "public-value"
+
+        let redactor = SensitiveInputRedactor(variables: [string, structured, visible],
+                                              environmentVariables: [environment, multiline])
+        let text = redactor.redact("string-secret-value environment-secret-value nested-secret-value deep-secret-value public-value\nfirst-secret-line\nsecond-secret-line")
+        XCTAssertFalse(text.contains("string-secret-value"))
+        XCTAssertFalse(text.contains("environment-secret-value"))
+        XCTAssertFalse(text.contains("nested-secret-value"))
+        XCTAssertFalse(text.contains("deep-secret-value"))
+        XCTAssertFalse(text.contains("first-secret-line"))
+        XCTAssertFalse(text.contains("second-secret-line"))
+        XCTAssertTrue(text.contains("public-value"))
+
+        let jsonLine = #"{"type":"diagnostic","diagnostic":{"detail":"nested-secret-value","extra":{"items":["deep-secret-value"],"count":42,"enabled":false}},"outputs":{"token":{"sensitive":true,"value":"nested-secret-value"}}}"#
+        let sanitized = redactor.redact(jsonLine)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(sanitized.utf8)) as? [String: Any])
+        let diagnostic = try XCTUnwrap(object["diagnostic"] as? [String: Any])
+        let detail = try XCTUnwrap(diagnostic["detail"] as? String)
+        let extra = try XCTUnwrap(diagnostic["extra"] as? [String: Any])
+        let items = try XCTUnwrap(extra["items"] as? [String])
+        let outputs = try XCTUnwrap(object["outputs"] as? [String: [String: Any]])
+        let token = try XCTUnwrap(outputs["token"])
+        XCTAssertFalse(detail.contains("nested-secret-value"))
+        XCTAssertFalse(items.joined().contains("deep-secret-value"))
+        XCTAssertEqual(extra["count"] as? String, "(sensitive)")
+        XCTAssertEqual(extra["enabled"] as? String, "(sensitive)")
+        XCTAssertEqual(token["sensitive"] as? Bool, true)
+        XCTAssertEqual(token["value"] as? String, "(sensitive)")
+    }
+
     func testPlanPassesSavedVariablesAndEnvironmentOverridesToTerraform() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("Habitable variable inputs \(UUID().uuidString)")
