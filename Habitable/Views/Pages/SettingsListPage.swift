@@ -30,6 +30,25 @@ struct SettingsListPage: View {
                         .frame(height: 64)
                         .padding(4)
                         .background(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                    if let error = workspace.descriptionPersistenceError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    if workspace.descriptionNeedsSave {
+                        Button("Retry saving description", action: workspace.retrySavingWorkspaceDescription)
+                            .disabled(workspace.locked)
+                    }
+                }
+            }
+
+            if let error = workspace.errorMessage {
+                Section("Workspace status") {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 }
             }
 
@@ -139,9 +158,6 @@ struct TerraformVersionSettings: View {
                 }
             }
             if let error = catalog.error {
-                Text(error).foregroundStyle(.red).textSelection(.enabled)
-            }
-            if let error = workspace.errorMessage {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
             }
         } header: {

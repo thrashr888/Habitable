@@ -27,6 +27,7 @@ func parseNDJsonOutput(_ output: String) -> [JSON] {
     return out
 }
 
+@MainActor
 func handleNDJsonSuccess(_ output: String) -> StructuredLog {
     let newLogs = StructuredLog()
 

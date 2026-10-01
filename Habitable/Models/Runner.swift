@@ -1,13 +1,12 @@
-import Combine
 import Darwin
 import Foundation
 
-enum TerraformOutputStream: Equatable {
+enum TerraformOutputStream: Equatable, Sendable {
     case stdout
     case stderr
 }
 
-struct TerraformCommandError: Error {
+struct TerraformCommandError: Error, Sendable {
     let message: String
     var output = ""
     var cancelled = false
@@ -16,7 +15,9 @@ struct TerraformCommandError: Error {
 /// A cancellable reference to one Terraform command. Cancellation is cooperative:
 /// Terraform receives SIGINT and the command completes only after it exits and its
 /// output streams have been drained.
-final class TerraformCommandHandle {
+/// Cancellation state is protected by `lock`; Process is attached/read while holding
+/// that lock and is only controlled through Process' thread-safe lifecycle methods.
+final class TerraformCommandHandle: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
     private var cancellationRequested = false
@@ -63,9 +64,9 @@ final class TerraformCommandHandle {
 }
 
 /// Runs Terraform directly, without a shell, on a serial command queue.
-final class Runner: ObservableObject {
-    typealias Completion = (String?, TerraformCommandError?) -> Void
-    typealias OutputHandler = (TerraformOutputStream, String) -> Void
+final class Runner: Sendable {
+    typealias Completion = @MainActor @Sendable (String?, TerraformCommandError?) -> Void
+    typealias OutputHandler = @MainActor @Sendable (TerraformOutputStream, String) -> Void
 
     private static let captureLimit = 1024 * 1024
     private static let lineLimit = 64 * 1024
@@ -149,6 +150,7 @@ final class Runner: ObservableObject {
     }
 
     @discardableResult
+    @MainActor
     func plan(workingDirectory: URL, runId: String,
               variables: [TerraformVariable] = [],
               environmentVariables: [EnvironmentVariable] = [],
@@ -269,7 +271,7 @@ final class Runner: ObservableObject {
                     stdout: stdoutPipe.fileHandleForReading, stderr: stderrPipe.fileHandleForReading,
                     retainsFullOutput: retainsFullOutput,
                     streamsOutput: onOutput != nil && ["init", "validate", "plan", "apply"].contains(arguments.first ?? ""),
-                    onOutput: delivery.map { delivery in { stream, text in delivery.receive(stream, text) } },
+                    onOutput: delivery,
                     completion: completion, finished: { commandFinished.signal() })
 
                 process.terminationHandler = { process in
@@ -307,7 +309,8 @@ final class Runner: ObservableObject {
 
     /// Coalesces bursts into one pending main-thread delivery, bounding queued UI
     /// updates as well as retained logs. Only complete lines enter this buffer.
-    private final class OutputDelivery {
+    /// Mutable batching state is protected by `lock`; delivery always hops to MainActor.
+    private final class OutputDelivery: @unchecked Sendable {
         private let lock = NSLock()
         private let callback: OutputHandler
         private var pending: [(TerraformOutputStream, String)] = []
@@ -332,6 +335,7 @@ final class Runner: ObservableObject {
             if shouldSchedule { DispatchQueue.main.async { self.deliver() } }
         }
 
+        @MainActor
         private func deliver() {
             lock.lock()
             let events = pending
@@ -356,7 +360,9 @@ final class Runner: ObservableObject {
     }
 
     /// Mutable command state is confined to `lifecycleQueue` after launch.
-    private final class CommandState {
+    /// Constructed before launch, then all mutable state is accessed only on
+    /// `Runner.lifecycleQueue`. Dispatch callbacks enqueue there before touching it.
+    private final class CommandState: @unchecked Sendable {
         private let runner: Runner
         private let process: Process
         private let handle: TerraformCommandHandle
@@ -364,7 +370,7 @@ final class Runner: ObservableObject {
         private let stderr: FileHandle
         private let retainsFullOutput: Bool
         private let streamsOutput: Bool
-        private let onOutput: OutputHandler?
+        private let onOutput: OutputDelivery?
         private let completion: Completion
         private let finished: () -> Void
         private var stdoutState = StreamState()
@@ -374,7 +380,7 @@ final class Runner: ObservableObject {
 
         init(runner: Runner, process: Process, handle: TerraformCommandHandle,
              stdout: FileHandle, stderr: FileHandle, retainsFullOutput: Bool,
-             streamsOutput: Bool, onOutput: OutputHandler?, completion: @escaping Completion,
+             streamsOutput: Bool, onOutput: OutputDelivery?, completion: @escaping Completion,
              finished: @escaping () -> Void) {
             self.runner = runner
             self.process = process
@@ -460,7 +466,7 @@ final class Runner: ObservableObject {
         var eof = false
 
         mutating func processCompleteLines(stream: TerraformOutputStream, retainsFullOutput: Bool,
-                                           streamsOutput: Bool, onOutput: OutputHandler?) {
+                                           streamsOutput: Bool, onOutput: OutputDelivery?) {
             while let newline = pending.firstIndex(of: 0x0A) {
                 let end = pending.index(after: newline)
                 let line = Data(pending[..<end])
@@ -485,7 +491,7 @@ final class Runner: ObservableObject {
 
         mutating func finishPartialLine(stream: TerraformOutputStream, retainsFullOutput: Bool,
                                         streamsOutput: Bool,
-                                        onOutput: OutputHandler?) {
+                                        onOutput: OutputDelivery?) {
             if droppingLine {
                 emit(Data(Runner.omittedLine.utf8), stream: stream, retainsFullOutput: false,
                      streamsOutput: streamsOutput, onOutput: onOutput)
@@ -498,7 +504,7 @@ final class Runner: ObservableObject {
         }
 
         private mutating func emit(_ line: Data, stream: TerraformOutputStream, retainsFullOutput: Bool,
-                                   streamsOutput: Bool, onOutput: OutputHandler?) {
+                                   streamsOutput: Bool, onOutput: OutputDelivery?) {
             let completeLine: Data
             if !retainsFullOutput && line.count > Runner.lineLimit {
                 completeLine = Data(Runner.omittedLine.utf8)
@@ -520,7 +526,7 @@ final class Runner: ObservableObject {
             }
             if streamsOutput, let onOutput {
                 let text = String(decoding: completeLine, as: UTF8.self)
-                onOutput(stream, text)
+                onOutput.receive(stream, text)
             }
         }
     }

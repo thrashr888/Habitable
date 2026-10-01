@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import HabitableCore
 
+@MainActor
 final class VariableInputsTests: XCTestCase {
     func testTerraformVariableSerializesStringAndStructuredJSONValues() throws {
         let string = TerraformVariable()

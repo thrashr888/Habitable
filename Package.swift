@@ -9,5 +9,5 @@ let package = Package(
         .target(name: "HabitableCore", dependencies: ["SwiftyJSON"], path: "Habitable/Models"),
         .testTarget(name: "HabitableCoreTests", dependencies: ["HabitableCore"])
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

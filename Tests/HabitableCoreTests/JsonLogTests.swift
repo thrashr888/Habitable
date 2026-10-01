@@ -3,10 +3,37 @@ import SwiftyJSON
 @testable import HabitableCore
 
 final class JsonLogTests: XCTestCase {
+    @MainActor
+    func testDeepOutputValuesRemainVisibleAndPreserveEscapedKeys() throws {
+        var nested: Any = ["quote\"and\nnewline": "leaf"]
+        for _ in 0..<20 { nested = ["value": nested] }
+        let output = JSON(["sensitive": false, "type": ["object", ["value": "string"]], "value": nested])
+        let state = transformShow(JSON(["values": ["outputs": ["deep": output.object]]]))
+        let displayed = try XCTUnwrap(state.outputs.first?.value)
+        XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(displayed.utf8)))
+        XCTAssertTrue(displayed.contains("leaf"))
+        XCTAssertEqual(state.outputs.first?.type, "object")
+        let events = transformOutputs(JSON(["outputs": ["deep": output.object]]))
+        XCTAssertEqual(events.outputs.first?.value, displayed)
+    }
+
+    func testOutputValuesPreserveScalarAndEmptyValues() {
+        XCTAssertEqual(terraformOutputValue(JSON("")), "")
+        XCTAssertEqual(terraformOutputValue(JSON(false)), "false")
+        XCTAssertEqual(terraformOutputValue(JSON(0)), "0")
+        XCTAssertEqual(terraformOutputValue(JSON(NSNull())), "null")
+        XCTAssertEqual(terraformOutputValue(JSON([String: String]())), "{}")
+        XCTAssertEqual(terraformOutputValue(JSON([String]())), "[]")
+    }
+
     func testParseTerraformPlanRejectsMalformedOrIncompleteShowOutput() {
         XCTAssertNil(parseTerraformPlan("not json"))
         XCTAssertNil(parseTerraformPlan(#"{"format_version":"1.0"}"#))
+        XCTAssertNil(parseTerraformPlan(#"{"format_version":"1.0","planned_values":[]}"#))
+        XCTAssertNil(parseTerraformPlan(#"{"format_version":"1.0","planned_values":{},"resource_changes":"invalid"}"#))
         XCTAssertNotNil(parseTerraformPlan(#"{"format_version":"1.0","resource_changes":[]}"#))
+        let outputOnly = #"{"format_version":"1.0","terraform_version":"1.16.4","planned_values":{"outputs":{"message":{"sensitive":false,"type":"string","value":"hello"}},"root_module":{"resources":[]}},"output_changes":{"message":{"actions":["create"],"before":null,"after":"hello","after_unknown":false,"before_sensitive":false,"after_sensitive":false}}}"#
+        XCTAssertEqual(parseTerraformPlan(outputOnly)?.resourceChanges, [])
     }
 
     func testTransformPlanFlattensNestedValuesAndKeepsUnknownSensitiveAndReplacementReasons() {
@@ -60,6 +87,7 @@ final class JsonLogTests: XCTestCase {
         XCTAssertEqual(plan.resourceChanges[3].action, "delete")
     }
 
+    @MainActor
     func testTransformShowCollectsResourcesFromNestedModules() throws {
         let fixture = #"""
         {

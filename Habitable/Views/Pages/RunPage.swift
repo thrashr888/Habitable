@@ -43,7 +43,19 @@ struct RunPageView: View {
     var errorView: some View {
         Group {
             if let errorMessage = run.errorMessage {
-                ErrorView(message: errorMessage)
+                let diagnostics = handleNDJsonSuccess(errorMessage).diagnostics
+                if diagnostics.isEmpty {
+                    ScrollView {
+                        ErrorView(message: errorMessage)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    List(diagnostics, id: \.id) { diagnostic in
+                        DiagnosticView(diagnostic: diagnostic.diagnostic,
+                                       workingDirectory: workspace.workingDirectory)
+                    }
+                }
             }
         }
     }

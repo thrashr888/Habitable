@@ -1,6 +1,7 @@
 import XCTest
 @testable import HabitableCore
 
+@MainActor
 final class CancellationModelTests: XCTestCase {
     @MainActor
     func testCancelKeepsWorkspaceLeaseUntilTerraformCleanupExits() async throws {
@@ -21,9 +22,12 @@ final class CancellationModelTests: XCTestCase {
         """.write(to: cli, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
         let coordinator = WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination"))
+        let defaults = UserDefaults(suiteName: "Habitable-cancel-\(UUID().uuidString)")!
         let workspace = Workspace(restoreLastDirectory: false,
+                                  defaults: defaults,
                                   historyStore: RunHistoryStore(directory: root.appendingPathComponent("history")),
-                                  commandCoordinator: coordinator)
+                                  commandCoordinator: coordinator,
+                                  descriptionStore: WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions")))
         workspace.runner = Runner(executableURL: cli)
         workspace.workingDirectory = root
         let run = TerraformRun(workspace: workspace)
@@ -64,9 +68,12 @@ final class CancellationModelTests: XCTestCase {
         esac
         """.write(to: cli, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+        let defaults = UserDefaults(suiteName: "Habitable-init-cancel-\(UUID().uuidString)")!
         let workspace = Workspace(restoreLastDirectory: false,
+                                  defaults: defaults,
                                   historyStore: RunHistoryStore(directory: root.appendingPathComponent("history")),
-                                  commandCoordinator: WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination")))
+                                  commandCoordinator: WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination")),
+                                  descriptionStore: WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions")))
         workspace.runner = Runner(executableURL: cli)
         workspace.workingDirectory = root
         workspace.initialize()

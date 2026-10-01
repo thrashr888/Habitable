@@ -2,6 +2,7 @@ import CryptoKit
 import XCTest
 @testable import HabitableCore
 
+@MainActor
 final class TerraformReleaseTests: XCTestCase {
     private var directory: URL!
     override func setUpWithError() throws {

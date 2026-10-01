@@ -1,9 +1,18 @@
 import XCTest
 @testable import HabitableCore
 
+@MainActor
 final class WorkspaceModelTests: XCTestCase {
-    private var root: URL!
-    private var directory: URL!
+    // XCTest calls setup, each test body, and teardown serially on its managed test instance.
+    nonisolated(unsafe) private var root: URL!
+    nonisolated(unsafe) private var directory: URL!
+    private var testCommandCoordinator: WorkspaceCommandCoordinator {
+        WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination"))
+    }
+    private var testDefaults: UserDefaults { UserDefaults(suiteName: "Habitable-workspace-\(root.lastPathComponent)")! }
+    private var testDescriptionStore: WorkspaceDescriptionStore {
+        WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions"))
+    }
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable workspace \(UUID())")
@@ -12,6 +21,8 @@ final class WorkspaceModelTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        UserDefaults(suiteName: "Habitable-workspace-\(root.lastPathComponent)")?
+            .removePersistentDomain(forName: "Habitable-workspace-\(root.lastPathComponent)")
         try FileManager.default.removeItem(at: root)
     }
 
@@ -34,7 +45,7 @@ final class WorkspaceModelTests: XCTestCase {
         """)
         try "terraform { required_version = \"~> 1.0\" }\n".write(to: directory.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
 
-        let first = Workspace(restoreLastDirectory: false)
+        let first = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         first.runner = Runner(executableURL: executable)
         first.workingDirectory = directory
         first.initialize()
@@ -45,7 +56,7 @@ final class WorkspaceModelTests: XCTestCase {
         try await waitUntil { !first.locked }
         XCTAssertTrue(first.isInitialized, "Repeated successful inits should keep the workspace initialized")
 
-        let reopened = Workspace(restoreLastDirectory: false)
+        let reopened = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         reopened.runner = Runner(executableURL: executable)
         reopened.updateWorkingDirectory(dir: directory)
         try await waitUntil { !reopened.locked }
@@ -66,7 +77,7 @@ final class WorkspaceModelTests: XCTestCase {
         let config = #"terraform { backend "remote" { hostname = "example.invalid" organization = "test" workspaces { name = "fixture" } } }"#
         try config.write(to: directory.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
 
-        let workspace = Workspace(restoreLastDirectory: false)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         workspace.runner = Runner(executableURL: executable)
         workspace.updateWorkingDirectory(dir: directory)
         try await waitUntil { !workspace.locked }
@@ -87,7 +98,7 @@ final class WorkspaceModelTests: XCTestCase {
           show) echo '{"values":null}' ;;
         esac
         """)
-        let workspace = Workspace(restoreLastDirectory: false)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         workspace.runner = Runner(executableURL: executable)
         workspace.updateWorkingDirectory(dir: directory)
         try await waitUntil { !workspace.locked }
@@ -175,7 +186,7 @@ final class WorkspaceModelTests: XCTestCase {
     @MainActor
     func testWorkspaceRecoveryRevalidatesBeforeNewPlans() async throws {
         let coordinator = WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination"))
-        let workspace = Workspace(restoreLastDirectory: false, commandCoordinator: coordinator)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: coordinator, descriptionStore: testDescriptionStore)
         workspace.workingDirectory = directory
         workspace.runner = Runner(executableURL: try fakeTerraform("""
         case "$1" in
@@ -207,8 +218,8 @@ final class WorkspaceModelTests: XCTestCase {
         try "production\n".write(to: terraformDirectory.appendingPathComponent("environment"), atomically: true, encoding: .utf8)
         try #"{"backend":{"type":"remote","hash":12345,"config":{}}}"#
             .write(to: terraformDirectory.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
-        let workspace = Workspace(restoreLastDirectory: false,
-                                  commandCoordinator: WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination")))
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         workspace.workingDirectory = directory
 
         let lease = try workspace.acquireCommandLease()
@@ -220,13 +231,94 @@ final class WorkspaceModelTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceDescriptionSurvivesRestartAndIsScopedToCanonicalDirectory() async throws {
+        let descriptions = WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions"))
+        let otherDirectory = root.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+        let alias = root.appendingPathComponent("workspace-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: directory)
+
+        let first = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator,
+                              descriptionStore: descriptions)
+        first.updateWorkingDirectory(dir: alias)
+        try await waitUntil { !first.locked }
+        first.description = "Manually written description"
+        XCTAssertNil(first.descriptionPersistenceError)
+
+        let reopened = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator,
+                                 descriptionStore: descriptions)
+        reopened.updateWorkingDirectory(dir: directory)
+        try await waitUntil { !reopened.locked }
+        XCTAssertEqual(reopened.description, "Manually written description")
+
+        reopened.updateWorkingDirectory(dir: otherDirectory)
+        try await waitUntil { !reopened.locked }
+        XCTAssertEqual(reopened.description, "")
+        reopened.description = "Other workspace"
+        reopened.updateWorkingDirectory(dir: directory)
+        try await waitUntil { !reopened.locked }
+        XCTAssertEqual(reopened.description, "Manually written description")
+    }
+
+    @MainActor
+    func testWorkspaceDescriptionSaveFailureIsVisibleAndKeepsEditedText() throws {
+        let blockedParent = root.appendingPathComponent("not-a-directory")
+        try Data("file".utf8).write(to: blockedParent)
+        let descriptions = WorkspaceDescriptionStore(directory: blockedParent.appendingPathComponent("descriptions"))
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator,
+                                 descriptionStore: descriptions)
+        workspace.updateWorkingDirectory(dir: directory)
+
+        workspace.description = "Keep this edit visible"
+
+        XCTAssertEqual(workspace.description, "Keep this edit visible")
+        XCTAssertTrue(workspace.descriptionPersistenceError?.contains("Cannot save the workspace description") == true)
+    }
+
+    @MainActor
+    func testUnsavedDescriptionBlocksFolderChangeUntilRetrySucceeds() async throws {
+        let blockedParent = root.appendingPathComponent("description-storage-blocker")
+        try Data("file".utf8).write(to: blockedParent)
+        let descriptions = WorkspaceDescriptionStore(directory: blockedParent.appendingPathComponent("descriptions"))
+        let otherDirectory = root.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator,
+                                  descriptionStore: descriptions)
+        workspace.updateWorkingDirectory(dir: directory)
+        try await waitUntil { !workspace.locked }
+
+        workspace.description = "Keep this unsaved edit"
+        XCTAssertTrue(workspace.descriptionNeedsSave)
+        workspace.updateWorkingDirectory(dir: otherDirectory)
+
+        XCTAssertEqual(workspace.workingDirectory, directory)
+        XCTAssertEqual(workspace.description, "Keep this unsaved edit")
+        XCTAssertTrue(workspace.descriptionNeedsSave)
+
+        try FileManager.default.removeItem(at: blockedParent)
+        try FileManager.default.createDirectory(at: blockedParent, withIntermediateDirectories: true)
+        workspace.retrySavingWorkspaceDescription()
+        XCTAssertFalse(workspace.descriptionNeedsSave)
+        XCTAssertNil(workspace.descriptionPersistenceError)
+
+        workspace.updateWorkingDirectory(dir: otherDirectory)
+        try await waitUntil { !workspace.locked }
+        XCTAssertEqual(workspace.workingDirectory, otherDirectory)
+        XCTAssertEqual(workspace.description, "")
+
+        workspace.updateWorkingDirectory(dir: directory)
+        try await waitUntil { !workspace.locked }
+        XCTAssertEqual(workspace.description, "Keep this unsaved edit")
+    }
+
+    @MainActor
     func testExternalTerraformWorkspaceSelectionInvalidatesEarlierGeneration() throws {
         let terraformDirectory = directory.appendingPathComponent(".terraform")
         try FileManager.default.createDirectory(at: terraformDirectory, withIntermediateDirectories: true)
         try #"{"backend":{"type":"local","hash":12345,"config":{}}}"#
             .write(to: terraformDirectory.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
-        let workspace = Workspace(restoreLastDirectory: false,
-                                  commandCoordinator: WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination")))
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         workspace.workingDirectory = directory
         let initial = try workspace.acquireCommandLease()
         let initialGeneration = initial.generation

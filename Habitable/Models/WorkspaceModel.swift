@@ -12,14 +12,23 @@ import CryptoKit
 import Darwin
 
 /// Serializes Terraform commands across windows and app processes for one canonical directory.
-final class WorkspaceCommandCoordinator {
-    final class Lease {
+final class WorkspaceCommandCoordinator: Sendable {
+    /// Mutable lease state is protected by `stateLock`; the descriptor and file URLs
+    /// are immutable after initialization, so callers can safely pass a lease to
+    /// command completion callbacks without sending unsynchronized state.
+    final class Lease: @unchecked Sendable {
+        private let stateLock = NSLock()
         private let descriptor: Int32
         let metadataURL: URL
         private let failureMarkerURL: URL
         private let failureIdentifier: String
         private var isReleased = false
-        private(set) var generation: Int64
+        private var currentGeneration: Int64
+
+        var generation: Int64 {
+            stateLock.lock(); defer { stateLock.unlock() }
+            return currentGeneration
+        }
 
         fileprivate init(descriptor: Int32, metadataURL: URL, failureMarkerURL: URL,
                         failureIdentifier: String, generation: Int64) {
@@ -27,14 +36,19 @@ final class WorkspaceCommandCoordinator {
             self.metadataURL = metadataURL
             self.failureMarkerURL = failureMarkerURL
             self.failureIdentifier = failureIdentifier
-            self.generation = generation
+            currentGeneration = generation
         }
 
         func invalidatePlans() throws {
-            let nextGeneration = generation + 1
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            let (nextGeneration, overflow) = currentGeneration.addingReportingOverflow(1)
+            guard !overflow else {
+                throw WorkspaceCommandCoordinator.CoordinatorError.unavailable("The saved-plan generation is exhausted.")
+            }
             do {
                 try saveGeneration(nextGeneration)
-                generation = nextGeneration
+                currentGeneration = nextGeneration
             } catch {
                 WorkspaceCommandCoordinator.markFailed(identifier: failureIdentifier,
                     marker: failureMarkerURL, reason: error.localizedDescription)
@@ -43,8 +57,13 @@ final class WorkspaceCommandCoordinator {
         }
 
         func release() {
-            guard !isReleased else { return }
+            stateLock.lock()
+            guard !isReleased else {
+                stateLock.unlock()
+                return
+            }
             isReleased = true
+            stateLock.unlock()
             flock(descriptor, LOCK_UN)
             close(descriptor)
         }
@@ -70,7 +89,9 @@ final class WorkspaceCommandCoordinator {
 
     static let shared = WorkspaceCommandCoordinator()
     private static let failureLock = NSLock()
-    private static var failedIdentifiers = Set<String>()
+    // Every access to this fallback set is paired with `failureLock`; the marker file
+    // remains the cross-process source of truth when it can be written.
+    nonisolated(unsafe) private static var failedIdentifiers = Set<String>()
     private let directory: URL
 
     init(directory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -245,6 +266,7 @@ final class WorkspaceCommandCoordinator {
 }
 
 // break out plan, apply, show, etc runners
+@MainActor
 class Workspace: ObservableObject {
     var id = UUID()
 
@@ -254,8 +276,14 @@ class Workspace: ObservableObject {
     private let commandCoordinator: WorkspaceCommandCoordinator
     let historyStore: RunHistoryStore
     @Published var historyError: String?
+    @Published private(set) var historyLoading = false
+    @Published private(set) var historyPageOffset = 0
+    @Published private(set) var historyTotalCount = 0
+    let historyPageSize = 50
     @Published private(set) var coordinationRecoveryNotice: String?
     private var unsavedRuns: [UUID: (RunRecord, URL)] = [:]
+    private var historyRequestID = UUID()
+    private var historyActionRequestID = UUID()
 
     // state
     @Published var locked = false
@@ -291,7 +319,14 @@ class Workspace: ObservableObject {
     @Published var workingDirectory: URL?
 //    @AppStorage("workingDirectory") var workingDirectory: URL?
     @AppStorage("lastWorkingDirectory") var lastWorkingDirectory: URL?
-    @Published var description = ""
+    @Published var description = "" {
+        didSet { persistWorkspaceDescription() }
+    }
+    @Published private(set) var descriptionPersistenceError: String?
+    @Published private(set) var descriptionNeedsSave = false
+    private let descriptionStore: WorkspaceDescriptionStore
+    private var descriptionWorkspace: URL?
+    private var isLoadingWorkspaceDescription = false
     @Published var autoApply = false
     @Published var terraformVersion = "Checking…"
     @Published var selectedTerraformWorkspace = "default"
@@ -308,10 +343,12 @@ class Workspace: ObservableObject {
 
     init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard,
          historyStore: RunHistoryStore = RunHistoryStore(),
-         commandCoordinator: WorkspaceCommandCoordinator = .shared) {
+         commandCoordinator: WorkspaceCommandCoordinator = .shared,
+         descriptionStore: WorkspaceDescriptionStore = WorkspaceDescriptionStore()) {
         self.historyStore = historyStore
         preferences = defaults
         self.commandCoordinator = commandCoordinator
+        self.descriptionStore = descriptionStore
         managedTerraformVersion = defaults.string(forKey: TerraformReleaseService.selectionKey)
         runner = Runner(executableURL: TerraformReleaseService.selectedExecutable(defaults: defaults))
         refreshTerraformVersion()
@@ -386,11 +423,29 @@ class Workspace: ObservableObject {
 
     func updateWorkingDirectory(dir: URL) {
         guard !locked else { return }
+        let previousPath = descriptionWorkspace.map(RunHistoryStore.workspacePath)
+        let nextPath = RunHistoryStore.workspacePath(dir)
+        if previousPath != nextPath, descriptionNeedsSave, !saveWorkspaceDescription() {
+            return
+        }
         coordinationRecoveryNotice = nil
         guard retryUnsavedRuns() else { return }
         for run in runs { run.doDiscard() }
         guard retryUnsavedRuns() else { return }
         runs = []
+        if previousPath != nextPath {
+            isLoadingWorkspaceDescription = true
+            descriptionWorkspace = dir
+            descriptionNeedsSave = false
+            description = ""
+            descriptionPersistenceError = nil
+            do {
+                description = try descriptionStore.load(workspace: dir)
+            } catch {
+                descriptionPersistenceError = error.localizedDescription
+            }
+            isLoadingWorkspaceDescription = false
+        }
         historyError = nil
         state = nil
         isInitialized = false
@@ -398,6 +453,7 @@ class Workspace: ObservableObject {
         hasState = false
         hasVariables = false
         terraformVariables = []
+        historyActionRequestID = UUID()
         workingDirectory = dir
         refreshExecutionContext()
         lastWorkingDirectory = dir
@@ -414,6 +470,32 @@ class Workspace: ObservableObject {
         
         checkVariables()
         validate()
+    }
+
+    private func persistWorkspaceDescription() {
+        guard !isLoadingWorkspaceDescription, descriptionWorkspace != nil else { return }
+        descriptionNeedsSave = true
+        _ = saveWorkspaceDescription()
+    }
+
+    func retrySavingWorkspaceDescription() {
+        guard descriptionNeedsSave else { return }
+        _ = saveWorkspaceDescription()
+    }
+
+    @discardableResult
+    private func saveWorkspaceDescription() -> Bool {
+        guard let directory = descriptionWorkspace else { return false }
+        do {
+            try descriptionStore.save(description, workspace: directory)
+            descriptionPersistenceError = nil
+            descriptionNeedsSave = false
+            return true
+        } catch {
+            descriptionPersistenceError = error.localizedDescription
+            descriptionNeedsSave = true
+            return false
+        }
     }
 
     var executionContextIdentifier: String {
@@ -500,7 +582,7 @@ class Workspace: ObservableObject {
     private func parseTextVariables(file: URL) {
         do {
             terraformVariables = []
-            let vars = try String(contentsOf: file)
+            let vars = try String(contentsOf: file, encoding: .utf8)
             for v in vars.split(separator: "\n") {
                 let parts = v.split(separator: "=")
                                 
@@ -669,17 +751,128 @@ class Workspace: ObservableObject {
     }
 
     func reloadRunHistory() {
-        guard !locked, let directory = workingDirectory else { return }
+        guard !locked, workingDirectory != nil else { return }
         guard retryUnsavedRuns() else { return }
-        do {
-            let records = try historyStore.load(workspace: directory)
-            // Preserve live runs and their saved-plan capabilities when refreshing the list.
-            let live = Dictionary(uniqueKeysWithValues: runs.filter { !$0.isRestored }.map { ($0.id, $0) })
-            runs = records.map { live[$0.id] ?? TerraformRun(workspace: self, record: $0, restored: true) }
-            historyError = nil
-        } catch {
-            historyError = error.localizedDescription
+        loadRunHistoryPage(offset: 0)
+    }
+
+    func loadNextRunHistoryPage() {
+        guard !locked, !historyLoading, historyError == nil,
+              historyPageOffset + historyPageSize < historyTotalCount else { return }
+        loadRunHistoryPage(offset: historyPageOffset + historyPageSize)
+    }
+
+    func loadPreviousRunHistoryPage() {
+        guard !locked, !historyLoading, historyError == nil, historyPageOffset > 0 else { return }
+        loadRunHistoryPage(offset: max(0, historyPageOffset - historyPageSize))
+    }
+
+    private func loadRunHistoryPage(offset: Int) {
+        guard let directory = workingDirectory else { return }
+        let requestID = UUID()
+        historyRequestID = requestID
+        historyLoading = true
+        historyError = nil
+        let store = historyStore
+        let limit = historyPageSize
+        let unsavedIDs = Set(unsavedRuns.keys)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try store.loadPage(workspace: directory, offset: offset, limit: limit) }
+            DispatchQueue.main.async {
+                guard self.historyRequestID == requestID,
+                      self.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
+                self.historyLoading = false
+                switch result {
+                case .success(let page):
+                    // Keep this session's active runs visible; finished records follow the selected page.
+                    let live = self.runs.filter { !$0.isPersisted || !$0.isFinished || $0.status == .interrupted || unsavedIDs.contains($0.id) }
+                    let liveByID = Dictionary(uniqueKeysWithValues: live.map { ($0.id, $0) })
+                    let restored = page.records.map { liveByID[$0.id] ?? TerraformRun(workspace: self, record: $0, restored: true) }
+                    let pageIDs = Set(page.records.map(\.id))
+                    self.runs = restored + live.filter { !pageIDs.contains($0.id) }
+                    self.historyPageOffset = page.offset
+                    self.historyTotalCount = page.totalCount
+                    self.historyError = nil
+                case .failure(let error):
+                    self.historyError = error.localizedDescription
+                }
+            }
         }
+    }
+
+    func deleteSavedRun(_ id: UUID) {
+        guard !locked, let directory = workingDirectory,
+              historyError == nil, unsavedRuns[id] == nil,
+              let selectedRun = runs.first(where: { $0.id == id }),
+              selectedRun.isPersisted, Self.isCompletedDeletableRun(selectedRun.status) else { return }
+        let protectedIDs = Set(runs.filter { !$0.isPersisted || !$0.isFinished || $0.status == .interrupted }.map(\.id)).union(unsavedRuns.keys)
+        let store = historyStore
+        let requestID = UUID()
+        historyRequestID = requestID
+        historyLoading = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try store.delete(workspace: directory, id: id, protecting: protectedIDs) }
+            DispatchQueue.main.async {
+                guard self.historyRequestID == requestID,
+                      self.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
+                self.historyLoading = false
+                switch result {
+                case .success:
+                    self.runs.removeAll { $0.id == id }
+                    self.historyError = nil
+                    self.reloadRunHistory()
+                case .failure(let error): self.historyError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func applyRunHistoryRetention(days: Int) {
+        guard !locked, historyError == nil, unsavedRuns.isEmpty, let directory = workingDirectory else { return }
+        let protectedIDs = Set(runs.filter { !$0.isPersisted || !$0.isFinished || $0.status == .interrupted }.map(\.id)).union(unsavedRuns.keys)
+        let store = historyStore
+        let cutoff = Calendar.current.date(byAdding: .day, value: -max(days, 1), to: Date()) ?? Date()
+        let requestID = UUID()
+        historyRequestID = requestID
+        historyLoading = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result {
+                let ids = try store.retentionCandidates(workspace: directory, before: cutoff, protecting: protectedIDs)
+                try store.delete(workspace: directory, ids: ids, protecting: protectedIDs)
+                return ids
+            }
+            DispatchQueue.main.async {
+                guard self.historyRequestID == requestID,
+                      self.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
+                self.historyLoading = false
+                switch result {
+                case .success(let ids):
+                    self.runs.removeAll { ids.contains($0.id) }
+                    self.reloadRunHistory()
+                case .failure(let error): self.historyError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func exportSavedRun(_ id: UUID, to destination: URL) {
+        guard historyError == nil, unsavedRuns[id] == nil, let directory = workingDirectory,
+              runs.first(where: { $0.id == id })?.isPersisted == true else { return }
+        let store = historyStore
+        let requestID = UUID()
+        historyActionRequestID = requestID
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try store.export(id: id, workspace: directory, to: destination) }
+            DispatchQueue.main.async {
+                guard self.historyActionRequestID == requestID,
+                      self.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
+                if case .failure(let error) = result { self.historyError = "Run export failed. \(error.localizedDescription)" }
+            }
+        }
+    }
+
+    private static func isCompletedDeletableRun(_ status: RunStatus) -> Bool {
+        [.applied, .discarded, .errored, .canceled, .expired].contains(status)
     }
 
     @discardableResult
@@ -703,19 +896,88 @@ class Workspace: ObservableObject {
         return true
     }
 
-    func queueRun(_ message: String? = nil) {
-        guard !locked, isValid, historyError == nil, let directory = workingDirectory else { return }
+    func queueRun(_ message: String? = nil, onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
+        guard !locked, !historyLoading, isValid, historyError == nil, let directory = workingDirectory else { return }
         refreshExecutionContext()
-        do {
-            let record = try historyStore.create(workspace: directory, terraformVersion: terraformVersion, message: message,
-                                                 selectedTerraformWorkspace: selectedTerraformWorkspace,
-                                                 backendIdentity: backendIdentity)
-            historyError = nil
-            let run = TerraformRun(workspace: self, record: record, restored: false)
-            runs.append(run)
-            run.doPlan { _, _ in }
-        } catch {
-            historyError = "Cannot start a run until its history can be saved. \(error.localizedDescription)"
+        let canonicalDirectory = RunHistoryStore.workspacePath(directory)
+        let terraformVersion = self.terraformVersion
+        let selectedTerraformWorkspace = self.selectedTerraformWorkspace
+        let backendIdentity = self.backendIdentity
+        let executionContext = executionContextIdentifier
+        let store = historyStore
+        let pageLimit = historyPageSize
+        let requestID = UUID()
+        historyRequestID = requestID
+        historyLoading = true
+        lock()
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result: Result<(RunRecord, RunHistoryStore.Page), Error> = Result {
+                let record = try store.create(workspace: directory, terraformVersion: terraformVersion, message: message,
+                                              selectedTerraformWorkspace: selectedTerraformWorkspace, backendIdentity: backendIdentity)
+                do {
+                    let page = try store.loadPage(workspace: directory, offset: 0, limit: pageLimit)
+                    return (record, page)
+                } catch {
+                    var retiredRecord = record
+                    retiredRecord.status = .canceled
+                    retiredRecord.updatedAt = max(Date(), record.createdAt.addingTimeInterval(0.001))
+                    try? store.save(retiredRecord, workspace: directory)
+                    throw error
+                }
+            }
+            DispatchQueue.main.async {
+                guard self.historyRequestID == requestID else {
+                    if case .success(let (record, _)) = result {
+                        DispatchQueue.global(qos: .utility).async {
+                            var retiredRecord = record
+                            retiredRecord.status = .canceled
+                            retiredRecord.updatedAt = max(Date(), record.createdAt.addingTimeInterval(0.001))
+                            try? store.save(retiredRecord, workspace: directory)
+                        }
+                    }
+                    return
+                }
+                let contextIsCurrent = self.workingDirectory.map(RunHistoryStore.workspacePath) == canonicalDirectory
+                    && self.terraformVersion == terraformVersion
+                    && self.executionContextIdentifier == executionContext
+                    && self.isValid
+                guard contextIsCurrent else {
+                    self.historyLoading = false
+                    self.unlock()
+                    if case .success(let (record, _)) = result {
+                        DispatchQueue.global(qos: .utility).async {
+                            var retiredRecord = record
+                            retiredRecord.status = .canceled
+                            retiredRecord.updatedAt = max(Date(), record.createdAt.addingTimeInterval(0.001))
+                            try? store.save(retiredRecord, workspace: directory)
+                        }
+                    }
+                    return
+                }
+                self.historyLoading = false
+                self.unlock()
+                switch result {
+                case .success(let (record, page)):
+                    self.historyError = nil
+                    let run = TerraformRun(workspace: self, record: record, restored: false)
+                    let retained = self.runs.filter {
+                        !$0.isRestored && (!$0.isPersisted || !$0.isFinished || $0.status == .interrupted || self.unsavedRuns[$0.id] != nil)
+                    }
+                    let retainedByID = Dictionary(uniqueKeysWithValues: retained.map { ($0.id, $0) })
+                    let pageRuns = page.records.map { pageRecord in
+                        pageRecord.id == record.id ? run : (retainedByID[pageRecord.id] ?? TerraformRun(workspace: self, record: pageRecord, restored: true))
+                    }
+                    let pageIDs = Set(page.records.map(\.id))
+                    self.runs = pageRuns + retained.filter { !pageIDs.contains($0.id) }
+                    self.historyPageOffset = page.offset
+                    self.historyTotalCount = page.totalCount
+                    onCreated?(run.id)
+                    run.doPlan { _, _ in }
+                case .failure(let error):
+                    self.historyError = "Cannot start a run until its history can be saved. \(error.localizedDescription)"
+                }
+            }
         }
     }
 

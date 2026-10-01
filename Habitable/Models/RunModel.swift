@@ -6,6 +6,7 @@ import Foundation
 /// representations from every user-visible or persisted Terraform result.
 /// The snapshot is immutable so edits made while a command is running cannot
 /// change which values are protected.
+@MainActor
 struct SensitiveInputRedactor {
     private let literals: [(value: String, replacement: String)]
     private let numbers: Set<String>
@@ -133,15 +134,16 @@ struct SensitiveInputRedactor {
     }
 }
 
-enum RunStatus: String, Codable {
+enum RunStatus: String, Codable, Sendable {
     case pending = "PENDING", planning = "PLANNING", planned = "PLANNED"
     case confirmed = "CONFIRMED", applying = "APPLYING", applied = "APPLIED"
     case discarded = "DISCARDED", errored = "ERRORED", canceled = "CANCELED"
     case expired = "EXPIRED", interrupted = "INTERRUPTED"
 }
 
+@MainActor
 class TerraformRun: ObservableObject, Identifiable {
-    var id = UUID()
+    nonisolated let id: UUID
     var number = 0
     private weak var workspace: Workspace?
     var createdAt = Date()
@@ -162,6 +164,8 @@ class TerraformRun: ObservableObject, Identifiable {
     @Published var status: RunStatus = .pending
     @Published private var activeCommand: TerraformCommandHandle?
     @Published private(set) var isCanceling = false
+
+    var isPersisted: Bool { stored }
 
     var canCancel: Bool { activeCommand != nil && [.planning, .applying].contains(status) }
 
@@ -220,6 +224,7 @@ class TerraformRun: ObservableObject, Identifiable {
 
     // Construction never launches a command: queueRun saves the initial record first.
     init(workspace: Workspace) {
+        id = UUID()
         self.workspace = workspace
         workspaceDirectory = workspace.workingDirectory
         terraformVersion = workspace.terraformVersion
@@ -228,8 +233,9 @@ class TerraformRun: ObservableObject, Identifiable {
     }
 
     init(workspace: Workspace, record: RunRecord, restored: Bool) {
+        id = record.id
         self.workspace = workspace
-        id = record.id; number = record.number; createdAt = record.createdAt
+        number = record.number; createdAt = record.createdAt
         updatedAt = record.updatedAt; message = record.message
         terraformVersion = record.terraformVersion
         selectedTerraformWorkspace = record.selectedTerraformWorkspace ?? selectedTerraformWorkspace
@@ -412,6 +418,6 @@ class TerraformRun: ObservableObject, Identifiable {
 }
 
 extension TerraformRun: Hashable {
-    func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
-    static func ==(lhs: TerraformRun, rhs: TerraformRun) -> Bool { lhs === rhs }
+    nonisolated func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+    nonisolated static func ==(lhs: TerraformRun, rhs: TerraformRun) -> Bool { lhs === rhs }
 }

@@ -27,6 +27,7 @@ private func isTerraformIdentifier(_ key: String) -> Bool {
     key.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
 }
 
+@MainActor
 class TerraformVariable: ObservableObject {
     var id = UUID()
     @Published var key: String = ""
@@ -57,6 +58,7 @@ class TerraformVariable: ObservableObject {
     }
 }
 
+@MainActor
 class EnvironmentVariable: ObservableObject {
     var id = UUID()
     @Published var key: String = ""
