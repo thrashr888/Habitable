@@ -23,7 +23,14 @@ struct DiagnosticCodeView: View {
 }
 
 struct DiagnosticView: View {
-    @State var diagnostic: DiagnosticSummary
+    var diagnostic: DiagnosticSummary
+    var workingDirectory: URL? = nil
+
+    private var sourceURL: URL? {
+        guard let filename = diagnostic.range?.filename else { return nil }
+        if filename.hasPrefix("/") { return URL(fileURLWithPath: filename) }
+        return workingDirectory?.appendingPathComponent(filename)
+    }
     
 //    var sentence: String {
 //        var out = ""
@@ -42,9 +49,15 @@ struct DiagnosticView: View {
         HStack {
             if let filename = diagnostic.range?.filename {
                 Text("on")
-                // TODO add the working directory to this filename so the link works
-                Link(filename, destination: URL(fileURLWithPath: filename, isDirectory: false))
-                    .foregroundColor(.accentColor)
+                if let sourceURL {
+                    Link(filename, destination: sourceURL)
+                        .foregroundColor(.accentColor)
+                } else {
+                    Text(filename)
+                }
+                if let line = diagnostic.range?.start?.line, line > 0 {
+                    Text("line \(line)")
+                }
                 if let context = diagnostic.snippet?.context {
                     Text(", in \(context):")
                 }
@@ -72,6 +85,7 @@ struct DiagnosticView: View {
                 Text("\(detail)")
             }
         }
+        .textSelection(.enabled)
         .padding(.all)
         .border(Color.red, width: 1)
     }

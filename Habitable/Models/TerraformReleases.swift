@@ -2,7 +2,7 @@ import Combine
 import CryptoKit
 import Foundation
 
-struct TerraformRelease: Identifiable, Equatable {
+struct TerraformRelease: Identifiable, Equatable, Sendable {
     let version: String
     var id: String { version }
 
@@ -18,13 +18,16 @@ struct TerraformRelease: Identifiable, Equatable {
     }
 }
 
-struct TerraformReleaseError: LocalizedError {
+struct TerraformReleaseError: LocalizedError, Sendable {
     let message: String
     var errorDescription: String? { message }
 }
 
 /// Uses the machine-readable catalog behind HashiCorp's official releases page.
-struct TerraformReleaseService {
+struct TerraformReleaseService: Sendable {
+    typealias Fetch = @Sendable (URL) async throws -> Data
+    typealias ProgressHandler = @MainActor @Sendable (String) async -> Void
+
     static let sourceURL = URL(string: "https://releases.hashicorp.com/terraform/")!
     static let selectionKey = "managedTerraformVersion"
     #if arch(arm64)
@@ -37,10 +40,10 @@ struct TerraformReleaseService {
 
     let directory: URL
     let architecture: String
-    let fetch: (URL) async throws -> Data
+    let fetch: Fetch
 
     init(directory: URL = Self.defaultDirectory, architecture: String = Self.architecture,
-         fetch: @escaping (URL) async throws -> Data = TerraformReleaseService.download) {
+         fetch: @escaping Fetch = TerraformReleaseService.download) {
         self.directory = directory
         self.architecture = architecture
         self.fetch = fetch
@@ -105,7 +108,7 @@ struct TerraformReleaseService {
         }
     }
 
-    func install(_ release: TerraformRelease, progress: @escaping (String) async -> Void = { _ in }) async throws -> URL {
+    func install(_ release: TerraformRelease, progress: @escaping ProgressHandler = { _ in }) async throws -> URL {
         guard TerraformRelease.components(release.version) != nil, ["arm64", "amd64"].contains(architecture) else {
             throw TerraformReleaseError(message: "Invalid Terraform release or Mac architecture.")
         }
@@ -231,8 +234,8 @@ final class TerraformReleaseCatalog: ObservableObject {
         error = nil
         defer { isInstalling = false; status = nil }
         do {
-            let url = try await service.install(release) { message in
-                await MainActor.run { self.status = message }
+            let url = try await service.install(release) { [weak self] message in
+                self?.status = message
             }
             installed = service.installedReleases()
             return url

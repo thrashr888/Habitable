@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import HabitableCore
 
+@MainActor
 final class SensitiveRunTests: XCTestCase {
     @MainActor
     func testRunSnapshotRedactsPlanReviewApplyErrorsAndHistoryButKeepsSavedPlanBytes() async throws {
@@ -44,8 +45,10 @@ final class SensitiveRunTests: XCTestCase {
         try script.write(to: source, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: source.path)
 
-        let workspace = Workspace(restoreLastDirectory: false, historyStore: history,
-                                  commandCoordinator: WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination")))
+        let defaults = UserDefaults(suiteName: "Habitable-sensitive-\(UUID().uuidString)")!
+        let workspace = Workspace(restoreLastDirectory: false, defaults: defaults, historyStore: history,
+                                  commandCoordinator: WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination")),
+                                  descriptionStore: WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions")))
         workspace.runner = Runner(executableURL: source,
                                   environment: ["PATH": "/bin:/usr/bin", "APP_TOKEN": "environment-secret-value",
                                                 "PLAN_PATH": root.appendingPathComponent("temporary-plan").path,

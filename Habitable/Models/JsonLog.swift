@@ -9,7 +9,7 @@ import Combine
 import Foundation
 import SwiftyJSON
 
-enum ChangeActions: String {
+enum ChangeActions: String, Sendable {
     case NoOp = "noop"
     case Create = "create"
     case Read = "read"
@@ -18,7 +18,7 @@ enum ChangeActions: String {
     case Delete = "delete"
 }
 
-enum MessageTypes: String {
+enum MessageTypes: String, Sendable {
     // Generic messages
     case Version = "version"
     case Log = "log"
@@ -71,7 +71,7 @@ protocol tfMessage {
     var message: String? { get }
 }
 
-struct LogMessage: tfMessage {
+struct LogMessage: tfMessage, Sendable {
     var id = UUID()
     var type: MessageTypes = .Log
     var message: String?
@@ -83,7 +83,7 @@ func transformLog(_ log: JSON) -> LogMessage {
     )
 }
 
-struct VersionMessage: tfMessage {
+struct VersionMessage: tfMessage, Sendable {
     var id = UUID()
     var type: MessageTypes = .Version
     var message: String?
@@ -97,14 +97,14 @@ func transformVersion(_ log: JSON) -> VersionMessage {
     )
 }
 
-struct ChangeSummaryChanges {
+struct ChangeSummaryChanges: Sendable {
     var add: Int
     var change: Int
     var remove: Int
     var operation: String?
 }
 
-struct ChangeSummaryMessage: tfMessage {
+struct ChangeSummaryMessage: tfMessage, Sendable {
     var id = UUID()
     var type: MessageTypes = .ChangeSummary
     var message: String?
@@ -154,13 +154,27 @@ struct OutputsMessage: tfMessage {
     var outputs: [Output] = []
 }
 
+/// Terraform values are valid JSON. Foundation preserves deeply nested objects
+/// and escapes their keys without SwiftyJSON's optional-value depth limit.
+func terraformOutputValue(_ value: JSON) -> String? {
+    if let string = value.string { return string }
+    guard value.exists(),
+          let data = try? JSONSerialization.data(withJSONObject: value.object,
+                                                options: [.fragmentsAllowed, .sortedKeys]) else { return nil }
+    return String(data: data, encoding: .utf8)
+}
+
+func terraformOutputType(_ type: JSON) -> String? {
+    type.string ?? type.arrayValue.first?.string
+}
+
 func transformOutputs(_ log: JSON) -> OutputsMessage {
     var outputs: [Output] = []
     for (k, out) in log["outputs"] {
         let add = Output(
             key: k,
-            type: out["type"].string,
-            value: out["value"].rawString([.castNilToNSNull: true]),
+            type: terraformOutputType(out["type"]),
+            value: terraformOutputValue(out["value"]),
             sensitive: out["sensitive"].boolValue
         )
         outputs.append(add)
@@ -171,7 +185,7 @@ func transformOutputs(_ log: JSON) -> OutputsMessage {
     )
 }
 
-struct DiagnosticRangeSnippet {
+struct DiagnosticRangeSnippet: Sendable {
     var context: String?
     var code: String?
     var startLine: Int
@@ -180,19 +194,19 @@ struct DiagnosticRangeSnippet {
     var values: [String] = []
 }
 
-struct DiagnosticRangeLocation {
+struct DiagnosticRangeLocation: Sendable {
     var line: Int
     var column: Int
     var byte: Int
 }
 
-struct DiagnosticRange {
+struct DiagnosticRange: Sendable {
     var filename: String?
     var start: DiagnosticRangeLocation?
     var end: DiagnosticRangeLocation?
 }
 
-struct DiagnosticSummary {
+struct DiagnosticSummary: Sendable {
     var severity: String?
     var summary: String?
     var detail: String?
@@ -200,7 +214,7 @@ struct DiagnosticSummary {
     var snippet: DiagnosticRangeSnippet?
 }
 
-struct DiagnosticMessage: tfMessage {
+struct DiagnosticMessage: tfMessage, Sendable {
     var id = UUID()
     var type: MessageTypes = .Diagnostic
     var message: String?
@@ -244,7 +258,7 @@ func transformDiagnostic(_ log: JSON) -> DiagnosticMessage {
     )
 }
 
-struct HookMessage: tfMessage {
+struct HookMessage: tfMessage, Sendable {
     var id = UUID()
     var type: MessageTypes
     var message: String?
@@ -290,7 +304,7 @@ func transformHook(_ log: JSON) -> HookMessage? {
     )
 }
 
-struct Resource {
+struct Resource: Sendable {
     var addr: String
     var module: String?
     var resource: String?
@@ -300,13 +314,13 @@ struct Resource {
     var resource_key: String?
 }
 
-struct PlannedChangeSummary {
+struct PlannedChangeSummary: Sendable {
     var address: String
     var resource: Resource
     var action: ChangeActions = .NoOp
 }
 
-struct PlannedChangeMessage: tfMessage {
+struct PlannedChangeMessage: tfMessage, Sendable {
     var id = UUID()
     var type: MessageTypes = .PlannedChange
     var message: String?
@@ -340,8 +354,9 @@ func transformPlannedChange(_ log: JSON) -> PlannedChangeMessage {
 }
 
 // "Resources"
+@MainActor
 class ShowResource: ObservableObject, Identifiable {
-    var id = UUID()
+    nonisolated let id = UUID()
     var address: String?
     var mode: String?
     var type: String?
@@ -362,11 +377,11 @@ class ShowResource: ObservableObject, Identifiable {
 }
 
 extension ShowResource: Hashable {
-    func hash(into hasher: inout Hasher) {
+    nonisolated func hash(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(self))
     }
 
-    static func ==(lhs: ShowResource, rhs: ShowResource) -> Bool {
+    nonisolated static func ==(lhs: ShowResource, rhs: ShowResource) -> Bool {
         return lhs === rhs
     }
 }
@@ -390,13 +405,14 @@ struct ShowMessage {
     let created_at = Date()
 }
 
+@MainActor
 func transformShow(_ log: JSON) -> ShowMessage {
     var outputs: [Output] = []
     for (k, out) in log["values"]["outputs"] {
         let add = Output(
             key: k,
-            type: nil, // show has no type
-            value: out["value"].rawString([.castNilToNSNull: true]),
+            type: terraformOutputType(out["type"]),
+            value: terraformOutputValue(out["value"]),
             sensitive: out["sensitive"].boolValue
         )
         outputs.append(add)

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
         BC2200000000000000000001 /* RunHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2200000000000000000002 /* RunHistory.swift */; };
+		BC2300000000000000000001 /* WorkspaceDescriptionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2300000000000000000002 /* WorkspaceDescriptionStore.swift */; };
 		BB1100000000000000000001 /* TerraformReleases.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1100000000000000000002 /* TerraformReleases.swift */; };
 		8A926B4C2648AA1E00FDBA5C /* TextLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4B2648AA1E00FDBA5C /* TextLog.swift */; };
 		8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B4D2648AA4100FDBA5C /* Error.swift */; };
@@ -51,6 +52,7 @@
 
 /* Begin PBXFileReference section */
         BC2200000000000000000002 /* RunHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunHistory.swift; sourceTree = "<group>"; };
+		BC2300000000000000000002 /* WorkspaceDescriptionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDescriptionStore.swift; sourceTree = "<group>"; };
 		BB1100000000000000000002 /* TerraformReleases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformReleases.swift; sourceTree = "<group>"; };
 		8A926B4B2648AA1E00FDBA5C /* TextLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLog.swift; sourceTree = "<group>"; };
 		8A926B4D2648AA4100FDBA5C /* Error.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Error.swift; sourceTree = "<group>"; };
@@ -125,6 +127,7 @@
 				8AA12B1B26427AC30048A4A9 /* Runner.swift */,
 				BB1100000000000000000002 /* TerraformReleases.swift */,
                 BC2200000000000000000002 /* RunHistory.swift */,
+				BC2300000000000000000002 /* WorkspaceDescriptionStore.swift */,
 				8A926B592648C62A00FDBA5C /* RunModel.swift */,
 				8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */,
 				8A926B7E2653742000FDBA5C /* VariablesModels.swift */,
@@ -308,6 +311,7 @@
 				8AA12B1C26427AC30048A4A9 /* Runner.swift in Sources */,
 				BB1100000000000000000001 /* TerraformReleases.swift in Sources */,
                 BC2200000000000000000001 /* RunHistory.swift in Sources */,
+				BC2300000000000000000001 /* WorkspaceDescriptionStore.swift in Sources */,
 				8A926B79264FA36900FDBA5C /* OutputPage.swift in Sources */,
 				8AF213252639E8BC009F97C2 /* HabitableApp.swift in Sources */,
 				8A926B4E2648AA4100FDBA5C /* Error.swift in Sources */,
@@ -455,7 +459,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.thrasher.paul.Habitable;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -480,7 +484,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.thrasher.paul.Habitable;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};

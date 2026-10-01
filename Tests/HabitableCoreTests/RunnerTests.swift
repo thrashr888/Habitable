@@ -1,6 +1,7 @@
 import XCTest
 @testable import HabitableCore
 
+@MainActor
 final class RunnerTests: XCTestCase {
     private var directory: URL!
 

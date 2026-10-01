@@ -10,30 +10,32 @@ import SwiftUI
 struct OutputPageView: View {
     var output: Output
     var body: some View {
-        VStack(alignment: .leading) {
-            Text("Name")
-                .font(.headline)
-            Text("\(output.key)")
-            
-            if let type = output.type {
-                Text("Type")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Name")
+                    .font(.headline)
+                Text(output.key)
+
+                if let type = output.type {
+                    Text("Type")
+                        .font(.headline)
+                        .padding(.top)
+                    Text(type)
+                }
+
+                Text("Value")
                     .font(.headline)
                     .padding(.top)
-                Text("\(type)")
+                if output.sensitive {
+                    Text("(sensitive)")
+                } else {
+                    Text(output.value ?? "Value unavailable")
+                }
             }
-            
-            Text("Value")
-                .font(.headline)
-                .padding(.top)
-            if output.sensitive {
-                Text("(sensitive)")
-            } else {
-                Text("\(output.value ?? "")")
-            }
-            
-            Spacer()
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
         }
-        .padding(.all)
-        .frame(minWidth: 0, idealWidth: 100, maxWidth: .infinity, minHeight: 0, idealHeight: 100, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

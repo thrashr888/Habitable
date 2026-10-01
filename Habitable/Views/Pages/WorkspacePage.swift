@@ -10,12 +10,14 @@ import SwiftUI
 struct CheckView: View {
     let label: String
     let check: Bool
+    var failureIsError = true
     var body: some View {
         HStack {
             if check {
                 Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
             } else {
-                Image(systemName: "nosign").foregroundColor(.red)
+                Image(systemName: failureIsError ? "nosign" : "minus.circle")
+                    .foregroundStyle(failureIsError ? Color.red : Color.secondary)
             }
             Text(label)
         }
@@ -39,8 +41,8 @@ struct WorkspacePage: View {
 
             CheckView(label: "Initialized", check: workspace.isInitialized)
             CheckView(label: "Config is valid", check: workspace.isValid)
-            CheckView(label: "State available", check: workspace.hasState)
-            CheckView(label: ".tfvars file exists", check: workspace.hasVariables)
+            CheckView(label: "State available", check: workspace.hasState, failureIsError: false)
+            CheckView(label: ".tfvars file exists (optional)", check: workspace.hasVariables, failureIsError: false)
 
             if workspace.workingDirectory == nil {
                 Text("Working directory")

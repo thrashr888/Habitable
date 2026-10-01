@@ -8,7 +8,7 @@
 import Combine
 import Foundation
 
-enum States: String {
+enum States: String, Sendable {
     case NoOp = "noop"
     case Applied = "applied"
     case Applying = "applying"
@@ -56,14 +56,14 @@ let applyErroredActionToState: [ChangeActions: States] = [
     ChangeActions.Delete: States.DeleteErrored,
 ]
 
-struct Provisioner {
+struct Provisioner: Sendable {
     var provisioner: String
     var output: [String] = []
     var state: States
     var done = false
 }
 
-struct Stage {
+struct Stage: Sendable {
     var id = UUID()
     var state: States
     var identifier: String?
@@ -73,7 +73,7 @@ struct Stage {
     var errored = false
 }
 
-struct StageUpdate {
+struct StageUpdate: Sendable {
     var state: States?
     var identifier: String?
     var elapsed: String?
@@ -82,6 +82,7 @@ struct StageUpdate {
     var errored: Bool?
 }
 
+@MainActor
 class ResourceState: ObservableObject {
     var id = UUID()
     var address: String

@@ -47,12 +47,17 @@ struct ContentView: View {
             selectedResource = nil
             selectedOutput = nil
         }
+        .onChange(of: workspace.runs.map(\.id)) { ids in
+            if let selectedRun, !ids.contains(selectedRun) {
+                self.selectedRun = nil
+            }
+        }
     }
 
     private var sidebar: some View {
         List(selection: $selection) {
             Label("Workspace", systemImage: "folder").tag(NavigationItem.workspace)
-            Label("Runs (\(workspace.runs.count))", systemImage: "list.bullet.rectangle").tag(NavigationItem.runs)
+            Label("Runs (\(max(workspace.historyTotalCount, workspace.runs.count)))", systemImage: "list.bullet.rectangle").tag(NavigationItem.runs)
             Label("Resources (\(workspace.state?.resources.count ?? 0))", systemImage: "globe").tag(NavigationItem.resources)
             Label("Outputs (\(workspace.state?.outputs.count ?? 0))", systemImage: "chevron.right.square").tag(NavigationItem.outputs)
             Label("Variables (\(workspace.terraformVariables.count))", systemImage: "dollarsign.circle").tag(NavigationItem.variables)

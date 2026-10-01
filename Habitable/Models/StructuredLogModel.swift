@@ -9,6 +9,7 @@ import Combine
 import Foundation
 import SwiftyJSON
 
+@MainActor
 class StructuredLog: ObservableObject {
     var id = UUID()
     var logs: [LogMessage] = []
@@ -20,7 +21,7 @@ class StructuredLog: ObservableObject {
     var createdAt = Date()
 }
 
-enum PlanReviewedValue: Equatable {
+enum PlanReviewedValue: Equatable, Sendable {
     case absent
     case value(String)
     case unknown
@@ -36,7 +37,7 @@ enum PlanReviewedValue: Equatable {
     }
 }
 
-struct PlanAttributeChange: Identifiable, Equatable {
+struct PlanAttributeChange: Identifiable, Equatable, Sendable {
     let path: String
     let before: PlanReviewedValue
     let after: PlanReviewedValue
@@ -44,7 +45,7 @@ struct PlanAttributeChange: Identifiable, Equatable {
     var id: String { path }
 }
 
-struct PlanResourceChange: Identifiable, Equatable {
+struct PlanResourceChange: Identifiable, Equatable, Sendable {
     let address: String
     let action: String
     let attributes: [PlanAttributeChange]
@@ -54,7 +55,7 @@ struct PlanResourceChange: Identifiable, Equatable {
     var isReplacement: Bool { action == "replace" }
 }
 
-struct TerraformPlan: Equatable {
+struct TerraformPlan: Equatable, Sendable {
     let resourceChanges: [PlanResourceChange]
 }
 
@@ -64,8 +65,15 @@ func transformPlan(_ log: JSON) -> TerraformPlan {
 
 func parseTerraformPlan(_ output: String) -> TerraformPlan? {
     guard let data = output.data(using: .utf8), let json = try? JSON(data: data),
-          json.type == .dictionary, json["format_version"].string != nil,
-          json["resource_changes"].type == .array else { return nil }
+          json.type == .dictionary, json["format_version"].string != nil else { return nil }
+    if let resourceChanges = json.dictionaryObject?["resource_changes"] {
+        guard JSON(resourceChanges).type == .array else { return nil }
+    } else {
+        // Terraform omits resource_changes for output-only plans. A planned_values
+        // object is required to distinguish that valid empty resource plan from
+        // incomplete `show -json` output.
+        guard json["planned_values"].type == .dictionary else { return nil }
+    }
     return transformPlan(json)
 }
 
