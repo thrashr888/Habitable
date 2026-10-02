@@ -110,6 +110,7 @@ struct TerraformVersionSettings: View {
                 Text(workspace.managedTerraformVersion == nil ? "System" : "Managed")
                     .foregroundStyle(.secondary)
             }
+            .id("\(workspace.terraformVersion)-\(workspace.managedTerraformVersion ?? "system")")
             if !catalog.available.isEmpty {
                 Picker("Release", selection: $selection) {
                     ForEach(catalog.available) { release in
