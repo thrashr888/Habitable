@@ -194,6 +194,49 @@ struct DiagnosticRangeSnippet: Sendable {
     var values: [String] = []
 }
 
+struct DiagnosticSnippetLine: Sendable {
+    var number: Int?
+    var text: String
+    /// Terraform 1.16.5 emits these as UTF-8 byte offsets into the snippet.
+    /// Keep them as byte offsets until the renderer verifies UTF-8 boundaries.
+    var highlight: Range<Int>?
+}
+
+func diagnosticSnippetLines(_ snippet: DiagnosticRangeSnippet) -> [DiagnosticSnippetLine] {
+    guard let code = snippet.code else { return [] }
+    let bytes = Array(code.utf8)
+    let requestedStart = snippet.highlightStartOffset
+    let requestedEnd = snippet.highlightEndOffset
+    func isUTF8Boundary(_ offset: Int) -> Bool {
+        guard offset >= 0, offset <= bytes.count else { return false }
+        let index = code.utf8.index(code.utf8.startIndex, offsetBy: offset)
+        return String.Index(index, within: code) != nil
+    }
+    let startIsBoundary = isUTF8Boundary(requestedStart)
+    let endIsBoundary = isUTF8Boundary(requestedEnd)
+    let validHighlight = startIsBoundary && endIsBoundary && requestedEnd > requestedStart
+    let highlightStart = requestedStart
+    let highlightEnd = requestedEnd
+
+    var result: [DiagnosticSnippetLine] = []
+    var lineStart = 0
+    var lineNumber = 0
+    for index in 0...bytes.count {
+        guard index == bytes.count || bytes[index] == 0x0A else { continue }
+        let lineText = String(decoding: bytes[lineStart..<index], as: UTF8.self)
+        let overlapStart = max(lineStart, highlightStart)
+        let overlapEnd = min(index, highlightEnd)
+        let lineHighlight = validHighlight && overlapEnd > overlapStart
+            ? (overlapStart - lineStart)..<(overlapEnd - lineStart) : nil
+        let (candidateNumber, overflow) = snippet.startLine.addingReportingOverflow(lineNumber)
+        let number = snippet.startLine > 0 && !overflow ? candidateNumber : nil
+        result.append(DiagnosticSnippetLine(number: number, text: lineText, highlight: lineHighlight))
+        lineNumber += 1
+        lineStart = index + 1
+    }
+    return result
+}
+
 struct DiagnosticRangeLocation: Sendable {
     var line: Int
     var column: Int
@@ -247,7 +290,7 @@ func transformDiagnostic(_ log: JSON) -> DiagnosticMessage {
             snippet: DiagnosticRangeSnippet(
                 context: s["context"].string,
                 code: s["code"].string,
-                startLine: r["snippet"]["start_line"].int ?? 0,
+                startLine: s["start_line"].int ?? 0,
                 highlightStartOffset: s["highlight_start_offset"].int ?? 0,
                 highlightEndOffset: s["highlight_end_offset"].int ?? 0,
                 values: s["values"].map({ (v, _) in

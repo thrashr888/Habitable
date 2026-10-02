@@ -3,6 +3,52 @@ import SwiftyJSON
 @testable import HabitableCore
 
 final class JsonLogTests: XCTestCase {
+    func testDiagnosticUsesSnippetStartLineAndPreservesHighlightOffsets() throws {
+        let fixture = JSON(parseJSON: #"{"type":"diagnostic","diagnostic":{"severity":"error","range":{"filename":"main.tf","start":{"line":4,"column":2,"byte":1},"end":{"line":4,"column":5,"byte":4},"snippet":{"start_line":99}},"snippet":{"code":"first\n🚀bad","start_line":10,"highlight_start_offset":10,"highlight_end_offset":13}}}"#)
+
+        let diagnostic = transformDiagnostic(fixture).diagnostic
+        let snippet = try XCTUnwrap(diagnostic.snippet)
+        XCTAssertEqual(snippet.startLine, 10)
+        let lines = diagnosticSnippetLines(snippet)
+        XCTAssertEqual(lines.map(\.number), [10, 11])
+        XCTAssertEqual(lines.map(\.text), ["first", "🚀bad"])
+        XCTAssertEqual(lines[0].highlight, nil)
+        XCTAssertEqual(lines[1].highlight, 4..<7)
+    }
+
+    func testDiagnosticSnippetKeepsReadableSourceWhenHighlightIsOutOfBounds() {
+        let lines = diagnosticSnippetLines(DiagnosticRangeSnippet(
+            context: nil, code: "source line", startLine: 3,
+            highlightStartOffset: 40, highlightEndOffset: 48
+        ))
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].number, 3)
+        XCTAssertEqual(lines[0].text, "source line")
+        XCTAssertNil(lines[0].highlight)
+    }
+
+    func testTerraformUnicodeByteOffsetsHighlightTheActualToken() {
+        let code = #"locals { broken = "🚀" + }"#
+        let lines = diagnosticSnippetLines(DiagnosticRangeSnippet(
+            context: "locals", code: code, startLine: 1,
+            highlightStartOffset: 27, highlightEndOffset: 28
+        ))
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0].text, code)
+        XCTAssertEqual(lines[0].highlight, 27..<28)
+        let bytes = Array(code.utf8)
+        XCTAssertEqual(String(decoding: bytes[27..<28], as: UTF8.self), "}")
+    }
+
+    func testDiagnosticSnippetDoesNotHighlightInsideUTF8Character() {
+        let lines = diagnosticSnippetLines(DiagnosticRangeSnippet(
+            context: nil, code: "🚀 bad", startLine: 1,
+            highlightStartOffset: 1, highlightEndOffset: 2
+        ))
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertNil(lines[0].highlight)
+    }
+
     @MainActor
     func testDeepOutputValuesRemainVisibleAndPreserveEscapedKeys() throws {
         var nested: Any = ["quote\"and\nnewline": "leaf"]
