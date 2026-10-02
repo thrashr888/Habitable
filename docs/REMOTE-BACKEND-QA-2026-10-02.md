@@ -19,9 +19,9 @@ With `TF_CLI_CONFIG_FILE` set in the app's launch environment to the Habitable-o
 
 Starting and stopping the output stream for `run-BF6VzZeqrvidjmsP` returned the local UI to Ready with a canceled message explaining that the remote run might continue. The API later reported this run as `planned_and_finished`. An earlier no-change apply attempt (`run-n4irUWWkxdQUrCuP`) failed and exposed the missing no-op apply guard; the guard was added before the successful follow-up above. These runs made no resource changes.
 
-The reusable minimal configuration is in [Tests/Fixtures/RemoteOutputsOnly/main.tf](../Tests/Fixtures/RemoteOutputsOnly/main.tf). Its dated workspace `habitable-et3-20261002` remains available in `pthrasher_v2` with auto-apply disabled and output-only state. If it is later removed, recreate it with Terraform version 1.6.6, remote execution, and auto-apply disabled, then run the fixture from this directory.
+The reusable minimal configuration is in [Tests/Fixtures/RemoteOutputsOnly/main.tf](../Tests/Fixtures/RemoteOutputsOnly/main.tf). Its dated workspace `habitable-et3-20261002` was removed after QA. To repeat this workflow, recreate the disposable workspace with remote execution and auto-apply disabled, then run the fixture from this directory. These observations used Terraform 1.6.6 in HCP.
 
-All six listed runs were terminal (`applied` or `planned_and_finished`) when cleanup was attempted. The scoped delete could not proceed: the sandbox blocked `tfctl` from creating its session directory, and the elevated request to run the exact-ID delete was rejected by automatic approval review as an irreversible remote workspace/state deletion lacking direct user authorization. The workspace remains intact; no workspace was deleted.
+All six listed runs were terminal (`applied` or `planned_and_finished`) before cleanup. Automatic approval review initially required direct authorization for irreversible remote workspace/state deletion. After the user explicitly authorized deleting Habitable test workspaces, the exact-ID delete succeeded on 2026-10-02. Subsequent lookups by workspace ID and organization/name returned Resource or path not found. No existing project workspace was deleted.
 
 ## Scope not covered
 
