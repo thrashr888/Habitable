@@ -538,8 +538,20 @@ class Workspace: ObservableObject {
         selectedTerraformWorkspace = environmentWorkspace?.isEmpty == false ? environmentWorkspace! : (fileWorkspace?.isEmpty == false ? fileWorkspace! : "default")
 
         let metadataURL = directory.appendingPathComponent(".terraform/terraform.tfstate")
-        guard let data = try? Data(contentsOf: metadataURL),
-              let json = try? JSON(data: data),
+        // The implicit local backend does not write a backend metadata file.
+        // Keep malformed or unreadable metadata unknown instead of calling it local.
+        let data: Data
+        do {
+            data = try Data(contentsOf: metadataURL)
+        } catch {
+            let fileError = error as NSError
+            let isMissing = fileError.domain == NSCocoaErrorDomain
+                && [NSFileReadNoSuchFileError, NSFileNoSuchFileError].contains(fileError.code)
+            backendIdentity = isMissing ? "local" : "unknown backend"
+            executionContextDisplay = "Workspace: \(selectedTerraformWorkspace) · Backend: \(backendIdentity)"
+            return
+        }
+        guard let json = try? JSON(data: data),
               let backend = json["backend"]["type"].string else {
             backendIdentity = "unknown backend"
             executionContextDisplay = "Workspace: \(selectedTerraformWorkspace) · Backend: \(backendIdentity)"
@@ -680,6 +692,7 @@ class Workspace: ObservableObject {
         // Clear stale inventory while querying the selected local or remote backend.
         state = nil
         hasState = false
+        errorMessage = nil
         lock()
         
         let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
@@ -689,16 +702,27 @@ class Workspace: ObservableObject {
             lease.release()
             
             if let res = res {
-                let json = parseJsonOutput(res)
+                guard let data = res.data(using: .utf8), let json = try? JSON(data: data),
+                      let object = json.dictionary else {
+                    self.errorMessage = "Terraform returned malformed state data."
+                    return
+                }
                 if json["values"].dictionary != nil, json["values"]["root_module"].dictionary != nil {
                     self.state = transformShow(json)
-                    self.errorMessage = nil
                     self.hasState = true
                     self.isValid = true
+                } else if json["values"].exists() == false,
+                          json["format_version"].string != nil,
+                          object.keys.allSatisfy({ ["format_version", "terraform_version"].contains($0) }) {
+                    // `terraform show -json` succeeds in a fresh local workspace and
+                    // returns only format_version (and optionally terraform_version).
+                    // That is a valid empty state, not an error.
+                    self.state = nil
+                    self.hasState = false
                 } else {
                     self.state = nil
                     self.hasState = false
-                    self.errorMessage = "Terraform returned no state data for the selected backend and workspace."
+                    self.errorMessage = "Terraform returned malformed state data."
                 }
             }
             

@@ -8,11 +8,14 @@
 import SwiftUI
 
 struct StructuredLogView: View {
-    var logs: StructuredLog
+    @ObservedObject var logs: StructuredLog
     @State var showLogs = false
     @State private var selection = 2
 
     var body: some View {
+        if !logs.isComplete {
+            liveProgress
+        } else {
         VStack(alignment: .leading) {
             TabView(selection: $selection,
                 content:  {
@@ -71,6 +74,48 @@ struct StructuredLogView: View {
             else if !logs.outputs.isEmpty { selection = 6 }
             else if !logs.logs.isEmpty { selection = 3 }
             else { selection = 4 }
+        }
+        }
+    }
+
+    private var liveProgress: some View {
+        List {
+            if logs.resources.isEmpty && logs.diagnostics.isEmpty && logs.logs.isEmpty {
+                Text("Waiting for Terraform events…").foregroundStyle(.secondary)
+            }
+            if !logs.diagnostics.isEmpty {
+                Section("Diagnostics") {
+                    ForEach(logs.diagnostics, id: \.id) { log in
+                        DiagnosticView(diagnostic: log.diagnostic)
+                    }
+                }
+            }
+            if !logs.resources.isEmpty {
+                Section("Resources") {
+                    ForEach(logs.resources, id: \.id) { resource in
+                        ResourceView(resourceState: resource)
+                    }
+                }
+            }
+            if let summary = logs.changeSummaries.last {
+                Section("Change summary") {
+                    ChangeSummaryView(changes: summary.changes)
+                }
+            }
+            if !logs.outputs.isEmpty {
+                Section("Outputs") {
+                    ForEach(logs.outputs, id: \.id) { output in
+                        OutputView(outputs: output.outputs)
+                    }
+                }
+            }
+            if !logs.logs.isEmpty {
+                Section("Activity") {
+                    ForEach(logs.logs, id: \.id) { log in
+                        if let message = log.message { LogView(message: message) }
+                    }
+                }
+            }
         }
     }
 }

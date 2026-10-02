@@ -8,36 +8,42 @@
 import SwiftUI
 
 struct ResourceView: View {
-    var resourceState: ResourceState
+    @ObservedObject var resourceState: ResourceState
     var resource: Resource {
         resourceState.resource
     }
 
     var body: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                Text("\(resourceState.action.rawValue)")
-                Text("\(resource.implied_provider ?? "terraform")")
-                Text("\(resource.addr)")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(resource.addr)
+                    .font(.body.monospaced())
+                    .textSelection(.enabled)
+                Spacer()
+                Text(resourceState.action.rawValue.capitalized)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             ForEach(resourceState.stages, id: \.id) { stage in
-                HStack {
-                    Text("stage: \(stage.state.rawValue)")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Image(systemName: stage.errored ? "exclamationmark.circle.fill" : (stage.done ? "checkmark.circle" : "clock"))
+                            .foregroundStyle(stage.errored ? Color.red : Color.secondary)
+                            .accessibilityHidden(true)
+                        Text(stage.state.rawValue.capitalized)
+                        Spacer()
+                        if let elapsed = stage.elapsed, let seconds = Double(elapsed), seconds > 0 {
+                            Text("\(elapsed)s").monospacedDigit().foregroundStyle(.secondary)
+                        }
+                    }
                     if let identifier = stage.identifier {
-                        Text("\(identifier)")
-                    }
-                    if let elapsed = stage.elapsed, elapsed > "0" {
-                        Text("\(elapsed) seconds")
-                    }
-                    if stage.done {
-                        Text("done")
-                    }
-                    if stage.errored {
-                        Text("errored")
+                        Text(identifier).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
+                .accessibilityElement(children: .combine)
             }
-            Divider()
         }
+        .padding(.vertical, 4)
     }
 }

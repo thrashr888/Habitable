@@ -103,7 +103,7 @@ final class SensitiveRunTests: XCTestCase {
         environment.value = "replacement-environment-value"
 
         guard let change = run.planDiff?.resourceChanges.first,
-              let input = change.attributes.first(where: { $0.path == "input" }) else {
+              let input = change.attributes.first(where: { $0.path == "$[\"input\"]" }) else {
             return XCTFail("Expected the saved plan review to include the input attribute")
         }
         XCTAssertEqual(input.after, .value("(sensitive)"))

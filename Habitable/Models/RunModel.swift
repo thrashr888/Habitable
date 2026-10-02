@@ -1,6 +1,7 @@
 import Combine
 import CoreFoundation
 import Foundation
+import SwiftyJSON
 
 /// Captures app-marked inputs at the start of a run and removes their literal
 /// representations from every user-visible or persisted Terraform result.
@@ -175,15 +176,44 @@ class TerraformRun: ObservableObject, Identifiable {
         activeCommand?.cancel()
     }
 
-    private func appendOutput(_ text: String) {
+    private func appendOutput(_ text: String, stream: TerraformOutputStream,
+                              decoder: NDJSONStreamDecoder, log: StructuredLog) {
         let safe = sensitiveInputRedactor.redact(text)
-        let lines = safe.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
-            guard let data = line.data(using: .utf8),
-                  let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let message = event["@message"] as? String else { return String(line) }
-            return message
-        }.joined(separator: "\n")
-        textOutput = String(((textOutput ?? "") + lines).suffix(262_144))
+        guard stream == .stdout else {
+            let current = textOutput ?? ""
+            let stderr = "[stderr] " + safe
+            textOutput = String((current + stderr).suffix(262_144))
+            consumeTerraformEvent(JSON(["type": "log", "@message": stderr.trimmingCharacters(in: .whitespacesAndNewlines)]), into: log)
+            return
+        }
+        decoder.append(safe).forEach { event in
+            appendLiveText(event)
+            consumeTerraformEvent(event, into: log)
+            updateChangeCounts(from: log)
+        }
+    }
+
+    private func appendLiveText(_ event: JSON) {
+        let visible = event["@message"].string ?? event.rawString() ?? ""
+        guard !visible.isEmpty else { return }
+        let current = textOutput ?? ""
+        textOutput = String((current + visible + "\n").suffix(262_144))
+    }
+
+    private func finishLiveOutput(decoder: NDJSONStreamDecoder, log: StructuredLog) {
+        decoder.finish().forEach { event in
+            appendLiveText(event)
+            consumeTerraformEvent(event, into: log)
+            updateChangeCounts(from: log)
+        }
+        log.isComplete = true
+    }
+
+    private func updateChangeCounts(from log: StructuredLog) {
+        guard let changes = log.changeSummaries.last else { return }
+        added = changes.changes.add
+        changed = changes.changes.change
+        destroyed = changes.changes.remove
     }
 
     private func finishCommand() {
@@ -214,12 +244,23 @@ class TerraformRun: ObservableObject, Identifiable {
     var canConfirm: Bool {
         !isRestored && status == .planned && apply == nil && workspace?.locked == false
             && workspace?.historyError == nil
+            && !isUnchangedHCPPlan
+    }
+    var isUnchangedHCPPlan: Bool {
+        guard usesHCPBackend, let planDiff else { return false }
+        return planDiff.resourceChanges.allSatisfy { $0.action == "no-op" }
+            && planDiff.outputChanges.allSatisfy { $0.action == "no-op" }
     }
     var canDiscard: Bool {
         !isRestored && status == .planned && apply == nil && workspace?.locked == false
     }
     var executionContextDescription: String {
         "Terraform workspace: \(selectedTerraformWorkspace) · Backend: \(backendIdentity)"
+    }
+
+    var usesHCPBackend: Bool {
+        backendIdentity == "cloud" || backendIdentity.hasPrefix("cloud #")
+            || backendIdentity == "remote" || backendIdentity.hasPrefix("remote #")
     }
 
     // Construction never launches a command: queueRun saves the initial record first.
@@ -310,10 +351,14 @@ class TerraformRun: ObservableObject, Identifiable {
         workspace.lock(self)
         let runner = workspace.runner
         textOutput = ""
+        let liveLog = StructuredLog()
+        let decoder = NDJSONStreamDecoder()
+        plan = liveLog
         activeCommand = runner.plan(workingDirectory: directory, runId: id.uuidString,
                     variables: variables,
                     environmentVariables: environmentVariables,
-                    onOutput: { [self] _, text in appendOutput(text) }) { [self, workspace] output, error in
+                    onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog) }) { [self, workspace] output, error in
+            finishLiveOutput(decoder: decoder, log: liveLog)
             planOutput = redactOutput(output ?? error?.output)
             plan = planOutput.map(handleNDJsonSuccess)
             guard error == nil else {
@@ -388,8 +433,12 @@ class TerraformRun: ObservableObject, Identifiable {
         workspace.lock(self)
         let runner = workspace.runner
         textOutput = ""
+        let liveLog = StructuredLog()
+        let decoder = NDJSONStreamDecoder()
+        apply = liveLog
         activeCommand = runner.apply(workingDirectory: directory, runId: id.uuidString,
-                                    onOutput: { [self] _, text in appendOutput(text) }) { [self, workspace] output, error in
+                                    onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog) }) { [self, workspace] output, error in
+            finishLiveOutput(decoder: decoder, log: liveLog)
             finishCommand()
             workspace.unlock()
             let coordinationError: String?
