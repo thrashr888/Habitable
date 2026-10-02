@@ -13,11 +13,14 @@ struct SettingsListPage: View {
     var body: some View {
         Form {
             Section("Workspace") {
-                LabeledContent("Working directory") {
-                    VStack(alignment: .trailing, spacing: 8) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Working directory").font(.headline)
+                    HStack(alignment: .top, spacing: 12) {
                         Text(workspace.workingDirectory?.path ?? "No folder selected")
                             .textSelection(.enabled)
-                            .multilineTextAlignment(.trailing)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         Button("Choose folder…", action: workspace.addUrl)
                             .disabled(workspace.locked)
                     }

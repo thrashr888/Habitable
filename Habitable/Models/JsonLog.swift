@@ -79,7 +79,7 @@ struct LogMessage: tfMessage, Sendable {
 
 func transformLog(_ log: JSON) -> LogMessage {
     return LogMessage(
-        message: log["@message"].string
+        message: log["@message"].string ?? log.rawString()
     )
 }
 

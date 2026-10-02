@@ -94,9 +94,18 @@ struct RunPageView: View {
                     Text(run.isCanceling ? "Stopping Terraform…" : "Terraform is running…")
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Cancel", action: run.cancel)
+                    Button(run.usesHCPBackend ? "Stop streaming" : "Cancel", action: run.cancel)
                         .disabled(run.isCanceling)
                 }
+                if run.usesHCPBackend {
+                    Text("Stopping the local command may leave the run active in HCP Terraform.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else if run.status == .canceled && run.usesHCPBackend {
+                Text("The local command stopped. The remote run may still be active in HCP Terraform.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             if run.canDiscard || run.canConfirm {
@@ -116,8 +125,13 @@ struct RunPageView: View {
                 }
                 .controlSize(.regular)
             }
+            if run.status == .planned && run.isUnchangedHCPPlan {
+                Text("This workspace is up to date. No apply is needed.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
 
-            if run.apply != nil || run.errorMessage != nil {
+            if !run.canCancel && (run.apply != nil || run.errorMessage != nil) {
                 Picker("Run phase", selection: $selection) {
                     Text("Plan").tag(1)
                     if run.apply != nil { Text("Apply").tag(2) }
@@ -129,7 +143,13 @@ struct RunPageView: View {
 
             Group {
                 if run.canCancel {
-                    TextLogView(text: run.textOutput ?? "Waiting for Terraform output…")
+                    if run.status == .applying, let apply = run.apply {
+                        StructuredLogView(logs: apply)
+                    } else if let plan = run.plan {
+                        StructuredLogView(logs: plan)
+                    } else {
+                        TextLogView(text: run.textOutput ?? "Waiting for Terraform output…")
+                    }
                 } else {
                     switch selection {
                     case 2: applyView
@@ -146,6 +166,14 @@ struct RunPageView: View {
     }
 }
 
+private struct ScopedPlanAttribute: Identifiable {
+    let owner: String
+    let attribute: PlanAttributeChange
+
+    // List flattens nested ForEach content; paths alone collide across sections.
+    var id: String { "\(owner)\u{0}\(attribute.path)" }
+}
+
 private struct PlanReviewView: View {
     let plan: StructuredLog
     let diff: TerraformPlan?
@@ -155,8 +183,9 @@ private struct PlanReviewView: View {
         TabView(selection: $selection) {
             if let diff {
                 List {
-                    if diff.resourceChanges.allSatisfy({ $0.action == "no-op" }) {
-                        Text("No resource changes in this plan.")
+                    if diff.resourceChanges.allSatisfy({ $0.action == "no-op" }) &&
+                        diff.outputChanges.allSatisfy({ $0.action == "no-op" }) {
+                        Text("No changes in this plan.")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(diff.resourceChanges.filter { $0.action != "no-op" }) { change in
@@ -165,9 +194,12 @@ private struct PlanReviewView: View {
                                 Text("Terraform reported no attribute changes.")
                                     .foregroundStyle(.secondary)
                             }
-                            ForEach(change.attributes) { attribute in
+                            ForEach(change.attributes.map {
+                                ScopedPlanAttribute(owner: "resource:\(change.address)", attribute: $0)
+                            }) { row in
+                                let attribute = row.attribute
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(attribute.path.isEmpty ? "value" : attribute.path)
+                                    Text(attribute.path == "$" || attribute.path.isEmpty ? "Value" : attribute.path)
                                         .font(.headline)
                                     HStack(alignment: .firstTextBaseline) {
                                         Text("Before").foregroundStyle(.secondary)
@@ -196,6 +228,35 @@ private struct PlanReviewView: View {
                                 Text(change.address)
                                 Spacer()
                                 Text(change.action.capitalized).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    ForEach(diff.outputChanges.filter { $0.action != "no-op" }) { output in
+                        Section {
+                            ForEach(output.attributes.map {
+                                ScopedPlanAttribute(owner: "output:\(output.name)", attribute: $0)
+                            }) { row in
+                                let attribute = row.attribute
+                                VStack(alignment: .leading, spacing: 5) {
+                                    if !attribute.path.isEmpty && attribute.path != "$" {
+                                        Text(attribute.path).font(.headline)
+                                    }
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text("Before").foregroundStyle(.secondary)
+                                        Text(attribute.before.displayValue).textSelection(.enabled)
+                                    }
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text("After").foregroundStyle(.secondary)
+                                        Text(attribute.after.displayValue).textSelection(.enabled)
+                                    }
+                                }
+                                .padding(.vertical, 3)
+                            }
+                        } header: {
+                            HStack {
+                                Text("Output: \(output.name)")
+                                Spacer()
+                                Text(output.action.capitalized).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -259,7 +320,11 @@ struct RunSummaryView: View {
             
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: 64, alignment: .topLeading)
+        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+        .id(run.status.rawValue)
     }
 }
 

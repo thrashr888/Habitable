@@ -102,6 +102,7 @@ class ResourceState: ObservableObject {
     }
 
     func update(_ hook: HookMessage) {
+        objectWillChange.send()
         resource = hook.resource
 
         switch hook.type {

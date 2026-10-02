@@ -90,7 +90,27 @@ final class WorkspaceModelTests: XCTestCase {
     }
 
     @MainActor
-    func testEmptyShowDoesNotPretendStateIsAvailable() async throws {
+    func testTerraformShowWithoutStateIsNeutral() async throws {
+        let executable = try fakeTerraform("""
+        case "$1" in
+          version) echo '{"terraform_version":"1.16.4"}' ;;
+          validate) echo '{"valid":true}' ;;
+          show) echo '{"format_version":"1.0"}' ;;
+        esac
+        """)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.runner = Runner(executableURL: executable)
+        workspace.updateWorkingDirectory(dir: directory)
+        try await waitUntil { !workspace.locked }
+
+        XCTAssertTrue(workspace.isValid)
+        XCTAssertFalse(workspace.hasState)
+        XCTAssertNil(workspace.state)
+        XCTAssertNil(workspace.errorMessage)
+    }
+
+    @MainActor
+    func testMalformedShowDataRemainsVisible() async throws {
         let executable = try fakeTerraform("""
         case "$1" in
           version) echo '{"terraform_version":"1.16.4"}' ;;
@@ -106,7 +126,27 @@ final class WorkspaceModelTests: XCTestCase {
         XCTAssertTrue(workspace.isValid)
         XCTAssertFalse(workspace.hasState)
         XCTAssertNil(workspace.state)
-        XCTAssertTrue(workspace.errorMessage?.contains("no state data") == true)
+        XCTAssertEqual(workspace.errorMessage, "Terraform returned malformed state data.")
+    }
+
+    @MainActor
+    func testShowCommandFailureRemainsVisible() async throws {
+        let executable = try fakeTerraform("""
+        case "$1" in
+          version) echo '{"terraform_version":"1.16.4"}' ;;
+          validate) echo '{"valid":true}' ;;
+          show) echo 'remote backend is unavailable' >&2; exit 1 ;;
+        esac
+        """)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.runner = Runner(executableURL: executable)
+        workspace.updateWorkingDirectory(dir: directory)
+        try await waitUntil { !workspace.locked }
+
+        XCTAssertTrue(workspace.isValid)
+        XCTAssertFalse(workspace.hasState)
+        XCTAssertNil(workspace.state)
+        XCTAssertTrue(workspace.errorMessage?.contains("remote backend is unavailable") == true)
     }
 
     func testCoordinationLeaseSerializesWindowsAndInvalidatesSiblingPlans() throws {
@@ -228,6 +268,33 @@ final class WorkspaceModelTests: XCTestCase {
         XCTAssertTrue(workspace.executionContextIdentifier.hasPrefix("workspace=production;backend=remote #12345;terraform="))
         XCTAssertEqual(workspace.executionContextDisplay, "Workspace: production · Backend: remote #12345")
         lease.release()
+    }
+
+    @MainActor
+    func testImplicitLocalBackendWithoutMetadata() throws {
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.workingDirectory = directory
+        let lease = try workspace.acquireCommandLease()
+        defer { lease.release() }
+        XCTAssertEqual(workspace.backendIdentity, "local")
+        XCTAssertEqual(workspace.executionContextDisplay, "Workspace: default · Backend: local")
+        let run = TerraformRun(workspace: workspace)
+        XCTAssertEqual(run.executionContextDescription, "Terraform workspace: default · Backend: local")
+    }
+
+    @MainActor
+    func testMalformedBackendMetadataRemainsUnknown() throws {
+        let terraformDirectory = directory.appendingPathComponent(".terraform")
+        try FileManager.default.createDirectory(at: terraformDirectory, withIntermediateDirectories: true)
+        try "invalid metadata".write(to: terraformDirectory.appendingPathComponent("terraform.tfstate"),
+                                     atomically: true, encoding: .utf8)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.workingDirectory = directory
+        let lease = try workspace.acquireCommandLease()
+        defer { lease.release() }
+        XCTAssertEqual(workspace.backendIdentity, "unknown backend")
     }
 
     @MainActor

@@ -14,4 +14,6 @@ The native export flow produced a JSON file with owner-only permissions (0600). 
 
 A slow local terraform_data apply streamed its progress. Cancel produced Canceled, released the workspace lock after Terraform exited, and refreshed the partial state to show the resource created before cancellation.
 
-Follow-up defects are tracked in Beads: Habitable-ci9 covers the unnecessary status message for absent state; Habitable-uxl covers output changes in the Review tab.
+The subsequent 0.4.0 pass resolves Habitable-ci9 and Habitable-uxl. The signed Release app shows output before/after values, masked secrets, unknown values and empty-container transitions, and applies the reviewed output-only plan. Fresh workspaces have neutral empty-state indicators without an error; a true no-op plan says "No changes in this plan." Review rows use owner-scoped identities to prevent values from being reused across output sections.
+
+The 0.4.0 gate ran 67 tests with zero failures and one optional download test skipped. The universal Release app was accepted by Apple notarization, stapled, and accepted by Gatekeeper. A low-priority follow-up for punctuation-bearing map keys in review paths is tracked as Habitable-rbu.

@@ -67,8 +67,18 @@ struct ContentView: View {
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
         .safeAreaInset(edge: .bottom) {
-            Label(workspace.locked ? "Locked" : "Unlocked", systemImage: workspace.locked ? "lock.fill" : "lock.open.fill")
-                .padding()
+            HStack(spacing: 8) {
+                if workspace.locked {
+                    ProgressView().controlSize(.small)
+                    Text("Running Terraform").lineLimit(1)
+                } else {
+                    Label("Ready", systemImage: "checkmark.circle")
+                }
+                Spacer()
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding()
         }
     }
 

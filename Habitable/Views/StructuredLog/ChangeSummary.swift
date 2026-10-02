@@ -8,12 +8,14 @@
 import SwiftUI
 
 struct ChangeSummaryView: View {
-    @State var changes: ChangeSummaryChanges
+    var changes: ChangeSummaryChanges
     var body: some View {
-        HStack {
-            Text("\(changes.add) created")
-            Text("\(changes.change) changed")
-            Text("\(changes.remove) destroyed")
+        HStack(spacing: 20) {
+            Label("Add: \(changes.add)", systemImage: "plus.circle")
+            Label("Change: \(changes.change)", systemImage: "pencil.circle")
+            Label("Destroy: \(changes.remove)", systemImage: "minus.circle")
         }
+        .monospacedDigit()
+        .accessibilityElement(children: .combine)
     }
 }
