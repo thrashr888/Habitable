@@ -25,3 +25,9 @@ Command-R reloaded saved run history in the candidate and retained the selected 
 Actual VoiceOver traversal/text scaling, exact minimum-window behavior, larger long-value fixtures, and the broader live interruption/offline/missing-CLI matrix remain in Habitable-rt3.21. Native AX still aggregates input-row action labels, and Settings can temporarily retain an old outer path label while its nested value updates. These are not claimed fixed by source labels alone. Failed-plan retry currently requires Workspace validation to re-enable planning; its discoverability also needs further review.
 
 See `JSON-ARCHITECTURE.md` for the event-stream versus saved-plan implementation and its schema/persistence limits. Deeper HCP and AI integrations remain deferred.
+
+## Published release
+
+Version 0.4.3 (build 7) is published in the source repository and public tap and installed at `/Applications/Habitable.app` through Homebrew. Both uploaded ZIP digests match `80eebe89115846d2e0155fa1165a509dee405226d37eadbb278e56083630204b`. Cask style and online audit passed. The installed app has both architectures, verifies its signature and stapled ticket, and is accepted as Notarized Developer ID.
+
+With only the installed executable running, the app reopened, loaded the healthy output-only fixture, refreshed with Command-R, exposed the Search outputs label, and opened the selected output's correct detail. The app was left in that fixture without temporary app-input overrides. Source release code points to `84ec6ff1ff53d1dbd2edaa158dd09a42db832f9e`; the tap cask commit is `e57095a`.
