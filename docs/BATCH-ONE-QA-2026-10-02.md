@@ -21,3 +21,11 @@ Provider-free fixtures at `/tmp/habitable-batch-output-only`, `/tmp/habitable-ba
 A real plan with an invalid variable validation rule produced an Errored run. Its diagnostic displayed the source filename, line 1, the underlined offending snippet, and the explanatory text. Error and warning presentations have distinct labels and symbols.
 
 The renderer uses UTF-8 byte offsets observed in a real Terraform 1.16.5 diagnostic with an emoji before the error. HashiCorp's [validate JSON documentation](https://developer.hashicorp.com/terraform/cli/commands/validate#json-output-format) calls these character offsets, while the tested CLI reports bytes. Regression tests cover that actual snippet, correct snippet start-line parsing, invalid boundaries, out-of-range offsets, and multiline source. Invalid offsets leave readable, unhighlighted source. Existing sensitive-value redaction is unchanged.
+
+## Release and follow-up
+
+Version 0.4.2 was published in both the source repository and public tap, then installed through Homebrew. Both GitHub ZIP digests match `c791b3e576c37365f280d050304eaca49b55175cc240a1e2c15c2b1d686f04e3`. The installed app contains arm64 and x86_64, passes signature and stapled-ticket checks, and is accepted by Gatekeeper as Notarized Developer ID. Cask style and online audit passed.
+
+With the Debug process closed and only `/Applications/Habitable.app/Contents/MacOS/Habitable` running, the installed app showed the correct No resources presentation for output-only state. Its input sheet enabled Save immediately after a valid key was entered; Cancel left no QA override.
+
+A malformed-state Debug fixture reported a real state-read error, rather than treating the failure as an empty state. Its non-JSON error text retained terminal color escape sequences; that separate presentation defect is tracked in Habitable-rt3.19. The other backlog batches remain open.
