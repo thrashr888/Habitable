@@ -21,6 +21,7 @@ struct SettingsListPage: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                         Button("Choose folder…", action: workspace.addUrl)
                             .disabled(workspace.locked)
                     }
@@ -30,7 +31,7 @@ struct SettingsListPage: View {
                     TextEditor(text: $workspace.description)
                         .accessibilityLabel("Description")
                         .multilineTextAlignment(.leading)
-                        .frame(height: 64)
+                        .frame(minHeight: 80, maxHeight: 120)
                         .padding(4)
                         .background(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
                     if let error = workspace.descriptionPersistenceError {

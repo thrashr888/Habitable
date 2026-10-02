@@ -178,7 +178,7 @@ class TerraformRun: ObservableObject, Identifiable {
 
     private func appendOutput(_ text: String, stream: TerraformOutputStream,
                               decoder: NDJSONStreamDecoder, log: StructuredLog) {
-        let safe = sensitiveInputRedactor.redact(text)
+        let safe = sensitiveInputRedactor.redact(stripTerraformTerminalEscapes(text))
         guard stream == .stdout else {
             let current = textOutput ?? ""
             let stderr = "[stderr] " + safe
@@ -360,7 +360,8 @@ class TerraformRun: ObservableObject, Identifiable {
                     onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog) }) { [self, workspace] output, error in
             finishLiveOutput(decoder: decoder, log: liveLog)
             planOutput = redactOutput(output ?? error?.output)
-            plan = planOutput.map(handleNDJsonSuccess)
+            plan = error?.outputTruncated == true || error?.cancelled == true
+                ? liveLog : planOutput.map(handleNDJsonSuccess)
             guard error == nil else {
                 workspace.unlock()
                 lease.release()
@@ -450,7 +451,8 @@ class TerraformRun: ObservableObject, Identifiable {
             }
             lease.release()
             applyOutput = redactOutput(output ?? error?.output)
-            apply = applyOutput.map(handleNDJsonSuccess)
+            apply = error?.outputTruncated == true || error?.cancelled == true
+                ? liveLog : applyOutput.map(handleNDJsonSuccess)
             errorMessage = redactOutput(coordinationError ?? error?.message)
             status = coordinationError != nil ? .errored : (error?.cancelled == true ? .canceled : (error == nil ? .applied : .errored))
             workspace.isValid = coordinationError == nil && error == nil

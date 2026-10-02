@@ -19,6 +19,17 @@ struct RunPageView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+
+    private var statusSymbol: String {
+        switch run.status {
+        case .pending, .planning: return "hourglass"
+        case .planned: return "doc.text.magnifyingglass"
+        case .confirmed, .applying: return "arrow.triangle.2.circlepath"
+        case .applied: return "checkmark.circle.fill"
+        case .discarded, .canceled, .expired: return "xmark.circle"
+        case .errored, .interrupted: return "exclamationmark.triangle.fill"
+        }
+    }
     
     var planView: some View {
         Group {
@@ -66,7 +77,7 @@ struct RunPageView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Run #\(run.number)").font(.title2.weight(.semibold))
                     if let message = run.message {
-                        Text(message)
+                        Text(message).lineLimit(2)
                     }
                     Text("\(run.createdAt, formatter: Self.taskDateFormat)")
                         .font(.caption)
@@ -76,7 +87,7 @@ struct RunPageView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(run.status.rawValue.localizedCapitalized)
+                Label(run.status.rawValue.localizedCapitalized, systemImage: statusSymbol)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -278,6 +289,17 @@ private struct PlanReviewView: View {
 
 struct RunSummaryView: View {
     @ObservedObject var run: TerraformRun
+
+    private var statusSymbol: String {
+        switch run.status {
+        case .pending, .planning: return "hourglass"
+        case .planned: return "doc.text.magnifyingglass"
+        case .confirmed, .applying: return "arrow.triangle.2.circlepath"
+        case .applied: return "checkmark.circle.fill"
+        case .discarded, .canceled, .expired: return "xmark.circle"
+        case .errored, .interrupted: return "exclamationmark.triangle.fill"
+        }
+    }
     
     static let taskDateFormat: DateFormatter = {
         let formatter = DateFormatter()
@@ -290,9 +312,9 @@ struct RunSummaryView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading) {
                 HStack {
-                    Label("#\(run.number) \(run.message ?? "run")", systemImage: run.isFinished ? "circle.fill" : "circle")
+                    Label("#\(run.number) \(run.message ?? "run")", systemImage: statusSymbol)
                         .font(.headline)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
                 Text("\(run.createdAt, formatter: Self.taskDateFormat)")
                     .font(.caption)
@@ -302,14 +324,17 @@ struct RunSummaryView: View {
                 HStack(alignment: .center) {
                     if let add = run.added {
                         Text("+\(add)")
+                            .accessibilityLabel("\(add) resources to add")
                             .foregroundColor(.green)
                     }
                     if let change = run.changed {
                         Text("~\(change)")
+                            .accessibilityLabel("\(change) resources to change")
                             .foregroundColor(.blue)
                     }
                     if let destroy = run.destroyed {
                         Text("-\(destroy)")
+                            .accessibilityLabel("\(destroy) resources to destroy")
                             .foregroundColor(.red)
                     }
                     Spacer()
@@ -321,7 +346,7 @@ struct RunSummaryView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .frame(height: 64, alignment: .topLeading)
+        .frame(minHeight: 64, alignment: .topLeading)
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .id("\(run.id.uuidString)-\(run.status.rawValue)")

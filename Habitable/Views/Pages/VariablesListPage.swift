@@ -25,24 +25,42 @@ struct TerraformVariableSummaryView: View {
             }
             Text(variable.sensitive ? "(sensitive value)" : variable.value)
                 .foregroundColor(.secondary)
+            Text(variable.isUserInput ? "App override · This session · Overrides workspace tfvars" : "From workspace tfvars · Read-only")
+                .font(.caption).foregroundColor(.secondary)
         }
     }
+}
+
+@MainActor
+private struct TerraformVariableEditorContext: Identifiable {
+    let id = UUID()
+    let draft: TerraformVariable
+    let original: TerraformVariable?
 }
 
 struct VariableListPage: View {
     @EnvironmentObject var workspace: Workspace
     
-    @State var terraformVariableModal: Bool = false
-    @State var environmentVariableModal: Bool = false
-    
-    @State var newTV: TerraformVariable = TerraformVariable()
-    @State var newEV: EnvironmentVariable = EnvironmentVariable()
+    @State private var terraformEditorContext: TerraformVariableEditorContext?
+    @State private var inputError: String?
 
     var body: some View {
         VStack(alignment: .leading) {
             List {
                 ForEach(workspace.terraformVariables, id: \.id) { variable in
-                    TerraformVariableSummaryView(variable: variable)
+                    HStack {
+                        TerraformVariableSummaryView(variable: variable)
+                        Spacer()
+                        if variable.isUserInput {
+                            Button("Edit") { openEditor(for: variable) }
+                                .buttonStyle(.borderless).disabled(workspace.locked)
+                            Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless).disabled(workspace.locked)
+                                .accessibilityLabel("Remove app input \(variable.key)")
+                                .help("Remove app input")
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
                 }
             }
         }
@@ -53,52 +71,87 @@ struct VariableListPage: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .help("Refresh variables")
                 }
+                .disabled(workspace.locked)
             }
             ToolbarItem(placement: .primaryAction) {
                 // TODO move to footer
                 Button(action: {
-                    self.terraformVariableModal = true
+                    openEditor(for: nil)
                 }) {
                     HStack(spacing: 10) {
                         Image(systemName: "text.badge.plus")
                         Text("Add")
                     }
                 }
+                .disabled(workspace.locked)
             }
         }
-        .sheet(isPresented: $terraformVariableModal) {
+        .sheet(item: $terraformEditorContext) { context in
             TerraformVariableEditor(
-                variable: newTV,
-                existingKeys: Set(workspace.terraformVariables.filter(\.isUserInput).map(\.key)),
+                variable: context.draft,
+                existingKeys: Set(workspace.terraformVariables.filter { $0.isUserInput && $0 !== context.original }.map(\.key)),
+                errorMessage: inputError,
                 onCancel: {
-                    newTV = TerraformVariable()
-                    terraformVariableModal = false
+                    terraformEditorContext = nil
+                    inputError = nil
                 },
-                onSave: {
-                    let isDuplicate = workspace.terraformVariables.contains { $0.isUserInput && $0.key == newTV.key }
-                    guard newTV.validationError == nil, !isDuplicate else { return }
-                    newTV.isUserInput = true
-                    workspace.addTerraformVariable(newTV)
-                    newTV = TerraformVariable()
-                    terraformVariableModal = false
+                onSave: { draft in
+                    let isDuplicate = workspace.terraformVariables.contains { $0 !== context.original && $0.isUserInput && $0.key == draft.key }
+                    guard draft.validationError == nil, !isDuplicate else { return }
+                    do {
+                        if let original = context.original {
+                            try workspace.updateTerraformVariable(original, key: draft.key, value: draft.value,
+                                                                  description: draft.description, sensitive: draft.sensitive, hcl: draft.hcl)
+                        } else {
+                            try workspace.addTerraformVariable(draft)
+                        }
+                    } catch { inputError = error.localizedDescription; return }
+                    terraformEditorContext = nil
+                    inputError = nil
                 }
             )
         }
+        .alert("Could not remove variable", isPresented: Binding(
+            get: { inputError != nil && terraformEditorContext == nil },
+            set: { if !$0 { inputError = nil } }
+        )) {
+            Button("OK", role: .cancel) { inputError = nil }
+        } message: { Text(inputError ?? "") }
+    }
+
+    private func copy(_ source: TerraformVariable) -> TerraformVariable {
+        let result = TerraformVariable()
+        result.key = source.key; result.value = source.value; result.description = source.description
+        result.sensitive = source.sensitive; result.hcl = source.hcl
+        return result
+    }
+
+    private func openEditor(for original: TerraformVariable?) {
+        inputError = nil
+        terraformEditorContext = TerraformVariableEditorContext(
+            draft: original.map(copy) ?? TerraformVariable(), original: original
+        )
+    }
+
+    private func remove(_ variable: TerraformVariable) {
+        do { try workspace.removeTerraformVariable(variable); inputError = nil }
+        catch { inputError = error.localizedDescription }
     }
 }
 
 private struct TerraformVariableEditor: View {
     @ObservedObject var variable: TerraformVariable
     let existingKeys: Set<String>
+    let errorMessage: String?
     let onCancel: () -> Void
-    let onSave: () -> Void
+    let onSave: (TerraformVariable) -> Void
 
     private var isDuplicate: Bool { existingKeys.contains(variable.key) }
 
     var body: some View {
         Form {
             Section(header: Text("Save a Terraform variable").font(.headline)) {
-                Text("Saved values apply to plans started in this app session.")
+                Text("App inputs apply to plans started in this session and override values from workspace tfvars.")
                     .font(.caption).foregroundColor(.secondary)
                 TextField("Key", text: $variable.key)
                 Text("Value")
@@ -120,11 +173,13 @@ private struct TerraformVariableEditor: View {
                 } else if isDuplicate {
                     Text("A variable with this key already exists.").foregroundColor(.red)
                 }
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
                 HStack {
-                    Button("Cancel", action: onCancel)
+                    Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                     Spacer()
-                    Button("Save variable", action: onSave)
+                    Button("Save variable") { onSave(variable) }
                         .disabled(variable.validationError != nil || isDuplicate)
+                        .keyboardShortcut(.return, modifiers: .command)
                 }
             }
         }

@@ -52,6 +52,8 @@ class TerraformVariable: ObservableObject {
         return json
     }
 
+    func validate() throws { _ = try terraformJSONValue() }
+
     var validationError: String? {
         do { _ = try terraformJSONValue(); return nil }
         catch { return error.localizedDescription }

@@ -6,10 +6,32 @@ enum TerraformOutputStream: Equatable, Sendable {
     case stderr
 }
 
+func stripTerraformTerminalEscapes(_ text: String) -> String {
+    let patterns = [
+        #"\x1B\][\s\S]*?(?:\x07|\x1B\\|\x9C)"#, // OSC
+        #"\x1B[P^_][\s\S]*?(?:\x1B\\|\x9C)"#, // DCS, PM, APC
+        #"(?:\x1B\[|\x9B)[0-?]*[ -/]*[@-~]"#, // CSI
+        #"\x1B[@-_]"# // two-byte escape
+    ]
+    return patterns.reduce(text) { value, pattern in
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return value }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        return expression.stringByReplacingMatches(in: value, range: range, withTemplate: "")
+    }
+}
+
 struct TerraformCommandError: Error, Sendable {
     let message: String
-    var output = ""
-    var cancelled = false
+    var output: String
+    var cancelled: Bool
+    var outputTruncated: Bool
+
+    init(message: String, output: String = "", cancelled: Bool = false, outputTruncated: Bool = false) {
+        self.message = stripTerraformTerminalEscapes(message)
+        self.output = stripTerraformTerminalEscapes(output)
+        self.cancelled = cancelled
+        self.outputTruncated = outputTruncated
+    }
 }
 
 /// A cancellable reference to one Terraform command. Cancellation is cooperative:
@@ -433,19 +455,21 @@ final class Runner: Sendable {
             let stderrText = String(decoding: stderrState.capture, as: UTF8.self)
             let wasCancelled = handle.isCancelled
             let outputOverflow = stdoutState.truncated
+            let captureTruncated = stdoutState.truncated || stderrState.truncated
             let status = exitStatus ?? -1
             let failure: TerraformCommandError?
             if wasCancelled {
                 let message = stderrText.isEmpty ? "Terraform command was canceled."
                     : "Terraform command was canceled. \(stderrText)"
-                failure = TerraformCommandError(message: message, output: stdoutText, cancelled: true)
+                failure = TerraformCommandError(message: message, output: stdoutText, cancelled: true,
+                                                outputTruncated: captureTruncated)
             } else if outputOverflow {
                 failure = TerraformCommandError(message: "Terraform output exceeded the bounded capture; the command result was not accepted.",
-                                                output: stdoutText)
+                                                output: stdoutText, outputTruncated: true)
             } else if status != 0 {
                 failure = TerraformCommandError(
                     message: stderrText.isEmpty ? (stdoutText.isEmpty ? "Terraform exited with status \(status)." : stdoutText) : stderrText,
-                    output: stdoutText)
+                    output: stdoutText, outputTruncated: captureTruncated)
             } else {
                 failure = nil
             }

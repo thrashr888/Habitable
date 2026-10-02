@@ -27,14 +27,20 @@ struct SearchField: NSViewRepresentable {
     }
 
     @Binding var search: String
+    var accessibilityLabel: String = "Search"
 
     func makeNSView(context: Context) -> NSSearchField {
-        NSSearchField(frame: .zero)
+        let searchField = NSSearchField(frame: .zero)
+        searchField.setAccessibilityLabel(accessibilityLabel)
+        searchField.placeholderString = accessibilityLabel
+        return searchField
     }
 
     func updateNSView(_ searchField: NSSearchField, context: Context) {
         searchField.stringValue = search
         searchField.delegate = context.coordinator
+        searchField.setAccessibilityLabel(accessibilityLabel)
+        searchField.placeholderString = accessibilityLabel
     }
 
     func makeCoordinator() -> Coordinator {
