@@ -1091,11 +1091,78 @@ class Workspace: ObservableObject {
         }
     }
 
-    func addTerraformVariable(_ variable: TerraformVariable) {
+    func addTerraformVariable(_ variable: TerraformVariable) throws {
+        guard !terraformVariables.contains(where: { $0 === variable }) else { return }
+        try variable.validate()
+        guard !terraformVariables.contains(where: { $0.isUserInput && $0.key == variable.key }) else {
+            throw VariableInputError.duplicateKey(variable.key)
+        }
+        try retirePlansForInputChange()
+        variable.isUserInput = true
         terraformVariables.append(variable)
     }
-    
-    func addEnvironmentVariable(_ variable: EnvironmentVariable) {
+
+    func updateTerraformVariable(_ existing: TerraformVariable, key: String, value: String,
+                                 description: String, sensitive: Bool, hcl: Bool) throws {
+        guard existing.isUserInput, terraformVariables.contains(where: { $0 === existing }) else { return }
+        let draft = TerraformVariable()
+        draft.key = key; draft.value = value; draft.description = description
+        draft.sensitive = sensitive; draft.hcl = hcl
+        try draft.validate()
+        guard !terraformVariables.contains(where: { $0 !== existing && $0.isUserInput && $0.key == key }) else {
+            throw VariableInputError.duplicateKey(key)
+        }
+        let changesEffectiveInput = existing.key != key || existing.value != value
+            || existing.sensitive != sensitive || existing.hcl != hcl
+        if changesEffectiveInput { try retirePlansForInputChange() }
+        existing.key = key; existing.value = value; existing.description = description
+        existing.sensitive = sensitive; existing.hcl = hcl
+    }
+
+    func removeTerraformVariable(_ variable: TerraformVariable) throws {
+        guard variable.isUserInput, terraformVariables.contains(where: { $0 === variable }) else { return }
+        try retirePlansForInputChange()
+        terraformVariables.removeAll { $0 === variable }
+    }
+
+    func addEnvironmentVariable(_ variable: EnvironmentVariable) throws {
+        guard !environmentVariables.contains(where: { $0 === variable }) else { return }
+        try variable.validate()
+        guard !environmentVariables.contains(where: { $0.isUserInput && $0.key == variable.key }) else {
+            throw VariableInputError.duplicateKey(variable.key)
+        }
+        try retirePlansForInputChange()
+        variable.isUserInput = true
         environmentVariables.append(variable)
+    }
+
+    func updateEnvironmentVariable(_ existing: EnvironmentVariable, key: String, value: String,
+                                   description: String, sensitive: Bool) throws {
+        guard existing.isUserInput, environmentVariables.contains(where: { $0 === existing }) else { return }
+        let draft = EnvironmentVariable()
+        draft.key = key; draft.value = value; draft.description = description
+        try draft.validate()
+        guard !environmentVariables.contains(where: { $0 !== existing && $0.isUserInput && $0.key == key }) else {
+            throw VariableInputError.duplicateKey(key)
+        }
+        if existing.key != key || existing.value != value || existing.sensitive != sensitive {
+            try retirePlansForInputChange()
+        }
+        existing.key = key; existing.value = value; existing.description = description
+        existing.sensitive = sensitive
+    }
+
+    func removeEnvironmentVariable(_ variable: EnvironmentVariable) throws {
+        guard variable.isUserInput, environmentVariables.contains(where: { $0 === variable }) else { return }
+        try retirePlansForInputChange()
+        environmentVariables.removeAll { $0 === variable }
+    }
+
+    private func retirePlansForInputChange() throws {
+        guard !locked else { throw WorkspaceCommandCoordinator.CoordinatorError.busy }
+        let lease = try acquireCommandLease()
+        defer { lease.release() }
+        try lease.invalidatePlans()
+        for run in runs { run.doDiscard() }
     }
 }

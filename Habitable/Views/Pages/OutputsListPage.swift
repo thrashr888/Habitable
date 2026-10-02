@@ -13,10 +13,12 @@ struct OutputSummaryView: View {
         VStack(alignment: .leading) {
             Text("\(output.key)")
             if output.sensitive {
-                Text("◼︎◼︎◼︎◼︎◼︎◼︎◼︎")
+                Label("Sensitive value hidden", systemImage: "lock.fill")
+                    .foregroundStyle(.secondary)
             } else if let value = output.value {
                 Text("\(value)")
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .truncationMode(.tail)
                     .foregroundColor(.secondary)
             }
@@ -55,6 +57,7 @@ struct OutputsListPage: View {
             } else {
                 ForEach(filteredOutputs) { output in
                     OutputSummaryView(output: output)
+                        .accessibilityElement(children: .combine)
                         .tag(output.key)
                 }
             }
@@ -67,9 +70,11 @@ struct OutputsListPage: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .help("Refresh state")
                 }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(workspace.locked)
             }
             ToolbarItem {
-                SearchField(search: $searchText)
+                SearchField(search: $searchText, accessibilityLabel: "Search outputs")
                     .frame(minWidth: 100, idealWidth: 200, maxWidth: .infinity)
             }
         }

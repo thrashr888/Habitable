@@ -87,6 +87,145 @@ final class CancellationModelTests: XCTestCase {
     }
 
     @MainActor
+    func testCancelApplyRetainsLeaseThroughCleanupThenRefreshesUnknownOutcome() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable apply cancel \(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cli = root.appendingPathComponent("terraform")
+        try #"""
+        #!/bin/sh
+        case "$1" in
+          version) echo '{"terraform_version":"fixture"}' ;;
+          plan) echo '{"type":"change_summary","changes":{"add":1,"change":0,"remove":0}}' ;;
+          show)
+            if [ -n "$3" ]; then
+              echo '{"format_version":"1.0","resource_changes":[]}'
+            else
+              echo '{"values":{"root_module":{"resources":[]}}}'
+            fi
+            ;;
+          apply)
+            trap 'echo cleanup-started; /bin/sleep 0.25; echo cleanup-finished; exit 130' INT
+            echo apply-started
+            while :; do /bin/sleep 0.05; done
+            ;;
+        esac
+        """#.write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+
+        let coordinator = WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination"))
+        let history = RunHistoryStore(directory: root.appendingPathComponent("history"))
+        let suiteName = "Habitable-apply-cancel-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let workspace = Workspace(restoreLastDirectory: false, defaults: defaults, historyStore: history,
+                                  commandCoordinator: coordinator,
+                                  descriptionStore: WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions")))
+        workspace.runner = Runner(executableURL: cli)
+        workspace.workingDirectory = root
+        workspace.terraformVersion = "fixture"
+        workspace.isValid = true
+        let record = try history.create(workspace: root, terraformVersion: "fixture", message: nil)
+        let run = TerraformRun(workspace: workspace, record: record, restored: false)
+        workspace.runs = [run]
+
+        let planFinished = expectation(description: "plan completes")
+        run.doPlan { _, error in
+            XCTAssertNil(error)
+            planFinished.fulfill()
+        }
+        await fulfillment(of: [planFinished], timeout: 5)
+        XCTAssertEqual(run.status, .planned)
+
+        let applyFinished = expectation(description: "canceled apply completes after cleanup")
+        run.doApply { _, _ in applyFinished.fulfill() }
+        try await waitUntil { run.textOutput?.contains("apply-started") == true }
+        run.cancel()
+        try await waitUntil { run.textOutput?.contains("cleanup-started") == true }
+        XCTAssertTrue(workspace.locked)
+        XCTAssertTrue(workspace.lockedBy === run)
+        XCTAssertThrowsError(try coordinator.acquire(workspace: root, contextIdentity: workspace.executionContextIdentifier))
+
+        await fulfillment(of: [applyFinished], timeout: 5)
+        try await waitUntil { !workspace.locked }
+        XCTAssertEqual(run.status, .canceled)
+        XCTAssertFalse(run.canCancel)
+        XCTAssertNotNil(workspace.state, "Canceled apply outcome is uncertain, so state must be refreshed")
+        XCTAssertTrue(run.textOutput?.contains("cleanup-finished") == true)
+        XCTAssertEqual(try history.readPersistedRecord(id: run.id, workspace: root).status, .canceled)
+        let available = try coordinator.acquire(workspace: root, contextIdentity: workspace.executionContextIdentifier)
+        available.release()
+    }
+
+    @MainActor
+    func testPlanOutputOverflowKeepsLateStreamedDiagnosticVisible() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable plan overflow \(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cli = root.appendingPathComponent("terraform")
+        try #"""
+        #!/bin/sh
+        case "$1" in
+          version) echo '{"terraform_version":"fixture"}' ;;
+          plan)
+            i=0
+            while [ "$i" -lt 18000 ]; do
+              printf '{"type":"log","@message":"filler-%05d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}\n' "$i"
+              i=$((i + 1))
+            done
+            printf '{"type":"diagnostic","diagnostic":{"severity":"error","summary":"Late overflow failure","detail":"This event follows the bounded capture."}}\n'
+            printf '\033[31mprovider stderr stream-secret after overflow\033[0m\n' >&2
+            exit 1
+            ;;
+        esac
+        """#.write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+
+        let coordinator = WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination"))
+        let history = RunHistoryStore(directory: root.appendingPathComponent("history"))
+        let suiteName = "Habitable-plan-overflow-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let workspace = Workspace(restoreLastDirectory: false, defaults: defaults, historyStore: history,
+                                  commandCoordinator: coordinator,
+                                  descriptionStore: WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions")))
+        workspace.runner = Runner(executableURL: cli)
+        workspace.workingDirectory = root
+        workspace.terraformVersion = "fixture"
+        let secret = TerraformVariable()
+        secret.key = "TOKEN"
+        secret.value = "stream-secret"
+        secret.sensitive = true
+        secret.isUserInput = true
+        workspace.terraformVariables = [secret]
+        let record = try history.create(workspace: root, terraformVersion: "fixture", message: nil)
+        let run = TerraformRun(workspace: workspace, record: record, restored: false)
+        workspace.runs = [run]
+
+        let finished = expectation(description: "overflow plan fails closed")
+        var completionError: String?
+        run.doPlan { _, error in
+            completionError = error
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 15)
+        XCTAssertEqual(run.status, .errored)
+        XCTAssertTrue(completionError?.contains("bounded capture") == true)
+        XCTAssertEqual(run.plan?.diagnostics.last?.diagnostic.summary, "Late overflow failure")
+        let lateStderr = try XCTUnwrap(run.plan?.logs.first(where: { $0.message?.contains("provider stderr") == true })?.message)
+        XCTAssertFalse(lateStderr.contains("\u{001B}"), "Live diagnostics must not expose terminal control codes")
+        XCTAssertTrue(lateStderr.contains("provider stderr (sensitive) after overflow"))
+        XCTAssertFalse(lateStderr.contains("stream-secret"), "Live diagnostics must preserve sensitive-input redaction")
+        XCTAssertTrue(run.textOutput?.contains("provider stderr (sensitive) after overflow") == true)
+        XCTAssertFalse(run.textOutput?.contains("stream-secret") == true)
+        XCTAssertFalse(run.textOutput?.contains("\u{001B}") == true)
+        XCTAssertTrue(run.plan?.isComplete == true)
+        XCTAssertNotNil(try history.readPersistedRecord(id: run.id, workspace: root).planOutput)
+        let available = try coordinator.acquire(workspace: root, contextIdentity: workspace.executionContextIdentifier)
+        available.release()
+    }
+
+    @MainActor
     private func waitUntil(_ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(5)
         while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }

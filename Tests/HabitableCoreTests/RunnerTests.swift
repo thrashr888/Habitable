@@ -61,6 +61,53 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(error?.message.components(separatedBy: "stderr-line").count, 5001)
     }
 
+    func testNonJSONCommandErrorsRemoveANSIFromMessageAndOutput() async throws {
+        let executable = try fakeCLI(#"""
+        case "$1" in
+          init|validate|show)
+            printf '\033]0;terraform diagnostic\007\033[31mstate is corrupt\033[0m\n' >&2
+            printf '\033[2Jstdout fallback\033[0m\n'
+            exit 1
+            ;;
+        esac
+        """#)
+        let runner = Runner(executableURL: executable)
+        let starts: [(@escaping Runner.Completion) -> Void] = [
+            { runner.initialize(workingDirectory: self.directory, completion: $0) },
+            { runner.validate(workingDirectory: self.directory, completion: $0) },
+            { runner.show(workingDirectory: self.directory, completion: $0) }
+        ]
+
+        for start in starts {
+            let (output, error) = await result(start)
+            XCTAssertNil(output)
+            let failure = try XCTUnwrap(error)
+            XCTAssertTrue(failure.message.contains("state is corrupt"))
+            XCTAssertFalse(failure.message.contains("\u{001B}"))
+            XCTAssertFalse(failure.message.contains("\u{0007}"))
+            XCTAssertTrue(failure.output.contains("stdout fallback"))
+            XCTAssertFalse(failure.output.contains("\u{001B}"))
+        }
+    }
+
+    func testFailedCommandReportsWhenStderrCaptureIsTruncated() async throws {
+        let executable = try fakeCLI(#"""
+        i=0
+        while [ "$i" -lt 18000 ]; do
+          echo "stderr-$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >&2
+          i=$((i + 1))
+        done
+        echo 'late-stderr-diagnostic' >&2
+        exit 1
+        """#)
+        let runner = Runner(executableURL: executable)
+        let (output, error) = await result { runner.validate(workingDirectory: directory, completion: $0) }
+        XCTAssertNil(output)
+        XCTAssertTrue(error?.outputTruncated == true)
+        XCTAssertTrue(error?.message.contains("stderr-0-") == true)
+        XCTAssertLessThanOrEqual(error?.message.utf8.count ?? .max, 1024 * 1024)
+    }
+
     func testStreamsCompleteUTF8LinesOnMainQueue() async throws {
         let executable = try fakeCLI("printf '\\342'; sleep 0.05; printf '\\202\\254 done'; printf '\\nlast line'")
         let runner = Runner(executableURL: executable)
@@ -83,6 +130,7 @@ final class RunnerTests: XCTestCase {
         let (output, error) = await result { runner.plan(workingDirectory: directory, runId: "too-large", completion: $0) }
         XCTAssertNil(output)
         XCTAssertTrue(error?.message.contains("not accepted") == true)
+        XCTAssertTrue(error?.outputTruncated == true)
         XCTAssertLessThanOrEqual(error?.output.utf8.count ?? .max, 1024 * 1024)
         XCTAssertTrue(error?.output.contains("output line omitted") == true)
     }

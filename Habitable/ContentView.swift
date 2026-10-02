@@ -89,6 +89,7 @@ struct ContentView: View {
             .font(.callout)
             .foregroundStyle(.secondary)
             .padding()
+            .accessibilityElement(children: .combine)
         }
     }
 

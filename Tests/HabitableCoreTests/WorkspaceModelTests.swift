@@ -307,13 +307,13 @@ final class WorkspaceModelTests: XCTestCase {
         editorVariable.value = "keep-me"
         editorVariable.sensitive = true
         editorVariable.isUserInput = true
-        workspace.addTerraformVariable(editorVariable)
+        try workspace.addTerraformVariable(editorVariable)
         let editorEnvironment = EnvironmentVariable()
         editorEnvironment.key = "EDITOR_TOKEN"
         editorEnvironment.value = "secret"
         editorEnvironment.sensitive = true
         editorEnvironment.isUserInput = true
-        workspace.addEnvironmentVariable(editorEnvironment)
+        try workspace.addEnvironmentVariable(editorEnvironment)
 
         try "from_file = \"old\"\n".write(to: directory.appendingPathComponent("terraform.tfvars"), atomically: true, encoding: .utf8)
         workspace.checkVariables()
@@ -363,6 +363,52 @@ final class WorkspaceModelTests: XCTestCase {
         XCTAssertTrue(discovered["nullable"]?.hcl == true)
         XCTAssertEqual(discovered["items"]?.value, "[1,\"x\"]")
         XCTAssertEqual(discovered["settings"]?.value, #"{"region":"west"}"#)
+    }
+
+    @MainActor
+    func testInputMutationsValidateDuplicatesAndRetirePlansOnlyForEffectiveChanges() throws {
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.workingDirectory = directory
+        let variable = TerraformVariable()
+        variable.key = "message"; variable.value = "one"
+        try workspace.addTerraformVariable(variable)
+        let initial = try generation(for: workspace)
+
+        try workspace.updateTerraformVariable(variable, key: "message", value: "one", description: "note", sensitive: false, hcl: false)
+        XCTAssertEqual(try generation(for: workspace), initial, "Description changes do not alter the planned inputs")
+        try workspace.updateTerraformVariable(variable, key: "message", value: "two", description: "note", sensitive: false, hcl: false)
+        let updated = try generation(for: workspace)
+        XCTAssertGreaterThan(updated, initial)
+
+        let duplicate = TerraformVariable()
+        duplicate.key = "message"; duplicate.value = "duplicate"
+        XCTAssertThrowsError(try workspace.addTerraformVariable(duplicate)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("listed more than once"))
+        }
+
+        let environment = EnvironmentVariable()
+        environment.key = "APP_TOKEN"; environment.value = "first"
+        try workspace.addEnvironmentVariable(environment)
+        let withEnvironment = try generation(for: workspace)
+        XCTAssertGreaterThan(withEnvironment, updated)
+        try workspace.updateEnvironmentVariable(environment, key: "APP_TOKEN", value: "second", description: "", sensitive: false)
+        let changedEnvironment = try generation(for: workspace)
+        XCTAssertGreaterThan(changedEnvironment, withEnvironment)
+
+        try workspace.removeTerraformVariable(variable)
+        let removed = try generation(for: workspace)
+        XCTAssertGreaterThan(removed, changedEnvironment)
+        try workspace.removeEnvironmentVariable(environment)
+        XCTAssertTrue(workspace.terraformVariables.isEmpty)
+        XCTAssertTrue(workspace.environmentVariables.isEmpty)
+        XCTAssertTrue(workspace.runs.isEmpty)
+    }
+
+    private func generation(for workspace: Workspace) throws -> Int64 {
+        let lease = try workspace.acquireCommandLease()
+        defer { lease.release() }
+        return lease.generation
     }
 
     private func workspaceFile(_ contents: String, named name: String) {

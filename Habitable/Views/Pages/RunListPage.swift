@@ -64,6 +64,7 @@ struct RunListPage: View {
                     Label("Previous", systemImage: "chevron.left")
                 }
                 .labelStyle(.iconOnly)
+                .accessibilityLabel("Previous run history page")
                 .controlSize(.small)
                 .help("Previous page")
                 .disabled(workspace.locked || workspace.historyLoading || workspace.historyPageOffset == 0)
@@ -74,6 +75,7 @@ struct RunListPage: View {
                     Label("Next", systemImage: "chevron.right")
                 }
                 .labelStyle(.iconOnly)
+                .accessibilityLabel("Next run history page")
                 .controlSize(.small)
                 .help("Next page")
                 .disabled(workspace.locked || workspace.historyLoading || workspace.historyPageOffset + workspace.historyPageSize >= workspace.historyTotalCount)
@@ -88,7 +90,9 @@ struct RunListPage: View {
                     Label("Reload history", systemImage: "arrow.clockwise")
                 }
                 .labelStyle(.iconOnly)
+                .accessibilityLabel("Reload saved run history")
                 .help("Reload saved run history")
+                .keyboardShortcut("r", modifiers: .command)
                 .disabled(workspace.locked)
             }
             ToolbarItem(placement: .primaryAction) {
@@ -98,6 +102,7 @@ struct RunListPage: View {
                     Label("Queue plan", systemImage: "text.badge.plus")
                 }
                 .labelStyle(.iconOnly)
+                .accessibilityLabel("Queue a Terraform plan")
                 .help("Queue a Terraform plan")
                 .disabled(workspace.locked || workspace.historyLoading || !workspace.isValid || workspace.historyError != nil)
             }
@@ -119,6 +124,7 @@ struct RunListPage: View {
                 } label: {
                     Label("Run history actions", systemImage: "ellipsis.circle")
                 }
+                .accessibilityLabel("Run history actions")
                 .help("Export or remove saved run history")
             }
         }

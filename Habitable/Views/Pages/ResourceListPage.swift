@@ -15,10 +15,10 @@ struct ResourceSummaryView: View {
 //            if resource.name != nil {
 //                Text("\"\(resource.name!)\"")
 //            }
-            if resource.address != nil {
-                Text("\(resource.address!)")
-                    .font(.system(.body, design: .monospaced))
-            }
+            Text(resource.address ?? "Unnamed resource")
+                .font(.system(.body, design: .monospaced))
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
 //            if resource.type != nil {
 //                Text("(\(resource.type!))")
 //            }
@@ -64,6 +64,7 @@ struct ResourceListPage: View {
                 ForEach(filteredResources) { resource in
                     ResourceSummaryView(resource: resource)
                         .lineLimit(2)
+                        .accessibilityElement(children: .combine)
                         .tag(resource.address ?? resource.id.uuidString)
                 }
             }
@@ -76,9 +77,11 @@ struct ResourceListPage: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .help("Refresh state")
                 }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(workspace.locked)
             }
             ToolbarItem {
-                SearchField(search: $searchText)
+                SearchField(search: $searchText, accessibilityLabel: "Search resources")
                     .frame(minWidth: 100, idealWidth: 200, maxWidth: .infinity)
             }
         }

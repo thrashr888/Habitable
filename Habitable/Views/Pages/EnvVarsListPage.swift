@@ -10,22 +10,45 @@ import SwiftUI
 struct EnvironmentVariableSummaryView: View {
     @ObservedObject var variable: EnvironmentVariable
     var body: some View {
-        Text("\(variable.key) = \(variable.sensitive ? "(sensitive value)" : variable.value)")
-        Text("\(variable.description)")
+        VStack(alignment: .leading) {
+            Text("\(variable.key) = \(variable.sensitive ? "(sensitive value)" : variable.value)")
+            if !variable.description.isEmpty { Text(variable.description).font(.caption).foregroundColor(.secondary) }
+            Text(variable.isUserInput ? "App override · This session · Overrides process environment" : "From process environment · Read-only")
+                .font(.caption).foregroundColor(.secondary)
+        }
     }
+}
+
+@MainActor
+private struct EnvironmentVariableEditorContext: Identifiable {
+    let id = UUID()
+    let draft: EnvironmentVariable
+    let original: EnvironmentVariable?
 }
 
 struct EnvVarListPage: View {
     @EnvironmentObject var workspace: Workspace
     
-    @State var environmentVariableModal: Bool = false
-    @State var newEV: EnvironmentVariable = EnvironmentVariable()
+    @State private var editorContext: EnvironmentVariableEditorContext?
+    @State private var inputError: String?
 
     var body: some View {
         VStack(alignment: .leading) {
             List {
                 ForEach(workspace.environmentVariables, id: \.id) { variable in
-                    EnvironmentVariableSummaryView(variable: variable)
+                    HStack {
+                        EnvironmentVariableSummaryView(variable: variable)
+                        Spacer()
+                        if variable.isUserInput {
+                            Button("Edit") { openEditor(for: variable) }
+                                .buttonStyle(.borderless).disabled(workspace.locked)
+                            Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless).disabled(workspace.locked)
+                                .accessibilityLabel("Remove app input \(variable.key)")
+                                .help("Remove app input")
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
                 }
             }
         }
@@ -36,51 +59,86 @@ struct EnvVarListPage: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .help("Refresh variables")
                 }
+                .disabled(workspace.locked)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
-                    self.environmentVariableModal = true
+                    openEditor(for: nil)
                 }) {
                     HStack(spacing: 10) {
                         Image(systemName: "text.badge.plus")
                         Text("Add")
                     }
                 }
+                .disabled(workspace.locked)
             }
         }
-        .sheet(isPresented: $environmentVariableModal) {
+        .sheet(item: $editorContext) { context in
             EnvironmentVariableEditor(
-                variable: newEV,
-                existingKeys: Set(workspace.environmentVariables.filter(\.isUserInput).map(\.key)),
+                variable: context.draft,
+                existingKeys: Set(workspace.environmentVariables.filter { $0.isUserInput && $0 !== context.original }.map(\.key)),
+                errorMessage: inputError,
                 onCancel: {
-                    newEV = EnvironmentVariable()
-                    environmentVariableModal = false
+                    editorContext = nil
+                    inputError = nil
                 },
-                onSave: {
-                    let isDuplicate = workspace.environmentVariables.contains { $0.isUserInput && $0.key == newEV.key }
-                    guard newEV.validationError == nil, !isDuplicate else { return }
-                    newEV.isUserInput = true
-                    workspace.addEnvironmentVariable(newEV)
-                    newEV = EnvironmentVariable()
-                    environmentVariableModal = false
+                onSave: { draft in
+                    let isDuplicate = workspace.environmentVariables.contains { $0 !== context.original && $0.isUserInput && $0.key == draft.key }
+                    guard draft.validationError == nil, !isDuplicate else { return }
+                    do {
+                        if let original = context.original {
+                            try workspace.updateEnvironmentVariable(original, key: draft.key, value: draft.value,
+                                                                    description: draft.description, sensitive: draft.sensitive)
+                        } else {
+                            try workspace.addEnvironmentVariable(draft)
+                        }
+                    } catch { inputError = error.localizedDescription; return }
+                    editorContext = nil
+                    inputError = nil
                 }
             )
         }
+        .alert("Could not remove environment variable", isPresented: Binding(
+            get: { inputError != nil && editorContext == nil },
+            set: { if !$0 { inputError = nil } }
+        )) {
+            Button("OK", role: .cancel) { inputError = nil }
+        } message: { Text(inputError ?? "") }
+    }
+
+    private func copy(_ source: EnvironmentVariable) -> EnvironmentVariable {
+        let result = EnvironmentVariable()
+        result.key = source.key; result.value = source.value; result.description = source.description
+        result.sensitive = source.sensitive
+        return result
+    }
+
+    private func openEditor(for original: EnvironmentVariable?) {
+        inputError = nil
+        editorContext = EnvironmentVariableEditorContext(
+            draft: original.map(copy) ?? EnvironmentVariable(), original: original
+        )
+    }
+
+    private func remove(_ variable: EnvironmentVariable) {
+        do { try workspace.removeEnvironmentVariable(variable); inputError = nil }
+        catch { inputError = error.localizedDescription }
     }
 }
 
 private struct EnvironmentVariableEditor: View {
     @ObservedObject var variable: EnvironmentVariable
     let existingKeys: Set<String>
+    let errorMessage: String?
     let onCancel: () -> Void
-    let onSave: () -> Void
+    let onSave: (EnvironmentVariable) -> Void
 
     private var isDuplicate: Bool { existingKeys.contains(variable.key) }
 
     var body: some View {
         Form {
             Section(header: Text("Save an environment variable").font(.headline)) {
-                Text("Saved values apply to plans started in this app session.")
+                Text("App inputs apply to plans started in this session and override process environment values.")
                     .font(.caption).foregroundColor(.secondary)
                 TextField("Key", text: $variable.key)
                 Toggle("Sensitive", isOn: $variable.sensitive)
@@ -99,11 +157,13 @@ private struct EnvironmentVariableEditor: View {
                 } else if isDuplicate {
                     Text("An environment variable with this key already exists.").foregroundColor(.red)
                 }
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
                 HStack {
-                    Button("Cancel", action: onCancel)
+                    Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                     Spacer()
-                    Button("Save", action: onSave)
+                    Button("Save") { onSave(variable) }
                         .disabled(variable.validationError != nil || isDuplicate)
+                        .keyboardShortcut(.return, modifiers: .command)
                 }
             }
         }
