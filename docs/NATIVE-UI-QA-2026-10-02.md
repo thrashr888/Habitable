@@ -20,4 +20,12 @@ The combined suite contains 77 tests, with zero failures and one optional offici
 
 Structured activity keeps the latest 200 entries and 100 diagnostics, latest summary/version/output messages, up to 500 resources, and eight stages per resource. Late events continue to update retained state. This is a bounded overview rather than a complete unbounded console archive.
 
-These observations validate the current native workflow improvements; they are not a comprehensive accessibility certification or a claim that every HCP provider/backend combination has been tested. Release packaging remains tracked separately in Habitable-6vl. The earlier 0.4.0 notarized archive predates these changes and must not be published.
+These observations validate the current native workflow improvements; they are not a comprehensive accessibility certification or a claim that every HCP provider/backend combination has been tested.
+
+## Published release verification
+
+The final universal Release build includes source commit `66f08fa`. A live check caught duplicate status-based row identities and newly inserted rows retaining a one-line height. Run rows now refresh their sizing with an identity combining the unique run ID and status. The signed release displayed distinct runs 1–7, and run 7 retained its date, counts, and status through Planned and Discarded.
+
+Version 0.4.0 was signed, notarized, stapled, published in the source repository and public Homebrew tap, and installed through `brew upgrade`. The public ZIP passed its SHA-256 check (`1d6233fd63706e23c8694ccd06168d76f495d74fef485f1e656ff306d0d9409c`). The installed app contains arm64 and x86_64, passes signature and stapled-ticket verification, and is accepted by Gatekeeper as Notarized Developer ID. Cask style and online audit passed. The running process was verified as `/Applications/Habitable.app/Contents/MacOS/Habitable`; its grouped settings and leading-aligned description editor were inspected live.
+
+The official release picker discovered Terraform 1.16.5 and successfully downloaded and selected it. After restart, the installed app displayed 1.16.5 Managed. The Active version label remained stale immediately after switching; that display refresh is tracked as a follow-up bug.
