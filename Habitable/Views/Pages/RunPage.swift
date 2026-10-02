@@ -324,7 +324,6 @@ struct RunSummaryView: View {
         .frame(height: 64, alignment: .topLeading)
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .id(run.status.rawValue)
     }
 }
 
