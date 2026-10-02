@@ -38,10 +38,6 @@ struct VariableListPage: View {
     @State var newTV: TerraformVariable = TerraformVariable()
     @State var newEV: EnvironmentVariable = EnvironmentVariable()
 
-    private var variableDuplicate: Bool {
-        workspace.terraformVariables.contains { $0.isUserInput && $0.key == newTV.key }
-    }
-
     var body: some View {
         VStack(alignment: .leading) {
             List {
@@ -71,49 +67,68 @@ struct VariableListPage: View {
             }
         }
         .sheet(isPresented: $terraformVariableModal) {
-            Form {
-                Section(header: Text("Save a Terraform variable")
-                            .font(.headline)) {
-                    Text("Saved values apply to plans started in this app session.")
-                        .font(.caption).foregroundColor(.secondary)
-                    TextField("Key", text: $newTV.key)
-                    Text("Value")
-                    if newTV.sensitive {
-                        SecureField("Value", text: $newTV.value)
-                    } else {
-                        TextEditor(text: $newTV.value)
-                            .frame(minHeight: 72)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Toggle("Value is JSON (list, map, number, boolean, or null)", isOn: $newTV.hcl)
-                    Toggle("Sensitive", isOn: $newTV.sensitive)
-                    Text("Hides this value and redacts matching input values from Habitable run logs and reviews. Also mark it sensitive in your Terraform configuration for Terraform’s own output.")
-                        .font(.caption).foregroundColor(.secondary)
-                    TextField("Description", text: $newTV.description)
-                        .multilineTextAlignment(.leading)
-                    if let validationError = newTV.validationError {
-                        Text(validationError).foregroundColor(.red)
-                    } else if variableDuplicate {
-                        Text("A variable with this key already exists.").foregroundColor(.red)
-                    }
-                    HStack {
-                        Button("Cancel") {
-                            newTV = TerraformVariable()
-                            terraformVariableModal = false
-                        }
-                        Spacer()
-                        Button("Save variable") {
-                            guard newTV.validationError == nil, !variableDuplicate else { return }
-                            newTV.isUserInput = true
-                            workspace.addTerraformVariable(newTV)
-                            newTV = TerraformVariable()
-                            terraformVariableModal = false
-                        }
-                        .disabled(newTV.validationError != nil || variableDuplicate)
-                    }
+            TerraformVariableEditor(
+                variable: newTV,
+                existingKeys: Set(workspace.terraformVariables.filter(\.isUserInput).map(\.key)),
+                onCancel: {
+                    newTV = TerraformVariable()
+                    terraformVariableModal = false
+                },
+                onSave: {
+                    let isDuplicate = workspace.terraformVariables.contains { $0.isUserInput && $0.key == newTV.key }
+                    guard newTV.validationError == nil, !isDuplicate else { return }
+                    newTV.isUserInput = true
+                    workspace.addTerraformVariable(newTV)
+                    newTV = TerraformVariable()
+                    terraformVariableModal = false
                 }
-            }.padding(/*@START_MENU_TOKEN@*/.all/*@END_MENU_TOKEN@*/)
+            )
         }
+    }
+}
+
+private struct TerraformVariableEditor: View {
+    @ObservedObject var variable: TerraformVariable
+    let existingKeys: Set<String>
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    private var isDuplicate: Bool { existingKeys.contains(variable.key) }
+
+    var body: some View {
+        Form {
+            Section(header: Text("Save a Terraform variable").font(.headline)) {
+                Text("Saved values apply to plans started in this app session.")
+                    .font(.caption).foregroundColor(.secondary)
+                TextField("Key", text: $variable.key)
+                Text("Value")
+                if variable.sensitive {
+                    SecureField("Value", text: $variable.value)
+                } else {
+                    TextEditor(text: $variable.value)
+                        .frame(minHeight: 72)
+                        .multilineTextAlignment(.leading)
+                }
+                Toggle("Value is JSON (list, map, number, boolean, or null)", isOn: $variable.hcl)
+                Toggle("Sensitive", isOn: $variable.sensitive)
+                Text("Hides this value and redacts matching input values from Habitable run logs and reviews. Also mark it sensitive in your Terraform configuration for Terraform’s own output.")
+                    .font(.caption).foregroundColor(.secondary)
+                TextField("Description", text: $variable.description)
+                    .multilineTextAlignment(.leading)
+                if let validationError = variable.validationError {
+                    Text(validationError).foregroundColor(.red)
+                } else if isDuplicate {
+                    Text("A variable with this key already exists.").foregroundColor(.red)
+                }
+                HStack {
+                    Button("Cancel", action: onCancel)
+                    Spacer()
+                    Button("Save variable", action: onSave)
+                        .disabled(variable.validationError != nil || isDuplicate)
+                }
+            }
+        }
+        .padding(.all)
     }
 }
 

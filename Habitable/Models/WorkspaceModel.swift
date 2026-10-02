@@ -453,6 +453,7 @@ class Workspace: ObservableObject {
         hasState = false
         hasVariables = false
         terraformVariables = []
+        environmentVariables = []
         historyActionRequestID = UUID()
         workingDirectory = dir
         refreshExecutionContext()
@@ -563,62 +564,147 @@ class Workspace: ObservableObject {
     }
     
     func checkVariables() {
-        guard let dir = workingDirectory else { return }
-        
+        guard let dir = workingDirectory else {
+            hasVariables = false
+            return
+        }
+
+        // Keep editor-created inputs stable while replacing all file/environment
+        // discoveries. This also removes values whose source file was deleted.
+        let userVariables = terraformVariables.filter(\.isUserInput)
+        let userEnvironmentVariables = environmentVariables.filter(\.isUserInput)
+        var discoveredVariables: [TerraformVariable] = []
         let fileManager = FileManager.default
-        var isDir: ObjCBool = false
-        if fileManager.fileExists(atPath: dir.appendingPathComponent("terraform.tfvars").path, isDirectory: &isDir) {
-            hasVariables = true
-            parseTextVariables(file: dir.appendingPathComponent("terraform.tfvars"))
+        let textFile = dir.appendingPathComponent("terraform.tfvars")
+        if fileManager.fileExists(atPath: textFile.path) {
+            discoveredVariables += parseTextVariables(file: textFile)
         }
-        isDir = false
-        if fileManager.fileExists(atPath: dir.appendingPathComponent("terraform.tfvars.json").path, isDirectory: &isDir) {
-            hasVariables = true
-            parseJSONVariables(file: dir.appendingPathComponent("terraform.tfvars.json"))
+        let jsonFile = dir.appendingPathComponent("terraform.tfvars.json")
+        if fileManager.fileExists(atPath: jsonFile.path) {
+            discoveredVariables += parseJSONVariables(file: jsonFile)
         }
-        
-        parseEnvironmentVariables()
+
+        // Keep one display entry per key, with the later-discovered JSON file
+        // taking precedence when both conventional tfvars files define it.
+        var discoveredByKey: [String: TerraformVariable] = [:]
+        for variable in discoveredVariables { discoveredByKey[variable.key] = variable }
+
+        terraformVariables = userVariables + discoveredByKey.values.sorted { $0.key < $1.key }
+        environmentVariables = userEnvironmentVariables + parseEnvironmentVariables()
+        hasVariables = fileManager.fileExists(atPath: textFile.path)
+            || fileManager.fileExists(atPath: jsonFile.path)
     }
-    
-    private func parseEnvironmentVariables() {
-        environmentVariables = []
+
+    private func parseEnvironmentVariables() -> [EnvironmentVariable] {
+        var discovered: [EnvironmentVariable] = []
         for (key, value) in ProcessInfo.processInfo.environment {
-            if !key.hasPrefix("TF_VAR_") { continue }
+            guard key.hasPrefix("TF_VAR_") else { continue }
             let variable = EnvironmentVariable()
             variable.key = key
             variable.value = value
-            environmentVariables.append(variable)
+            discovered.append(variable)
+        }
+        return discovered
+    }
+
+    /// Discovers only simple, single-line assignments. This intentionally does
+    /// not claim to parse HCL expressions or multiline collections; Terraform
+    /// remains the authority for interpreting the original file.
+    private func parseTextVariables(file: URL) -> [TerraformVariable] {
+        do {
+            let vars = try String(contentsOf: file, encoding: .utf8)
+            var discovered: [TerraformVariable] = []
+            var nestedExpressionDepth = 0
+            var blockComment = false
+            var heredocTerminator: String?
+            for line in vars.split(whereSeparator: \.isNewline) {
+                var trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let terminator = heredocTerminator {
+                    if trimmed == terminator { heredocTerminator = nil }
+                    continue
+                }
+                if blockComment {
+                    guard let end = trimmed.range(of: "*/") else { continue }
+                    trimmed = String(trimmed[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    blockComment = false
+                }
+                if trimmed.hasPrefix("/*") {
+                    guard let end = trimmed.range(of: "*/", range: trimmed.index(trimmed.startIndex, offsetBy: 2)..<trimmed.endIndex) else {
+                        blockComment = true
+                        continue
+                    }
+                    trimmed = String(trimmed[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if trimmed.isEmpty || trimmed.hasPrefix("#") || trimmed.hasPrefix("//") { continue }
+                if nestedExpressionDepth > 0 {
+                    nestedExpressionDepth += expressionDepthDelta(in: trimmed)
+                    nestedExpressionDepth = max(0, nestedExpressionDepth)
+                    continue
+                }
+                guard let equals = trimmed.firstIndex(of: "=") else { continue }
+                let key = String(trimmed[..<equals]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let value = String(trimmed[trimmed.index(after: equals)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty, !value.isEmpty else { continue }
+                if let markerRange = value.range(of: #"<<-?\s*([A-Za-z_][A-Za-z0-9_]*)"#, options: .regularExpression) {
+                    let marker = value[markerRange].replacingOccurrences(of: #"^<<-?\s*"#, with: "", options: .regularExpression)
+                    heredocTerminator = marker
+                    continue
+                }
+                let depth = expressionDepthDelta(in: value)
+                guard depth == 0 else {
+                    nestedExpressionDepth = max(0, depth)
+                    continue
+                }
+                let variable = TerraformVariable()
+                variable.key = key
+                variable.value = value
+                discovered.append(variable)
+            }
+            return discovered
+        } catch {
+            print(error.localizedDescription)
+            return []
         }
     }
-    
-    private func parseTextVariables(file: URL) {
+
+    private func expressionDepthDelta(in text: String) -> Int {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for character in text {
+            if inString {
+                if escaped { escaped = false }
+                else if character == "\\" { escaped = true }
+                else if character == "\"" { inString = false }
+                continue
+            }
+            if character == "\"" { inString = true }
+            else if "[{(".contains(character) { depth += 1 }
+            else if "]})".contains(character) { depth -= 1 }
+        }
+        return depth
+    }
+
+    private func parseJSONVariables(file: URL) -> [TerraformVariable] {
         do {
-            terraformVariables = []
-            let vars = try String(contentsOf: file, encoding: .utf8)
-            for v in vars.split(separator: "\n") {
-                let parts = v.split(separator: "=")
-                                
+            let data = try Data(contentsOf: file)
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+            return object.keys.sorted().compactMap { key in
+                guard let value = object[key] else { return nil }
                 let variable = TerraformVariable()
-                guard parts.count > 1 else { continue }
-                variable.key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-                if parts.count > 1 {
-                    // TODO parse json value
-                    variable.value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                variable.key = key
+                if let string = value as? String, !(value is NSNumber) {
+                    variable.value = string
+                } else if let encoded = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]),
+                          let rendered = String(data: encoded, encoding: .utf8) {
+                    variable.value = rendered
+                    variable.hcl = true
                 }
-                terraformVariables.append(variable)
+                return variable
             }
         } catch {
             print(error.localizedDescription)
-        }
-    }
-    
-    private func parseJSONVariables(file: URL) {
-        let json = JSON.init(file)
-        for (key, value):(String, JSON) in json {
-            let variable = TerraformVariable()
-            variable.key = key
-            variable.value = value.string ?? ""
-            terraformVariables.append(variable)
+            return []
         }
     }
 

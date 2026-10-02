@@ -52,6 +52,16 @@ struct ContentView: View {
                 self.selectedRun = nil
             }
         }
+        .onChange(of: workspace.state?.id) { _ in
+            if let selectedResource, let state = workspace.state,
+               !state.resources.contains(where: { ($0.address ?? $0.id.uuidString) == selectedResource }) {
+                self.selectedResource = nil
+            }
+            if let selectedOutput, let state = workspace.state,
+               !state.outputs.contains(where: { $0.key == selectedOutput }) {
+                self.selectedOutput = nil
+            }
+        }
     }
 
     private var sidebar: some View {

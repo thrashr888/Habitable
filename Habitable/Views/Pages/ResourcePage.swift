@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ShowResourceView: View {
-    @State var resource: ShowResource
+    var resource: ShowResource
     
     var providerLink: URL? {
         if let provider_name = resource.provider_name {

@@ -298,6 +298,78 @@ final class WorkspaceModelTests: XCTestCase {
     }
 
     @MainActor
+    func testVariableRefreshPreservesEditorInputsAndRemovesStaleDiscoveries() async throws {
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.workingDirectory = directory
+        let editorVariable = TerraformVariable()
+        editorVariable.key = "saved"
+        editorVariable.value = "keep-me"
+        editorVariable.sensitive = true
+        editorVariable.isUserInput = true
+        workspace.addTerraformVariable(editorVariable)
+        let editorEnvironment = EnvironmentVariable()
+        editorEnvironment.key = "EDITOR_TOKEN"
+        editorEnvironment.value = "secret"
+        editorEnvironment.sensitive = true
+        editorEnvironment.isUserInput = true
+        workspace.addEnvironmentVariable(editorEnvironment)
+
+        try "from_file = \"old\"\n".write(to: directory.appendingPathComponent("terraform.tfvars"), atomically: true, encoding: .utf8)
+        workspace.checkVariables()
+        XCTAssertEqual(workspace.terraformVariables.map(\.key), ["saved", "from_file"])
+        XCTAssertTrue(workspace.hasVariables)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("terraform.tfvars"))
+        workspace.checkVariables()
+
+        XCTAssertEqual(workspace.terraformVariables.map(\.key), ["saved"])
+        XCTAssertTrue(workspace.terraformVariables[0].sensitive)
+        XCTAssertEqual(workspace.environmentVariables.map(\.key), ["EDITOR_TOKEN"])
+        XCTAssertTrue(workspace.environmentVariables[0].sensitive)
+        XCTAssertFalse(workspace.hasVariables)
+
+        let otherWorkspace = root.appendingPathComponent("other-workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: otherWorkspace, withIntermediateDirectories: true)
+        workspace.runner = Runner(executableURL: try fakeTerraform("""
+        case "$1" in
+          version) echo '{"terraform_version":"1.16.4"}' ;;
+          validate) echo '{"valid":true}' ;;
+          show) echo '{"values":{"root_module":{"resources":[]}}}' ;;
+        esac
+        """))
+        workspace.updateWorkingDirectory(dir: otherWorkspace)
+        try await waitUntil { !workspace.locked }
+        XCTAssertFalse(workspace.terraformVariables.contains { $0.isUserInput })
+        XCTAssertFalse(workspace.environmentVariables.contains { $0.isUserInput })
+        XCTAssertFalse(workspace.hasVariables)
+    }
+
+    @MainActor
+    func testTfvarsDiscoveryPreservesEqualsAndTypedJSONValues() throws {
+        workspaceFile("message = \"east=west\"\nlist = [\"a\", \"b\"]\nobject = {\n  ignored = true\n}\n# comment\n", named: "terraform.tfvars")
+        workspaceFile(#"{"enabled":true,"count":3,"message":"north=south","nullable":null,"items":[1,"x"],"settings":{"region":"west"}}"#, named: "terraform.tfvars.json")
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.workingDirectory = directory
+        workspace.checkVariables()
+
+        let discovered = Dictionary(uniqueKeysWithValues: workspace.terraformVariables.map { ($0.key, $0) })
+        XCTAssertEqual(discovered["message"]?.value, "north=south")
+        XCTAssertEqual(discovered["list"]?.value, "[\"a\", \"b\"]")
+        XCTAssertNil(discovered["object"], "Multiline HCL values are outside this discovery reader's supported syntax")
+        XCTAssertEqual(discovered["enabled"]?.value, "true")
+        XCTAssertEqual(discovered["count"]?.value, "3")
+        XCTAssertEqual(discovered["nullable"]?.value, "null")
+        XCTAssertTrue(discovered["nullable"]?.hcl == true)
+        XCTAssertEqual(discovered["items"]?.value, "[1,\"x\"]")
+        XCTAssertEqual(discovered["settings"]?.value, #"{"region":"west"}"#)
+    }
+
+    private func workspaceFile(_ contents: String, named name: String) {
+        try! contents.write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+
+    @MainActor
     func testWorkspaceDescriptionSurvivesRestartAndIsScopedToCanonicalDirectory() async throws {
         let descriptions = WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions"))
         let otherDirectory = root.appendingPathComponent("other")

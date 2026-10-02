@@ -21,10 +21,6 @@ struct EnvVarListPage: View {
     @State var environmentVariableModal: Bool = false
     @State var newEV: EnvironmentVariable = EnvironmentVariable()
 
-    private var variableDuplicate: Bool {
-        workspace.environmentVariables.contains { $0.isUserInput && $0.key == newEV.key }
-    }
-
     var body: some View {
         VStack(alignment: .leading) {
             List {
@@ -53,47 +49,65 @@ struct EnvVarListPage: View {
             }
         }
         .sheet(isPresented: $environmentVariableModal) {
-            Form {
-                Section(header: Text("Save an environment variable")
-                            .font(.headline)) {
-                    Text("Saved values apply to plans started in this app session.")
-                        .font(.caption).foregroundColor(.secondary)
-                    TextField("Key", text: $newEV.key)
-                    Toggle("Sensitive", isOn: $newEV.sensitive)
-                    Text("Hides this value in Habitable. Terraform plan output follows the sensitivity declared in your Terraform configuration.")
-                        .font(.caption).foregroundColor(.secondary)
-                    if newEV.sensitive {
-                        SecureField("Value", text: $newEV.value)
-                    } else {
-                        TextField("Value", text: $newEV.value)
-                            .multilineTextAlignment(.leading)
-                    }
-                    TextField("Description", text: $newEV.description)
-                        .multilineTextAlignment(.leading)
-                    if let validationError = newEV.validationError {
-                        Text(validationError).foregroundColor(.red)
-                    } else if variableDuplicate {
-                        Text("An environment variable with this key already exists.").foregroundColor(.red)
-                    }
-                    
-                    HStack {
-                        Button("Cancel") {
-                            newEV = EnvironmentVariable()
-                            environmentVariableModal = false
-                        }
-                        Spacer()
-                        Button("Save") {
-                            guard newEV.validationError == nil, !variableDuplicate else { return }
-                            newEV.isUserInput = true
-                            workspace.addEnvironmentVariable(newEV)
-                            newEV = EnvironmentVariable()
-                            environmentVariableModal = false
-                        }
-                        .disabled(newEV.validationError != nil || variableDuplicate)
-                    }
+            EnvironmentVariableEditor(
+                variable: newEV,
+                existingKeys: Set(workspace.environmentVariables.filter(\.isUserInput).map(\.key)),
+                onCancel: {
+                    newEV = EnvironmentVariable()
+                    environmentVariableModal = false
+                },
+                onSave: {
+                    let isDuplicate = workspace.environmentVariables.contains { $0.isUserInput && $0.key == newEV.key }
+                    guard newEV.validationError == nil, !isDuplicate else { return }
+                    newEV.isUserInput = true
+                    workspace.addEnvironmentVariable(newEV)
+                    newEV = EnvironmentVariable()
+                    environmentVariableModal = false
                 }
-            }.padding(.all)
+            )
         }
+    }
+}
+
+private struct EnvironmentVariableEditor: View {
+    @ObservedObject var variable: EnvironmentVariable
+    let existingKeys: Set<String>
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    private var isDuplicate: Bool { existingKeys.contains(variable.key) }
+
+    var body: some View {
+        Form {
+            Section(header: Text("Save an environment variable").font(.headline)) {
+                Text("Saved values apply to plans started in this app session.")
+                    .font(.caption).foregroundColor(.secondary)
+                TextField("Key", text: $variable.key)
+                Toggle("Sensitive", isOn: $variable.sensitive)
+                Text("Hides this value in Habitable. Terraform plan output follows the sensitivity declared in your Terraform configuration.")
+                    .font(.caption).foregroundColor(.secondary)
+                if variable.sensitive {
+                    SecureField("Value", text: $variable.value)
+                } else {
+                    TextField("Value", text: $variable.value)
+                        .multilineTextAlignment(.leading)
+                }
+                TextField("Description", text: $variable.description)
+                    .multilineTextAlignment(.leading)
+                if let validationError = variable.validationError {
+                    Text(validationError).foregroundColor(.red)
+                } else if isDuplicate {
+                    Text("An environment variable with this key already exists.").foregroundColor(.red)
+                }
+                HStack {
+                    Button("Cancel", action: onCancel)
+                    Spacer()
+                    Button("Save", action: onSave)
+                        .disabled(variable.validationError != nil || isDuplicate)
+                }
+            }
+        }
+        .padding(.all)
     }
 }
 
