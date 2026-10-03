@@ -206,7 +206,7 @@ struct RunPageView: View {
             }
         }
         .listStyle(.inset)
-        .navigationTitle("Runs")
+
         .onAppear { followCurrentPhase() }
         .onChange(of: run.id) { _ in followCurrentPhase() }
         .onChange(of: run.status) { _ in followCurrentPhase() }

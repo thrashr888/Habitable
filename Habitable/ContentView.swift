@@ -69,36 +69,39 @@ struct ContentView: View {
                     if sidebarVisible {
                         sidebar.frame(minWidth: 180, idealWidth: 200, maxWidth: 240, maxHeight: .infinity)
                     }
-                    if selection?.hasDetailList == true {
-                        HSplitView {
-                            collection
-                                .frame(minWidth: 240, idealWidth: selection == .resources ? 460 : 280,
-                                       maxWidth: selection == .resources ? .infinity : 340,
-                                       maxHeight: .infinity)
-                            detail.frame(minWidth: selection == .resources ? 400 : 360, maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 0) {
+                        pageHeader
+                        Divider()
+                        if selection?.hasDetailList == true {
+                            HSplitView {
+                                collection
+                                    .frame(minWidth: 240, idealWidth: selection == .resources ? 460 : 280,
+                                           maxWidth: selection == .resources ? .infinity : 340,
+                                           maxHeight: .infinity)
+                                detail.frame(minWidth: selection == .resources ? 400 : 360, maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                        } else {
+                            page.frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                    } else {
-                        page.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        VStack(spacing: 2) {
-                            Text((selection ?? .workspace).title)
-                                .font(.headline).fixedSize(horizontal: true, vertical: false)
-                            Text(workspaceName).font(.caption).foregroundStyle(.secondary)
+                    QuietToolbar {
+                        ToolbarItem(placement: .navigation) {
+                            Button { sidebarVisible.toggle() } label: {
+                                Label(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
+                            }
+                            .buttonStyle(.borderless)
+                            .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+                            .keyboardShortcut("s", modifiers: [.command, .control])
+                        }
+                        ToolbarItem(placement: .principal) {
+                            Text(workspaceName).font(.body)
                                 .lineLimit(1).truncationMode(.middle)
+                                .frame(idealWidth: 280, maxWidth: 400)
+                                .help(workspace.workingDirectory?.path ?? workspaceName)
                         }
-                        .frame(maxWidth: 320)
-                        .help(workspace.workingDirectory?.path ?? workspaceName)
-                        .accessibilityElement(children: .combine)
-                    }
-                    ToolbarItem(placement: .navigation) {
-                        Button { sidebarVisible.toggle() } label: {
-                            Label(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
-                        }
-                        .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
-                        .keyboardShortcut("s", modifiers: [.command, .control])
                     }
                 }
             }
@@ -106,6 +109,8 @@ struct ContentView: View {
         .background(WorkspaceWindowIdentity(title: "\(workspaceName) — \((selection ?? .workspace).title)"))
         .environmentObject(workspace)
         .environmentObject(editors)
+        .buttonStyle(.borderless)
+        .groupBoxStyle(QuietGroupBoxStyle())
         .animation(nil, value: selection)
         .background(NavigationLayoutProbe(trace: navigationTrace, page: selection?.rawValue ?? "workspace")
             .allowsHitTesting(false))
@@ -160,6 +165,15 @@ struct ContentView: View {
                 self.selectedOutput = nil
             }
         }
+    }
+
+    private var pageHeader: some View {
+        Text((selection ?? .workspace).title)
+            .font(.title2.weight(.semibold)).lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20).padding(.vertical, 14)
+            .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var workspaceName: String {
@@ -351,8 +365,7 @@ struct ContentView_Previews: PreviewProvider {
     static var previews: some View { ContentView() }
 }
 
-/// Keep Window-menu identity useful while the principal toolbar owns the visible
-/// title. Native sidebar-bound titles can clip at the sidebar divider.
+/// Keep Window-menu identity useful; the content header owns the visible title.
 private struct WorkspaceWindowIdentity: NSViewRepresentable {
     let title: String
     func makeNSView(context: Context) -> IdentityView { IdentityView() }
@@ -370,5 +383,33 @@ private struct WorkspaceWindowIdentity: NSViewRepresentable {
             window?.title = title
             window?.titleVisibility = .hidden
         }
+    }
+}
+
+/// Preserve native toolbar controls while removing the OS shared glass capsule.
+struct QuietToolbar<Content: ToolbarContent>: ToolbarContent {
+    let content: Content
+    init(@ToolbarContentBuilder content: () -> Content) { self.content = content() }
+
+    @ToolbarContentBuilder var body: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            content.sharedBackgroundVisibility(.hidden)
+        } else {
+            content
+        }
+    }
+}
+
+struct QuietGroupBoxStyle: GroupBoxStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            configuration.label.font(.headline)
+            configuration.content.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }

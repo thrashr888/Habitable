@@ -115,49 +115,51 @@ struct RunListPage: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        .navigationTitle("Runs")
+
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button(action: workspace.reloadRunHistory) {
-                    Label("Reload history", systemImage: "arrow.clockwise")
-                }
-                .labelStyle(.iconOnly)
-                .accessibilityLabel("Reload saved run history")
-                .help("Reload saved run history")
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(workspace.locked)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: {
-                    workspace.queueRun { selection = $0 }
-                }) {
-                    Label(workspace.autoApply ? "Plan and apply automatically" : "Queue plan", systemImage: "text.badge.plus")
-                }
-                .labelStyle(.iconOnly)
-                .accessibilityLabel(workspace.autoApply ? "Plan and apply automatically" : "Queue a Terraform plan")
-                .help(workspace.autoApply ? "Create a plan and automatically apply its changes" : "Queue a Terraform plan")
-                .disabled(workspace.locked || workspace.historyLoading || !workspace.isValid || workspace.historyError != nil)
-            }
-            ToolbarItem(placement: .automatic) {
-                Menu {
-                    Button("Export selected run…", systemImage: "square.and.arrow.up", action: exportSelectedRun)
-                        .disabled(selectedSavedRun == nil || workspace.historyLoading || workspace.historyError != nil)
-                    Button("Delete selected saved run…", systemImage: "trash") {
-                        showDeleteConfirmation = true
+            QuietToolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button(action: workspace.reloadRunHistory) {
+                        Label("Reload history", systemImage: "arrow.clockwise")
                     }
-                    .disabled(!canDeleteSelectedRun || workspace.historyLoading || workspace.locked)
-                    Divider()
-                    Menu("Delete completed saved runs older than…") {
-                        retentionButton(days: 30, label: "30 days")
-                        retentionButton(days: 90, label: "90 days")
-                        retentionButton(days: 365, label: "1 year")
-                    }
-                    .disabled(workspace.historyLoading || workspace.locked || workspace.historyError != nil)
-                } label: {
-                    Label("Run history actions", systemImage: "ellipsis.circle")
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel("Reload saved run history")
+                    .help("Reload saved run history")
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(workspace.locked)
                 }
-                .accessibilityLabel("Run history actions")
-                .help("Export or remove saved run history")
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: {
+                        workspace.queueRun { selection = $0 }
+                    }) {
+                        Label(workspace.autoApply ? "Plan and apply automatically" : "Queue plan", systemImage: "text.badge.plus")
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel(workspace.autoApply ? "Plan and apply automatically" : "Queue a Terraform plan")
+                    .help(workspace.autoApply ? "Create a plan and automatically apply its changes" : "Queue a Terraform plan")
+                    .disabled(workspace.locked || workspace.historyLoading || !workspace.isValid || workspace.historyError != nil)
+                }
+                ToolbarItem(placement: .automatic) {
+                    Menu {
+                        Button("Export selected run…", systemImage: "square.and.arrow.up", action: exportSelectedRun)
+                            .disabled(selectedSavedRun == nil || workspace.historyLoading || workspace.historyError != nil)
+                        Button("Delete selected saved run…", systemImage: "trash") {
+                            showDeleteConfirmation = true
+                        }
+                        .disabled(!canDeleteSelectedRun || workspace.historyLoading || workspace.locked)
+                        Divider()
+                        Menu("Delete completed saved runs older than…") {
+                            retentionButton(days: 30, label: "30 days")
+                            retentionButton(days: 90, label: "90 days")
+                            retentionButton(days: 365, label: "1 year")
+                        }
+                        .disabled(workspace.historyLoading || workspace.locked || workspace.historyError != nil)
+                    } label: {
+                        Label("Run history actions", systemImage: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Run history actions")
+                    .help("Export or remove saved run history")
+                }
             }
         }
         .confirmationDialog("Delete this saved run?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
