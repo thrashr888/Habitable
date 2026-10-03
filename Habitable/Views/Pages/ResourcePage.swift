@@ -18,9 +18,9 @@ struct ShowResourceView: View {
     @State private var loadedDocumentationID: String?
     @State private var loadedProviderDocumentation: TerraformProviderDocumentation?
     @State private var loadedModuleDocumentation: TerraformModuleDocumentation?
-    @State private var loadedDeclarations: TerraformConfigurationMetadata?
+    @State private var loadedDeclaration: TerraformResourceDeclaration?
 
-    private var documentationID: String { "\(resource.id)-\(workspaceDirectory?.path ?? "")" }
+    private var documentationID: String { "\(resource.id)-\(resource.address ?? "")-\(workspaceDirectory?.path ?? "")" }
 
     private var attributes: [ResourceAttribute] {
         resource.displayAttributes
@@ -142,16 +142,22 @@ struct ShowResourceView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let address = resource.address,
-               let metadata = loadedDeclarations,
-               let declaration = TerraformConfigurationInspector.declaration(for: address, in: metadata),
+            if loadedDocumentationID == documentationID,
+               let address = resource.address,
+               let declaration = loadedDeclaration,
                let line = declaration.sourceLine {
                 HStack {
                     Text("Declared in \(declaration.sourceFile):\(line)")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     if let onOpenDeclaration {
-                        Button("Open declaration") { onOpenDeclaration(declaration.sourceFile, line) }
+                        Button("Open declaration") {
+                            guard let filename = TerraformDiagnosticSource.currentWorkspaceFile(
+                                filename: declaration.sourceFile, workspaceDirectory: workspaceDirectory),
+                                  let boundedLine = TerraformDiagnosticSource.boundedLine(
+                                    line, in: filename, workspaceDirectory: workspaceDirectory) else { return }
+                            onOpenDeclaration(filename, boundedLine)
+                        }
                             .buttonStyle(.borderless)
                     }
                 }
@@ -256,22 +262,28 @@ struct ShowResourceView: View {
         .padding()
         .frame(minWidth: 400, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity, alignment: .topLeading)
         .task(id: documentationID) {
+            loadedDeclaration = nil
             let id = documentationID
             let identity = resource.provider_name
             let type = resource.type
             let mode = resource.mode
             let address = resource.address
             let directory = workspaceDirectory
-            let result = await Task.detached(priority: .utility) {
+            let inspectionTask = Task.detached(priority: .utility) {
                 (TerraformProviderDocumentation.resolve(providerIdentity: identity, resourceType: type,
                     resourceMode: mode, lockFile: directory?.appendingPathComponent(".terraform.lock.hcl")),
                  TerraformModuleDocumentation.resolve(resourceAddress: address, workspaceDirectory: directory),
-                 directory.map { TerraformConfigurationInspector.inspectMetadata(directory: $0) })
-            }.value
+                 directory.flatMap { root in
+                     address.flatMap { TerraformConfigurationInspector.declarations(for: [$0], directory: root)[$0] }
+                 })
+            }
+            let result = await withTaskCancellationHandler(
+                operation: { await inspectionTask.value },
+                onCancel: { inspectionTask.cancel() })
             guard !Task.isCancelled else { return }
             loadedProviderDocumentation = result.0
             loadedModuleDocumentation = result.1
-            loadedDeclarations = result.2
+            loadedDeclaration = result.2
             loadedDocumentationID = id
         }
         .onChange(of: resource.address) { _ in schemaHelp.reset() }

@@ -212,6 +212,7 @@ class TerraformRun: ObservableObject, Identifiable {
     private(set) var gitDirty: Bool?
     private(set) var gitRemoteURL: String?
     private(set) var triggerSource: String?
+    private(set) var planOnly = false
     var gitShortCommit: String? { gitCommit.map { String($0.prefix(12)) } }
     var gitIsDetached: Bool { gitBranch == nil && gitCommit != nil }
 
@@ -399,7 +400,7 @@ class TerraformRun: ObservableObject, Identifiable {
         [.applied, .errored, .discarded, .canceled, .expired, .interrupted].contains(status)
     }
     var canConfirm: Bool {
-        !isRestored && !isCheckingContext && status == .planned && apply == nil && workspace?.locked == false
+        !planOnly && !isRestored && !isCheckingContext && status == .planned && apply == nil && workspace?.locked == false
             && workspace?.historyError == nil
             && workspace?.hasUnavailableRememberedInputs == false
             && !isUnchangedHCPPlan
@@ -441,6 +442,7 @@ class TerraformRun: ObservableObject, Identifiable {
         gitBranch = record.gitBranch; gitCommit = record.gitCommit
         gitSubject = record.gitSubject; gitDirty = record.gitDirty
         gitRemoteURL = record.gitRemoteURL; triggerSource = record.triggerSource
+        planOnly = record.planOnly == true
         terraformVersion = record.terraformVersion
         selectedTerraformWorkspace = record.selectedTerraformWorkspace ?? selectedTerraformWorkspace
         backendIdentity = record.backendIdentity ?? backendIdentity
@@ -483,7 +485,8 @@ class TerraformRun: ObservableObject, Identifiable {
                                applyStartedAt: applyStartedAt, applyFinishedAt: applyFinishedAt,
                                gitBranch: gitBranch, gitCommit: gitCommit,
                                gitSubject: gitSubject, gitDirty: gitDirty,
-                               gitRemoteURL: gitRemoteURL, triggerSource: triggerSource)
+                               gitRemoteURL: gitRemoteURL, triggerSource: triggerSource,
+                               planOnly: planOnly ? true : nil)
         return workspace.persistRun(record, directory: directory)
     }
 

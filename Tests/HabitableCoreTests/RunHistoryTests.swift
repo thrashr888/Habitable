@@ -41,6 +41,83 @@ final class RunHistoryTests: XCTestCase {
         try FileManager.default.removeItem(at: root)
     }
 
+    @MainActor
+    func testGitTriggeredPlanOnlyPolicyPersistsAndBlocksApplyWithAutoApplyEnabled() throws {
+        var record = try store.create(workspace: directory, terraformVersion: "1.16.4", message: "Git HEAD changed",
+                                      triggerSource: "git-commit", planOnly: true)
+        record.status = .planned
+        record.updatedAt = record.createdAt.addingTimeInterval(1)
+        try store.save(record, workspace: directory)
+        let restoredRecord = try XCTUnwrap(store.load(workspace: directory).first)
+        XCTAssertTrue(restoredRecord.planOnly == true)
+
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  historyStore: store, commandCoordinator: testCommandCoordinator,
+                                  descriptionStore: testDescriptionStore)
+        workspace.workingDirectory = directory
+        workspace.autoApply = true
+        let run = TerraformRun(workspace: workspace, record: restoredRecord, restored: false)
+        XCTAssertFalse(run.canConfirm, "A Git-triggered plan remains plan-only even when auto-apply is enabled.")
+        XCTAssertTrue(run.canDiscard)
+        workspace.didPlan(run: run, plan: StructuredLog())
+        XCTAssertEqual(run.status, .planned, "The auto-apply callback must not start an apply for a Git-triggered plan.")
+        XCTAssertNil(run.apply)
+    }
+
+    @MainActor
+    func testLiveGitCommitQueuesPlanWithoutApplyingOrCatchingUp() async throws {
+        guard let path = ProcessInfo.processInfo.environment["HABITABLE_TEST_TERRAFORM"] else {
+            throw XCTSkip("Set HABITABLE_TEST_TERRAFORM for the Git-trigger integration test")
+        }
+        func git(_ arguments: [String]) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.currentDirectoryURL = directory
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        try git(["init", "-b", "main"])
+        try ".terraform/\n*.tfstate*\n".write(to: directory.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+        try #"resource "terraform_data" "example" { input = "first" }"#
+            .write(to: directory.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try git(["add", "."])
+        let commitArguments = ["-c", "commit.gpgsign=false", "-c", "user.name=Habitable Tests",
+                               "-c", "user.email=habitable@example.invalid", "commit", "-m"]
+        try git(commitArguments + ["baseline"])
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, historyStore: store,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.runner = Runner(executableURL: URL(fileURLWithPath: path))
+        workspace.workingDirectory = directory
+        workspace.initialize()
+        try await waitUntil { !workspace.locked && workspace.isValid }
+        workspace.autoApply = true
+        workspace.gitPlanOnCommitEnabled = true
+        defer { workspace.gitPlanOnCommitEnabled = false }
+        try await Task.sleep(for: .seconds(3))
+        XCTAssertTrue(workspace.runs.isEmpty, "Enabling must baseline HEAD without a catch-up plan")
+        try #"resource "terraform_data" "example" { input = "second" }"#
+            .write(to: directory.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try git(["add", "main.tf"])
+        try git(commitArguments + ["change configuration"])
+        try await waitUntil { workspace.runs.first?.status == .planned }
+        let run = try XCTUnwrap(workspace.runs.first)
+        XCTAssertTrue(run.planOnly)
+        XCTAssertEqual(run.triggerSource, "git-commit")
+        XCTAssertFalse(run.canConfirm)
+        XCTAssertNil(run.apply)
+        try await Task.sleep(for: .seconds(3))
+        XCTAssertEqual(workspace.runs.count, 1, "A stable HEAD must not queue duplicate runs")
+        XCTAssertEqual(run.status, .planned, "Global Auto Apply must not apply a commit-triggered plan")
+        workspace.gitPlanOnCommitEnabled = false
+        workspace.gitPlanOnCommitEnabled = true
+        try await Task.sleep(for: .seconds(3))
+        XCTAssertEqual(workspace.runs.count, 1, "Re-enabling must establish a fresh baseline")
+    }
+
     func testRoundTripPreservesResultsAndPrivatePermissions() throws {
         var record = try store.create(workspace: directory, terraformVersion: "1.16.4", message: "First deployment",
                                       selectedTerraformWorkspace: "production", backendIdentity: "remote #12345")

@@ -93,6 +93,17 @@ struct SettingsListPage: View {
                     Toggle("Apply automatically after planning", isOn: $workspace.autoApply)
                         .disabled(workspace.locked)
                 }
+
+                SettingsSection("Git", footer: "While Habitable is open, plan after a clean commit or checkout change. These runs are plan-only and cannot apply. The first HEAD after enabling or reopening establishes a baseline.") {
+                    Toggle("Plan after Git HEAD changes", isOn: $workspace.gitPlanOnCommitEnabled)
+                        .disabled(workspace.workingDirectory == nil)
+                    if let outcome = workspace.gitPlanTriggerOutcome {
+                        Text(outcome)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(24)

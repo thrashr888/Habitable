@@ -171,6 +171,10 @@ struct RunPageView: View {
                 }
 
                 if run.canDiscard || run.canConfirm {
+                    if run.planOnly {
+                        Text("Plan-only run. Create a new plan to apply these changes.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
                     if run.canConfirm {
                         if let plan = run.planDiff {
                             let consequences = plan.consequences
@@ -301,7 +305,7 @@ private struct PlanReviewSections: View {
     let diff: TerraformPlan?
     let workspaceDirectory: URL?
     let onOpenDeclaration: ((String, Int) -> Void)?
-    @State private var declarations: TerraformConfigurationMetadata?
+    @State private var declarations: [String: TerraformResourceDeclaration] = [:]
     @State private var addressFilter = ""
     @State private var operationFilter = "All"
 
@@ -326,6 +330,11 @@ private struct PlanReviewSections: View {
             else if item.action == "update" { result.1 += 1 }
             else if item.action == "read" { result.4 += 1 }
         }
+    }
+
+    private var declarationTaskID: String {
+        let addresses = (diff?.resourceChanges ?? []).map(\.address).sorted().joined(separator: "\u{0}")
+        return "\(workspaceDirectory?.path ?? "")\u{0}\(addresses)"
     }
 
     var body: some View {
@@ -371,16 +380,18 @@ private struct PlanReviewSections: View {
                             SafeCopyButton(value: change.address,
                                            label: "Copy resource address \(change.address)",
                                            showsTitle: true)
-                            if let declarations,
-                               let declaration = TerraformConfigurationInspector.declaration(for: change.address, in: declarations),
+                            if let declaration = declarations[change.address],
                                let line = declaration.sourceLine {
                                 HStack {
                                     Text("Current declaration: \(declaration.sourceFile):\(line)")
                                         .font(.caption).foregroundStyle(.secondary)
                                     Spacer()
                                     if let onOpenDeclaration {
-                                        Button("Open current declaration") { onOpenDeclaration(declaration.sourceFile, line) }
-                                            .buttonStyle(.borderless)
+                                        Button("Open current declaration") {
+                                            guard let boundedLine = TerraformDiagnosticSource.boundedLine(
+                                                line, in: declaration.sourceFile, workspaceDirectory: workspaceDirectory) else { return }
+                                            onOpenDeclaration(declaration.sourceFile, boundedLine)
+                                        }.buttonStyle(.borderless)
                                     }
                                 }
                             }
@@ -488,11 +499,16 @@ private struct PlanReviewSections: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .task(id: workspaceDirectory?.path) {
-            guard let workspaceDirectory else { declarations = nil; return }
-            let inspected = await Task.detached(priority: .utility) {
-                TerraformConfigurationInspector.inspectMetadata(directory: workspaceDirectory)
-            }.value
+        .task(id: declarationTaskID) {
+            declarations = [:]
+            guard let workspaceDirectory else { return }
+            let addresses = (diff?.resourceChanges ?? []).map(\.address)
+            let inspectionTask = Task.detached(priority: .utility) {
+                TerraformConfigurationInspector.declarations(for: addresses, directory: workspaceDirectory)
+            }
+            let inspected = await withTaskCancellationHandler(
+                operation: { await inspectionTask.value },
+                onCancel: { inspectionTask.cancel() })
             guard !Task.isCancelled else { return }
             declarations = inspected
         }
