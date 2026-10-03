@@ -185,6 +185,10 @@ class TerraformRun: ObservableObject, Identifiable {
 
     private func appendHistoryEvent(_ event: JSON, phase: RunStatus) {
         guard let line = event.rawString(options: [.sortedKeys]) else { return }
+        if event["@message"].string == "[Earlier live output omitted; consult the completed run events]" {
+            if phase == .planning { planHistoryOutputTruncated = true }
+            else { applyHistoryOutputTruncated = true }
+        }
         if event["type"].string == "version" {
             if phase == .planning {
                 planHistoryVersionEvent = line
@@ -453,7 +457,7 @@ class TerraformRun: ObservableObject, Identifiable {
                 completion(plan, errorMessage)
                 return
             }
-            if let schemaError = liveLog.schemaError {
+            if let schemaError = plan?.schemaError ?? liveLog.schemaError {
                 workspace.unlock()
                 lease.release()
                 errorMessage = sensitiveInputRedactor.redact(schemaError)

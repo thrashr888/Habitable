@@ -25,3 +25,9 @@ Resource inspector scale, general durable-input/secret-storage design, comprehen
 - Native candidate reviewed the complex fixture: import/move rows, replacement order, module/count paths, removed output, and sensitive nested output were visible.
 - Native failure/retry: a broken expression produced an Errored run; Validate and plan revalidated and kept the run count unchanged while the expression remained invalid. After restoring the file, the same action produced a fresh Planned run and selected it.
 - Initial integration runs caught and fixed compact-NDJSON framing and version-only-history restoration regressions before release.
+
+## Distribution and installed QA
+
+0.4.4 build 8 was signed, notarized, stapled, published to the source repository and Homebrew tap, and upgraded through Homebrew. Cask style and online audit passed. The installed app reviewed and applied the local complex artifact, refreshed to seven resources, and preserved Applied status and resource completion events after restart. Earlier pending plans reopened as Expired and had no confirmation action.
+
+The first remote CI run exposed a timing-dependent omission-metadata case: the bounded Runner delivery queue can omit filler before it reaches the history tail. Late diagnostics still survive, but the history omission bit must also reflect that upstream marker. This is addressed by the follow-up patch; tests must continue requiring the omission notice.
