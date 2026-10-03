@@ -573,20 +573,26 @@ final class WorkspaceModelTests: XCTestCase {
             commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         workspace.runner = Runner(executableURL: executable)
         workspace.workingDirectory = directory
-        workspace.validateAndQueueRun()
+        var navigatedRunIDs: [UUID] = []
+        workspace.validateAndQueueRun { navigatedRunIDs.append($0) }
         try await waitUntil { !workspace.locked }
         XCTAssertFalse(workspace.isValid)
         XCTAssertTrue(workspace.errorMessage?.contains("Fix configuration") == true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("plan-started").path))
         XCTAssertTrue(workspace.runs.isEmpty)
+        XCTAssertTrue(navigatedRunIDs.isEmpty, "Failed validation must not navigate to a run")
 
         try Data().write(to: directory.appendingPathComponent("ready"))
-        workspace.validateAndQueueRun()
+        workspace.validateAndQueueRun { id in
+            XCTAssertTrue(workspace.runs.contains { $0.id == id && $0.isPersisted })
+            navigatedRunIDs.append(id)
+        }
         try await waitUntil { workspace.runs.first?.status == .planned && !workspace.locked }
         XCTAssertTrue(workspace.isValid)
         XCTAssertNil(workspace.errorMessage)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("plan-started").path))
         XCTAssertEqual(workspace.runs.count, 1)
+        XCTAssertEqual(navigatedRunIDs, [try XCTUnwrap(workspace.runs.first).id])
     }
 
     @MainActor

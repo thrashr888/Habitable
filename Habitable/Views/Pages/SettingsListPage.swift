@@ -12,92 +12,92 @@ struct SettingsListPage: View {
     @EnvironmentObject var workspace: Workspace
 
     var body: some View {
-        Form {
-            Section("Workspace") {
-                if let error = workspace.workspaceOpenError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Local folder").font(.headline)
-                    HStack(alignment: .top, spacing: 12) {
-                        Text(workspace.workingDirectory?.path ?? "No folder selected")
-                            .textSelection(.enabled)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Choose folder…", action: workspace.addUrl)
-                            .disabled(workspace.locked)
-                        if let directory = workspace.workingDirectory {
-                            Button("Reveal in Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([directory])
-                            }
-                            .disabled(!FileManager.default.fileExists(atPath: directory.path))
-                        }
-                    }
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Description")
-                    TextEditor(text: $workspace.description)
-                        .accessibilityLabel("Description")
-                        .multilineTextAlignment(.leading)
-                        .frame(minHeight: 80, maxHeight: 120)
-                        .padding(4)
-                        .background(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                    if let error = workspace.descriptionPersistenceError {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                SettingsSection("Workspace") {
+                    if let error = workspace.workspaceOpenError {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                     }
-                    if workspace.descriptionNeedsSave {
-                        Button("Retry saving description", action: workspace.retrySavingWorkspaceDescription)
-                            .disabled(workspace.locked)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Local folder").font(.headline)
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(workspace.workingDirectory?.path ?? "No folder selected")
+                                .textSelection(.enabled)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Choose folder…", action: workspace.addUrl)
+                                .disabled(workspace.locked)
+                            if let directory = workspace.workingDirectory {
+                                Button("Reveal in Finder") {
+                                    NSWorkspace.shared.activateFileViewerSelecting([directory])
+                                }
+                                .disabled(!FileManager.default.fileExists(atPath: directory.path))
+                            }
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description")
+                        TextEditor(text: $workspace.description)
+                            .accessibilityLabel("Description")
+                            .multilineTextAlignment(.leading)
+                            .frame(minHeight: 80, maxHeight: 120)
+                            .padding(4)
+                            .background(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                        if let error = workspace.descriptionPersistenceError {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        if workspace.descriptionNeedsSave {
+                            Button("Retry saving description", action: workspace.retrySavingWorkspaceDescription)
+                                .disabled(workspace.locked)
+                        }
                     }
                 }
-            }
 
-            if let error = workspace.errorMessage {
-                Section("Workspace status") {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-            }
-
-            if workspace.coordinationRecoveryRequired || workspace.coordinationRecoveryNotice != nil {
-                Section("Workspace coordination") {
-                    if workspace.coordinationRecoveryRequired {
-                        Text("A previous write failed while updating saved-plan coordination. Recovery checks that no Terraform command is using this workspace, advances its generation, and then clears the failure marker. Existing saved plans will no longer be usable; create a new plan before applying.")
-                            .foregroundStyle(.secondary)
+                if let error = workspace.errorMessage {
+                    SettingsSection("Workspace status") {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("Recover coordination", action: workspace.recoverCoordination)
-                            .disabled(workspace.locked)
-                    }
-                    if let notice = workspace.coordinationRecoveryNotice {
-                        Label(notice, systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                            .textSelection(.enabled)
                     }
                 }
-            }
 
-            TerraformVersionSettings(workspace: workspace)
+                if workspace.coordinationRecoveryRequired || workspace.coordinationRecoveryNotice != nil {
+                    SettingsSection("Workspace coordination") {
+                        if workspace.coordinationRecoveryRequired {
+                            Text("A previous write failed while updating saved-plan coordination. Recovery checks that no Terraform command is using this workspace, advances its generation, and then clears the failure marker. Existing saved plans will no longer be usable; create a new plan before applying.")
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Recover coordination", action: workspace.recoverCoordination)
+                                .disabled(workspace.locked)
+                        }
+                        if let notice = workspace.coordinationRecoveryNotice {
+                            Label(notice, systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
 
-            Section {
-                Toggle("Apply automatically after planning", isOn: $workspace.autoApply)
-                    .disabled(workspace.locked)
-            } header: {
-                Text("Execution")
-            } footer: {
-                Text("When enabled, a successful plan applies immediately without a review step.")
+                TerraformVersionSettings(workspace: workspace)
+
+                SettingsSection("Execution", footer: "When enabled, a successful plan applies immediately without a review step.") {
+                    Toggle("Apply automatically after planning", isOn: $workspace.autoApply)
+                        .disabled(workspace.locked)
+                }
             }
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .formStyle(.grouped)
-        .frame(maxWidth: 760)
+        .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("Settings")
     }
@@ -117,7 +117,7 @@ struct TerraformVersionSettings: View {
     @State private var selection = ""
 
     var body: some View {
-        Section {
+        SettingsSection("Terraform", footer: "Downloads are verified and stored by Habitable. Changing versions discards pending plans; queue a new plan before applying.") {
             LabeledContent("Active version") {
                 Text(workspace.terraformVersion)
                     .monospacedDigit()
@@ -178,10 +178,6 @@ struct TerraformVersionSettings: View {
             if let error = catalog.error {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
             }
-        } header: {
-            Text("Terraform")
-        } footer: {
-            Text("Downloads are verified and stored by Habitable. Changing versions discards pending plans; queue a new plan before applying.")
         }
         .task {
             await catalog.refresh()
@@ -203,6 +199,36 @@ struct TerraformVersionSettings: View {
             workspace.unlock()
             if let executable = executable {
                 workspace.useTerraform(version: release.version, executableURL: executable)
+            }
+        }
+    }
+}
+
+private struct SettingsSection<Content: View>: View {
+    let title: String
+    let footer: String?
+    let content: Content
+
+    init(_ title: String, footer: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 16) { content }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            } label: {
+                Text(title).font(.headline)
+            }
+            if let footer {
+                Text(footer)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
             }
         }
     }
