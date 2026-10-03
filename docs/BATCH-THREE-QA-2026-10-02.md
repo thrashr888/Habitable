@@ -31,3 +31,11 @@ Resource inspector scale, general durable-input/secret-storage design, comprehen
 0.4.4 build 8 was signed, notarized, stapled, published to the source repository and Homebrew tap, and upgraded through Homebrew. Cask style and online audit passed. The installed app reviewed and applied the local complex artifact, refreshed to seven resources, and preserved Applied status and resource completion events after restart. Earlier pending plans reopened as Expired and had no confirmation action.
 
 The first remote CI run exposed a timing-dependent omission-metadata case: the bounded Runner delivery queue can omit filler before it reaches the history tail. Late diagnostics still survive, but the history omission bit must also reflect that upstream marker. This is addressed by the follow-up patch; tests must continue requiring the omission notice.
+
+## Final result
+
+0.4.5 build 9 is published to both repositories and installed through thrashr888/tap/habitable. Its universal ZIP SHA-256 is bf1a27fff06facdfca816b5e579df429a9dd666143cab48e5540c404d4710d38; both uploaded asset digests match. Installed signature, stapled ticket, Gatekeeper, cask style, and online audit passed. The installed app reopened Ready on the local fixture and restored its Applied run, Errored run, and Expired older plans.
+
+Final remote gates passed: https://github.com/thrashr888/Habitable/actions/runs/37090533994 (revision d1bf20b7bd8b2211066be64eb383bbdf51e2f1e8). This includes 93 core tests with real Terraform and official release download, the Xcode 27 universal Release build, and architecture verification. CI exposed a startup CLI-version probe race in the unwritable-history test; injecting a fixed non-running fixture Runner isolated the intended failure without changing production context guards. The explicitly unsigned CI app verifier skips signature inspection; release ZIPs reject that mode and retain all strict distribution checks.
+
+The signed release remains tied to its exact build revision 8bd27c14f9bddb0ca71b62f16897281d29fa1f1b. Subsequent commits correct test fixtures and the standalone CI verifier; Habitable app sources and Package.swift are unchanged between the signed revision and the successful CI revision. The final local package suite also passed 93 tests (the separately verified optional online-download test is skipped by packaging unless enabled).
