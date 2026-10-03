@@ -38,6 +38,9 @@ class TerraformVariable: ObservableObject {
     /// True only for values explicitly saved in the editor. Workspace files
     /// discovered by the refresh action stay Terraform-managed/display-only.
     @Published var isUserInput = false
+    @Published var isRemembered = false
+    @Published var rememberedSecretUnavailable = false
+    @Published var rememberedSecretID: String?
 
     /// The value to place in Terraform's JSON variable file. Structured values
     /// are entered as JSON so strings, equals signs, and nested values survive
@@ -68,6 +71,9 @@ class EnvironmentVariable: ObservableObject {
     @Published var description: String = ""
     @Published var sensitive = false
     @Published var isUserInput = false
+    @Published var isRemembered = false
+    @Published var rememberedSecretUnavailable = false
+    @Published var rememberedSecretID: String?
 
     func validate() throws {
         guard !key.isEmpty, !key.contains("="), !key.contains("\0") else {

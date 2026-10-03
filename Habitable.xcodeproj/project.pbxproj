@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BC260000000000000000000001 /* RecentWorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC260000000000000000000002 /* RecentWorkspaceStore.swift */; };
+		BC250000000000000000000001 /* WorkspaceContextFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC250000000000000000000002 /* WorkspaceContextFingerprint.swift */; };
+		BC240000000000000000000001 /* WorkspaceInputStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC240000000000000000000002 /* WorkspaceInputStore.swift */; };
         BC2200000000000000000001 /* RunHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2200000000000000000002 /* RunHistory.swift */; };
 		BC2300000000000000000001 /* WorkspaceDescriptionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC2300000000000000000002 /* WorkspaceDescriptionStore.swift */; };
 		BB1100000000000000000001 /* TerraformReleases.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1100000000000000000002 /* TerraformReleases.swift */; };
@@ -51,6 +54,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		BC260000000000000000000002 /* RecentWorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentWorkspaceStore.swift; sourceTree = "<group>"; };
+		BC250000000000000000000002 /* WorkspaceContextFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceContextFingerprint.swift; sourceTree = "<group>"; };
+		BC240000000000000000000002 /* WorkspaceInputStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInputStore.swift; sourceTree = "<group>"; };
         BC2200000000000000000002 /* RunHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunHistory.swift; sourceTree = "<group>"; };
 		BC2300000000000000000002 /* WorkspaceDescriptionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDescriptionStore.swift; sourceTree = "<group>"; };
 		BB1100000000000000000002 /* TerraformReleases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformReleases.swift; sourceTree = "<group>"; };
@@ -127,6 +133,9 @@
 				8AA12B1B26427AC30048A4A9 /* Runner.swift */,
 				BB1100000000000000000002 /* TerraformReleases.swift */,
                 BC2200000000000000000002 /* RunHistory.swift */,
+				BC240000000000000000000002 /* WorkspaceInputStore.swift */,
+				BC250000000000000000000002 /* WorkspaceContextFingerprint.swift */,
+				BC260000000000000000000002 /* RecentWorkspaceStore.swift */,
 				BC2300000000000000000002 /* WorkspaceDescriptionStore.swift */,
 				8A926B592648C62A00FDBA5C /* RunModel.swift */,
 				8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */,
@@ -311,6 +320,9 @@
 				8AA12B1C26427AC30048A4A9 /* Runner.swift in Sources */,
 				BB1100000000000000000001 /* TerraformReleases.swift in Sources */,
                 BC2200000000000000000001 /* RunHistory.swift in Sources */,
+				BC240000000000000000000001 /* WorkspaceInputStore.swift in Sources */,
+				BC250000000000000000000001 /* WorkspaceContextFingerprint.swift in Sources */,
+				BC260000000000000000000001 /* RecentWorkspaceStore.swift in Sources */,
 				BC2300000000000000000001 /* WorkspaceDescriptionStore.swift in Sources */,
 				8A926B79264FA36900FDBA5C /* OutputPage.swift in Sources */,
 				8AF213252639E8BC009F97C2 /* HabitableApp.swift in Sources */,

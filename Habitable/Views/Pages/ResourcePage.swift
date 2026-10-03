@@ -1,70 +1,96 @@
 //
-//  Resource.swift
+//  ResourcePage.swift
 //  Habitable
 //
-//  Created by Paul Thrasher on 5/14/21.
-//
 
+import AppKit
 import SwiftUI
 
 struct ShowResourceView: View {
     var resource: ShowResource
-    
-    var providerLink: URL? {
-        if let provider_name = resource.provider_name {
-            return URL(string: "https://\(provider_name)")!
-        }
-        return nil
+    @State private var searchText = ""
+
+    private var attributes: [ResourceAttribute] {
+        resourceAttributes(values: resource.values, sensitiveValues: resource.sensitiveValues)
     }
-    
-//    var id = UUID()
-//    var address: String?
-//    var mode: String?
-//    var type: String?
-//    var name: String?
-//    var provider_name: String?
-//    var schema_version: Int?
-    
+
+    private var filteredAttributes: [ResourceAttribute] {
+        guard !searchText.isEmpty else { return attributes }
+        return attributes.filter { $0.searchableText.localizedCaseInsensitiveContains(searchText) }
+    }
+
     var body: some View {
-        VStack(alignment: .leading) {
-            if let name = resource.name {
-                Text("Name")
-                    .font(.headline)
-                Text("\"\(name)\"")
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 7) {
+                if let address = resource.address {
+                    LabeledContent("Address") {
+                        Text(address).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+                if let provider = resource.provider_name {
+                    LabeledContent("Provider") {
+                        if let url = terraformProviderRegistryURL(provider) {
+                            Link(provider, destination: url)
+                        } else {
+                            Text(provider).textSelection(.enabled)
+                        }
+                    }
+                }
+                if let mode = resource.mode { LabeledContent("Mode", value: mode) }
+                if let type = resource.type { LabeledContent("Type", value: type) }
+                if let name = resource.name { LabeledContent("Name", value: name) }
+                if let version = resource.schema_version { LabeledContent("Schema version", value: String(version)) }
             }
-            if let address = resource.address {
-                Text("Address")
-                    .font(.headline)
-                    .padding(.top)
-                Text("\(address)")
-                    .font(.system(.body, design: .monospaced))
+
+            Divider()
+            HStack {
+                Text("Attributes").font(.headline)
+                Spacer()
+                Text("\(filteredAttributes.count)").foregroundStyle(.secondary)
             }
-            if let mode = resource.mode {
-                Text("Mode")
-                    .font(.headline)
-                    .padding(.top)
-                Text("\(mode)")
+            if !attributes.isEmpty {
+                TextField("Search attributes", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
             }
-            if let type = resource.type {
-                Text("Type")
-                    .font(.headline)
-                    .padding(.top)
-                Text("\(type)")
+            if filteredAttributes.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: searchText.isEmpty ? "list.bullet.rectangle" : "magnifyingglass")
+                        .font(.title2).foregroundStyle(.secondary)
+                    Text(searchText.isEmpty ? "No attributes" : "No matches").font(.headline)
+                    Text(searchText.isEmpty ? "This resource has no recorded values." : "Try another search.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(filteredAttributes) { attribute in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(attribute.path)
+                            .font(.system(.callout, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(minWidth: 150, alignment: .leading)
+                        Text(attribute.value)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(attribute.value, forType: .string)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy value")
+                        .accessibilityLabel("Copy value for \(attribute.path)")
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listStyle(.plain)
             }
-            if let pl = providerLink {
-                Text("Provider name")
-                    .font(.headline)
-                    .padding(.top)
-                Link(pl.absoluteString, destination: pl)
-                    .padding(0)
-                    .foregroundColor(.accentColor)
-            }
-//            if resource.values != nil {
-//                Text("\(resource.values!)")
-//            }
-            Spacer()
         }
-        .padding(.all)
+        .padding()
+        .frame(minWidth: 400, minHeight: 360)
     }
 }
 
@@ -73,16 +99,14 @@ struct ShowView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            if show.root_module.resources.count > 0 {
-                Text("Resources")
-                    .fontWeight(.bold)
+            if !show.root_module.resources.isEmpty {
+                Text("Resources").fontWeight(.bold)
                 List(show.root_module.resources, id: \.id) { resource in
                     ShowResourceView(resource: resource)
                 }
             }
-            if show.values.outputs.count > 0 {
-                Text("Outputs")
-                    .fontWeight(.bold)
+            if !show.values.outputs.isEmpty {
+                Text("Outputs").fontWeight(.bold)
                 OutputView(outputs: show.values.outputs)
             }
         }
@@ -91,7 +115,5 @@ struct ShowView: View {
 
 struct ShowModuleView: View {
     @State var run: TerraformRun
-    var body: some View {
-        Text("id: \(run.id)")
-    }
+    var body: some View { Text("id: \(run.id)") }
 }

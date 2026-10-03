@@ -165,6 +165,11 @@ class TerraformRun: ObservableObject, Identifiable {
     private var updatedAt = Date()
     private var planGeneration: Int64?
     private var planExecutionContext: String?
+    private var planWorkspaceFingerprint: String?
+    private var planInputsFingerprint: String?
+    @Published private(set) var isCheckingContext = false
+    private var contextVerificationTask: Task<Void, Never>?
+    private var contextFingerprintTask: Task<String, Error>?
     private var selectedTerraformWorkspace = "default"
     private var backendIdentity = "unknown backend"
     private var sensitiveInputRedactor = SensitiveInputRedactor(variables: [], environmentVariables: [])
@@ -175,11 +180,20 @@ class TerraformRun: ObservableObject, Identifiable {
 
     var isPersisted: Bool { stored }
 
-    var canCancel: Bool { activeCommand != nil && [.planning, .applying].contains(status) }
+    var canCancel: Bool {
+        (activeCommand != nil && [.planning, .applying].contains(status))
+            || (isCheckingContext && [.planning, .planned].contains(status))
+    }
 
     func cancel() {
         guard canCancel, !isCanceling else { return }
         isCanceling = true
+        if isCheckingContext, activeCommand == nil {
+            status = .canceled
+            contextFingerprintTask?.cancel()
+            contextVerificationTask?.cancel()
+            return
+        }
         activeCommand?.cancel()
     }
 
@@ -295,7 +309,9 @@ class TerraformRun: ObservableObject, Identifiable {
 
     var historyNotice: String? {
         switch status {
-        case .expired: return "This plan is from an earlier session. Queue a new plan before applying."
+        case .expired: return isRestored
+            ? "This plan is from an earlier session. Queue a new plan before applying."
+            : "This plan is no longer valid. Create a new plan before applying."
         case .interrupted: return "This run was recorded before its command finished. Its outcome is unknown; refresh state and review a new plan. It may still be running in another session."
         default:
             guard isRestored else { return nil }
@@ -308,8 +324,9 @@ class TerraformRun: ObservableObject, Identifiable {
         [.applied, .errored, .discarded, .canceled, .expired, .interrupted].contains(status)
     }
     var canConfirm: Bool {
-        !isRestored && status == .planned && apply == nil && workspace?.locked == false
+        !isRestored && !isCheckingContext && status == .planned && apply == nil && workspace?.locked == false
             && workspace?.historyError == nil
+            && workspace?.hasUnavailableRememberedInputs == false
             && !isUnchangedHCPPlan
     }
     var isUnchangedHCPPlan: Bool {
@@ -398,6 +415,7 @@ class TerraformRun: ObservableObject, Identifiable {
 
     func doPlan(_ completion: @escaping (StructuredLog?, String?) -> Void) {
         guard !isRestored, status == .pending, let workspace,
+              !workspace.hasUnavailableRememberedInputs,
               !workspace.locked, let directory = workspaceDirectory,
               workspace.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
         let lease: WorkspaceCommandCoordinator.Lease
@@ -424,6 +442,67 @@ class TerraformRun: ObservableObject, Identifiable {
             return
         }
         workspace.lock(self)
+        let inputsFingerprint = WorkspaceContextFingerprint.inputsFingerprint(
+            terraformVariables: variables, environmentVariables: environmentVariables
+        )
+        let context = WorkspaceContextCaptureContext(
+            directory: directory, terraformWorkspace: selectedTerraformWorkspace,
+            backendIdentity: backendIdentity, terraformVersion: terraformVersion,
+            terraformExecutable: workspace.runner.executableURL, inputsFingerprint: inputsFingerprint
+        )
+        planWorkspaceFingerprint = nil
+        planInputsFingerprint = inputsFingerprint
+        isCheckingContext = true
+        contextVerificationTask = Task { [self, workspace] in
+            do {
+                guard !Task.isCancelled, status == .planning else {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                let capture = WorkspaceContextFingerprint.captureOffMainActor(context)
+                contextFingerprintTask = capture
+                let fingerprint = try await capture.value
+                contextFingerprintTask = nil
+                guard !Task.isCancelled, status == .planning else {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                guard currentInputsFingerprint(in: workspace) == context.inputsFingerprint else {
+                    failContextCheck(workspace: workspace, lease: lease, status: .errored,
+                                     message: "Terraform variable inputs changed before planning started. Try planning again.",
+                                     completion: completion)
+                    return
+                }
+                isCheckingContext = false
+                contextVerificationTask = nil
+                launchPlan(variables: variables, environmentVariables: environmentVariables,
+                           workspace: workspace, lease: lease, context: context,
+                           fingerprint: fingerprint, completion: completion)
+            } catch {
+                if Task.isCancelled || status == .canceled {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                contextFingerprintTask = nil
+                contextVerificationTask = nil
+                isCheckingContext = false
+                workspace.unlock()
+                lease.release()
+                finishCommand()
+                status = .errored
+                errorMessage = error.localizedDescription
+                workspace.isValid = false
+                workspace.runner.discardPlan(runId: id.uuidString)
+                persist()
+                completion(nil, errorMessage)
+            }
+        }
+    }
+
+    private func launchPlan(variables: [TerraformVariable], environmentVariables: [EnvironmentVariable],
+                            workspace: Workspace, lease: WorkspaceCommandCoordinator.Lease,
+                            context: WorkspaceContextCaptureContext, fingerprint: String,
+                            completion: @escaping (StructuredLog?, String?) -> Void) {
         let runner = workspace.runner
         textOutput = ""
         planHistoryOutput = nil
@@ -432,7 +511,7 @@ class TerraformRun: ObservableObject, Identifiable {
         let liveLog = StructuredLog()
         let decoder = NDJSONStreamDecoder()
         plan = liveLog
-        activeCommand = runner.plan(workingDirectory: directory, runId: id.uuidString,
+        activeCommand = runner.plan(workingDirectory: context.directory, runId: id.uuidString,
                     variables: variables,
                     environmentVariables: environmentVariables,
                     onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog, phase: .planning) }) { [self, workspace] output, error in
@@ -469,47 +548,114 @@ class TerraformRun: ObservableObject, Identifiable {
                 completion(plan, errorMessage)
                 return
             }
-            // Review exactly the saved plan that apply will receive. A plan that cannot
-            // be inspected is retired instead of becoming confirmable.
-            activeCommand = runner.showPlan(workingDirectory: directory, runId: id.uuidString) { [self, workspace] showOutput, showError in
-                finishCommand()
-                workspace.unlock()
-                if showError == nil, let showOutput = sensitiveInputRedactor.redact(showOutput),
-                   let reviewedPlan = parseTerraformPlan(showOutput) {
-                    planDiff = reviewedPlan
-                    planGeneration = lease.generation
-                    planExecutionContext = workspace.executionContextIdentifier
-                    status = .planned
-                    workspace.isValid = true
-                } else {
-                    let formatVersion = showOutput.flatMap { text -> String? in
-                        guard let data = text.data(using: .utf8), let json = try? JSON(data: data) else { return nil }
-                        return json["format_version"].string
+            finishCommand()
+            isCheckingContext = true
+            contextVerificationTask = Task { [self, workspace] in
+                do {
+                    guard !Task.isCancelled, status == .planning else {
+                        finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion, result: plan)
+                        return
                     }
-                    if showError == nil, let formatVersion,
-                       !supportsTerraformJSONMajor(formatVersion, supported: [1]) {
-                        errorMessage = redactOutput("This saved plan uses unsupported Terraform JSON format version \(formatVersion). Habitable supports format version 1.x.")
-                    } else {
-                        errorMessage = redactOutput(showError?.message)
-                            ?? "Terraform could not inspect the saved plan."
+                    let capture = WorkspaceContextFingerprint.captureOffMainActor(context)
+                    contextFingerprintTask = capture
+                    let currentFingerprint = try await capture.value
+                    contextFingerprintTask = nil
+                    guard !Task.isCancelled, status == .planning else {
+                        finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion, result: plan)
+                        return
                     }
-                    status = showError?.cancelled == true ? .canceled : .errored
-                    if showError?.cancelled != true { workspace.isValid = false }
+                    guard currentInputsFingerprint(in: workspace) == context.inputsFingerprint else {
+                        failContextCheck(workspace: workspace, lease: lease, status: .expired,
+                                         message: "Terraform variable inputs changed while planning. Create a new plan before applying.",
+                                         completion: completion, result: plan)
+                        return
+                    }
+                    guard currentFingerprint == fingerprint else {
+                        isCheckingContext = false
+                        contextVerificationTask = nil
+                        finishCommand()
+                        workspace.unlock()
+                        lease.release()
+                        status = .expired
+                        errorMessage = "Terraform configuration, variables, state, or workspace context changed while planning. Create a new plan before applying."
+                        workspace.isValid = false
+                        runner.discardPlan(runId: id.uuidString)
+                        persist()
+                        completion(plan, errorMessage)
+                        return
+                    }
+                    isCheckingContext = false
+                    contextVerificationTask = nil
+                    reviewSavedPlan(runner: runner, workspace: workspace, lease: lease,
+                                    context: context, fingerprint: fingerprint, completion: completion)
+                } catch {
+                    if Task.isCancelled || status == .canceled {
+                        finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion, result: plan)
+                        return
+                    }
+                    contextFingerprintTask = nil
+                    contextVerificationTask = nil
+                    isCheckingContext = false
+                    finishCommand()
+                    workspace.unlock()
+                    lease.release()
+                    status = .expired
+                    errorMessage = error.localizedDescription
+                    workspace.isValid = false
                     runner.discardPlan(runId: id.uuidString)
+                    persist()
+                    completion(plan, errorMessage)
                 }
-                if let changes = plan?.changeSummaries.last {
-                    added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove
-                }
-                let saved = persist()
-                lease.release()
-                if saved, status == .planned, let plan { workspace.didPlan(run: self, plan: plan) }
-                completion(plan, errorMessage)
             }
+        }
+    }
+
+    private func reviewSavedPlan(runner: Runner, workspace: Workspace,
+                                 lease: WorkspaceCommandCoordinator.Lease,
+                                 context: WorkspaceContextCaptureContext, fingerprint: String,
+                                 completion: @escaping (StructuredLog?, String?) -> Void) {
+        // Review exactly the saved plan that apply will receive. A plan that cannot
+        // be inspected is retired instead of becoming confirmable.
+        activeCommand = runner.showPlan(workingDirectory: context.directory, runId: id.uuidString) { [self, workspace] showOutput, showError in
+            finishCommand()
+            workspace.unlock()
+            if showError == nil, let showOutput = sensitiveInputRedactor.redact(showOutput),
+               let reviewedPlan = parseTerraformPlan(showOutput) {
+                planDiff = reviewedPlan
+                planGeneration = lease.generation
+                planExecutionContext = workspace.executionContextIdentifier
+                planWorkspaceFingerprint = fingerprint
+                status = .planned
+                workspace.isValid = true
+            } else {
+                let formatVersion = showOutput.flatMap { text -> String? in
+                    guard let data = text.data(using: .utf8), let json = try? JSON(data: data) else { return nil }
+                    return json["format_version"].string
+                }
+                if showError == nil, let formatVersion,
+                   !supportsTerraformJSONMajor(formatVersion, supported: [1]) {
+                    errorMessage = redactOutput("This saved plan uses unsupported Terraform JSON format version \(formatVersion). Habitable supports format version 1.x.")
+                } else {
+                    errorMessage = redactOutput(showError?.message)
+                        ?? "Terraform could not inspect the saved plan."
+                }
+                status = showError?.cancelled == true ? .canceled : .errored
+                if showError?.cancelled != true { workspace.isValid = false }
+                runner.discardPlan(runId: id.uuidString)
+            }
+            if let changes = plan?.changeSummaries.last {
+                added = changes.changes.add; changed = changes.changes.change; destroyed = changes.changes.remove
+            }
+            let saved = persist()
+            lease.release()
+            if saved, status == .planned, let plan { workspace.didPlan(run: self, plan: plan) }
+            completion(plan, errorMessage)
         }
     }
 
     func doApply(_ completion: @escaping (StructuredLog?, String?) -> Void) {
         guard canConfirm, let workspace, let directory = workspaceDirectory,
+              !workspace.hasUnavailableRememberedInputs,
               workspace.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
         let lease: WorkspaceCommandCoordinator.Lease
         do {
@@ -528,14 +674,136 @@ class TerraformRun: ObservableObject, Identifiable {
             completion(nil, errorMessage)
             return
         }
+        let variables = workspace.terraformVariables.filter(\.isUserInput)
+        let environmentVariables = workspace.environmentVariables.filter(\.isUserInput)
+        let inputsFingerprint = WorkspaceContextFingerprint.inputsFingerprint(
+            terraformVariables: variables, environmentVariables: environmentVariables
+        )
+        let currentContext = WorkspaceContextCaptureContext(
+            directory: directory, terraformWorkspace: workspace.selectedTerraformWorkspace,
+            backendIdentity: workspace.backendIdentity, terraformVersion: terraformVersion,
+            terraformExecutable: workspace.runner.executableURL, inputsFingerprint: inputsFingerprint
+        )
+        isCheckingContext = true
+        workspace.lock(self)
+        contextVerificationTask = Task { [self, workspace] in
+            do {
+                guard !Task.isCancelled, status == .planned else {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                let capture = WorkspaceContextFingerprint.captureOffMainActor(currentContext)
+                contextFingerprintTask = capture
+                let currentFingerprint = try await capture.value
+                contextFingerprintTask = nil
+                guard !Task.isCancelled, status == .planned else {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                guard currentFingerprint == planWorkspaceFingerprint,
+                      inputsFingerprint == planInputsFingerprint,
+                      currentInputsFingerprint(in: workspace) == inputsFingerprint,
+                      planGeneration == lease.generation,
+                      planExecutionContext == workspace.executionContextIdentifier else {
+                    expirePlanForContextChange(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                isCheckingContext = false
+                contextVerificationTask = nil
+                startApply(directory: directory, workspace: workspace, lease: lease, completion: completion)
+            } catch {
+                if Task.isCancelled || status == .canceled {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                contextFingerprintTask = nil
+                contextVerificationTask = nil
+                isCheckingContext = false
+                expirePlanForVerificationFailure(error, workspace: workspace, lease: lease, completion: completion)
+            }
+        }
+    }
+
+    private func finishCanceledContextCheck(workspace: Workspace, lease: WorkspaceCommandCoordinator.Lease,
+                                            completion: @escaping (StructuredLog?, String?) -> Void,
+                                            result: StructuredLog? = nil) {
+        contextFingerprintTask?.cancel()
+        contextFingerprintTask = nil
+        contextVerificationTask = nil
+        isCheckingContext = false
+        finishCommand()
+        workspace.unlock()
+        lease.release()
+        status = .canceled
+        errorMessage = "Canceled before Terraform started the command."
+        workspace.runner.discardPlan(runId: id.uuidString)
+        persist()
+        completion(result, errorMessage)
+    }
+
+    private func failContextCheck(workspace: Workspace, lease: WorkspaceCommandCoordinator.Lease,
+                                  status: RunStatus, message: String,
+                                  completion: @escaping (StructuredLog?, String?) -> Void,
+                                  result: StructuredLog? = nil) {
+        contextFingerprintTask?.cancel()
+        contextFingerprintTask = nil
+        contextVerificationTask = nil
+        isCheckingContext = false
+        workspace.unlock()
+        lease.release()
+        self.status = status
+        errorMessage = message
+        workspace.isValid = false
+        workspace.runner.discardPlan(runId: id.uuidString)
+        persist()
+        completion(result, errorMessage)
+    }
+
+    private func currentInputsFingerprint(in workspace: Workspace) -> String {
+        WorkspaceContextFingerprint.inputsFingerprint(
+            terraformVariables: workspace.terraformVariables,
+            environmentVariables: workspace.environmentVariables
+        )
+    }
+
+    private func expirePlanForContextChange(workspace: Workspace, lease: WorkspaceCommandCoordinator.Lease,
+                                            completion: @escaping (StructuredLog?, String?) -> Void) {
+        isCheckingContext = false
+        workspace.unlock()
+        lease.release()
+        status = .expired
+        errorMessage = "Terraform configuration, variables, local state, or workspace context changed after this plan was reviewed. Create a new plan before applying."
+        workspace.isValid = false
+        workspace.runner.discardPlan(runId: id.uuidString)
+        persist()
+        completion(nil, errorMessage)
+    }
+
+    private func expirePlanForVerificationFailure(_ error: Error, workspace: Workspace,
+                                                  lease: WorkspaceCommandCoordinator.Lease,
+                                                  completion: @escaping (StructuredLog?, String?) -> Void) {
+        isCheckingContext = false
+        workspace.unlock()
+        lease.release()
+        status = .expired
+        errorMessage = error.localizedDescription
+        workspace.isValid = false
+        workspace.runner.discardPlan(runId: id.uuidString)
+        persist()
+        completion(nil, errorMessage)
+    }
+
+    private func startApply(directory: URL, workspace: Workspace,
+                            lease: WorkspaceCommandCoordinator.Lease,
+                            completion: @escaping (StructuredLog?, String?) -> Void) {
         status = .applying
         guard persist() else {
             status = .planned
+            workspace.unlock()
             lease.release()
             completion(nil, workspace.historyError)
             return
         }
-        workspace.lock(self)
         let runner = workspace.runner
         textOutput = ""
         applyHistoryOutput = nil

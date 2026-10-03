@@ -23,9 +23,9 @@ struct TerraformVariableSummaryView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            Text(variable.sensitive ? "(sensitive value)" : variable.value)
+            Text(variable.rememberedSecretUnavailable ? "(remembered value unavailable)" : variable.sensitive ? "(sensitive value)" : variable.value)
                 .foregroundColor(.secondary)
-            Text(variable.isUserInput ? "App override · This session · Overrides workspace tfvars" : "From workspace tfvars · Read-only")
+            Text(variable.isUserInput ? "App override · \(variable.isRemembered ? "Remembered for this workspace" : "This session") · Overrides workspace tfvars" : "From workspace tfvars · Read-only")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -46,6 +46,9 @@ struct VariableListPage: View {
 
     var body: some View {
         VStack(alignment: .leading) {
+            if let error = workspace.rememberedInputsError {
+                Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
+            }
             List {
                 ForEach(workspace.terraformVariables, id: \.id) { variable in
                     HStack {
@@ -101,7 +104,7 @@ struct VariableListPage: View {
                     do {
                         if let original = context.original {
                             try workspace.updateTerraformVariable(original, key: draft.key, value: draft.value,
-                                                                  description: draft.description, sensitive: draft.sensitive, hcl: draft.hcl)
+                                                                  description: draft.description, sensitive: draft.sensitive, hcl: draft.hcl, remember: draft.isRemembered)
                         } else {
                             try workspace.addTerraformVariable(draft)
                         }
@@ -123,6 +126,9 @@ struct VariableListPage: View {
         let result = TerraformVariable()
         result.key = source.key; result.value = source.value; result.description = source.description
         result.sensitive = source.sensitive; result.hcl = source.hcl
+        result.isRemembered = source.isRemembered
+        result.rememberedSecretUnavailable = source.rememberedSecretUnavailable
+        result.rememberedSecretID = source.rememberedSecretID
         return result
     }
 
@@ -153,6 +159,13 @@ private struct TerraformVariableEditor: View {
             Section(header: Text("Save a Terraform variable").font(.headline)) {
                 Text("App inputs apply to plans started in this session and override values from workspace tfvars.")
                     .font(.caption).foregroundColor(.secondary)
+                Toggle("Remember for this workspace", isOn: $variable.isRemembered)
+                Text("Non-sensitive values are stored in a private local file. Sensitive values are stored in macOS Keychain.")
+                    .font(.caption).foregroundColor(.secondary)
+                if variable.rememberedSecretUnavailable {
+                    Text("This remembered secret is unavailable. Restore Keychain access or remove this input before running Terraform.")
+                        .font(.caption).foregroundColor(.red)
+                }
                 TextField("Key", text: $variable.key)
                 Text("Value")
                 if variable.sensitive {

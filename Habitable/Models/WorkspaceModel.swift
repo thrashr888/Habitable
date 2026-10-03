@@ -340,25 +340,29 @@ class Workspace: ObservableObject {
     @Published var state: ShowMessage?
     @Published var terraformVariables: [TerraformVariable] = []
     @Published var environmentVariables: [EnvironmentVariable] = []
+    @Published private(set) var rememberedInputsError: String?
+    @Published private(set) var workspaceOpenError: String?
+    private var rememberedInputLoadFailed = false
+    private let workspaceInputStore: WorkspaceInputStore
 
     init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard,
          historyStore: RunHistoryStore = RunHistoryStore(),
          commandCoordinator: WorkspaceCommandCoordinator = .shared,
-         descriptionStore: WorkspaceDescriptionStore = WorkspaceDescriptionStore()) {
+         descriptionStore: WorkspaceDescriptionStore = WorkspaceDescriptionStore(),
+         workspaceInputStore: WorkspaceInputStore = WorkspaceInputStore()) {
         self.historyStore = historyStore
         preferences = defaults
         self.commandCoordinator = commandCoordinator
         self.descriptionStore = descriptionStore
+        self.workspaceInputStore = workspaceInputStore
         managedTerraformVersion = defaults.string(forKey: TerraformReleaseService.selectionKey)
         runner = Runner(executableURL: TerraformReleaseService.selectedExecutable(defaults: defaults))
         refreshTerraformVersion()
         if restoreLastDirectory, dir == nil, let lastDir = lastWorkingDirectory {
-            workingDirectory = lastDir
             updateWorkingDirectory(dir: lastDir)
             return
         }
         if let dir = dir {
-            workingDirectory = dir
             updateWorkingDirectory(dir: dir)
         }
     }
@@ -411,7 +415,7 @@ class Workspace: ObservableObject {
         panel.canChooseDirectories = true
         panel.begin { response in
             if response == NSApplication.ModalResponse.OK, let fileUrl = panel.url {
-                self.updateWorkingDirectory(dir: fileUrl)
+                _ = self.openWorkspaceDirectory(fileUrl)
             }
         }
     }
@@ -421,17 +425,30 @@ class Workspace: ObservableObject {
         // there's some ModelState thing in swiftui for this
     }
 
-    func updateWorkingDirectory(dir: URL) {
-        guard !locked else { return }
+    func updateWorkingDirectory(dir: URL) { _ = openWorkspaceDirectory(dir) }
+
+    @discardableResult
+    func openWorkspaceDirectory(_ dir: URL) -> Bool {
+        workspaceOpenError = nil
+        guard !locked else { workspaceOpenError = "Wait for the current workspace command to finish before opening another folder."; return false }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            workspaceOpenError = "The selected folder is unavailable. Choose an existing directory."
+            return false
+        }
         let previousPath = descriptionWorkspace.map(RunHistoryStore.workspacePath)
         let nextPath = RunHistoryStore.workspacePath(dir)
         if previousPath != nextPath, descriptionNeedsSave, !saveWorkspaceDescription() {
-            return
+            workspaceOpenError = descriptionPersistenceError ?? "The current workspace description could not be saved."
+            return false
         }
+        let remembered: [(StoredWorkspaceInput, String?)]
+        do { remembered = try workspaceInputStore.loadAllowingUnavailableSecrets(workspace: dir) }
+        catch { workspaceOpenError = "Remembered workspace inputs could not be loaded. \(error.localizedDescription)"; return false }
         coordinationRecoveryNotice = nil
-        guard retryUnsavedRuns() else { return }
+        guard retryUnsavedRuns() else { workspaceOpenError = historyError ?? "Unsaved run history could not be saved."; return false }
         for run in runs { run.doDiscard() }
-        guard retryUnsavedRuns() else { return }
+        guard retryUnsavedRuns() else { workspaceOpenError = historyError ?? "Unsaved run history could not be saved."; return false }
         runs = []
         if previousPath != nextPath {
             isLoadingWorkspaceDescription = true
@@ -454,6 +471,7 @@ class Workspace: ObservableObject {
         hasVariables = false
         terraformVariables = []
         environmentVariables = []
+        applyRememberedInputs(remembered)
         historyActionRequestID = UUID()
         workingDirectory = dir
         refreshExecutionContext()
@@ -471,7 +489,60 @@ class Workspace: ObservableObject {
         
         checkVariables()
         validate()
+        return true
     }
+
+    func dismissWorkspaceOpenError() { workspaceOpenError = nil }
+
+    private func applyRememberedInputs(_ loaded: [(StoredWorkspaceInput, String?)]) {
+        rememberedInputsError = nil
+        rememberedInputLoadFailed = false
+        for (record, value) in loaded {
+            switch record.kind {
+            case .terraform:
+                let input = TerraformVariable()
+                input.key = record.key; input.value = value ?? ""; input.description = record.description
+                input.sensitive = record.sensitive; input.hcl = record.hcl; input.isUserInput = true
+                input.isRemembered = true; input.rememberedSecretUnavailable = value == nil
+                input.rememberedSecretID = record.secretID
+                terraformVariables.append(input)
+            case .environment:
+                let input = EnvironmentVariable()
+                input.key = record.key; input.value = value ?? ""; input.description = record.description
+                input.sensitive = record.sensitive; input.isUserInput = true
+                input.isRemembered = true; input.rememberedSecretUnavailable = value == nil
+                input.rememberedSecretID = record.secretID
+                environmentVariables.append(input)
+            }
+            if value == nil {
+                rememberedInputLoadFailed = true
+                rememberedInputsError = "A remembered sensitive input is unavailable in Keychain. Remove it or restore Keychain access before starting a run."
+            }
+        }
+    }
+
+    private func persistRememberedInputs() throws {
+        guard let workspace = workingDirectory else { return }
+        let records = terraformVariables.filter { $0.isUserInput && $0.isRemembered }.map {
+            StoredWorkspaceInput(kind: .terraform, key: $0.key, value: $0.rememberedSecretUnavailable && $0.value.isEmpty ? nil : $0.value,
+                                 secretID: $0.rememberedSecretUnavailable && $0.value.isEmpty ? $0.rememberedSecretID : nil,
+                                 description: $0.description, sensitive: $0.sensitive, hcl: $0.hcl)
+        } + environmentVariables.filter { $0.isUserInput && $0.isRemembered }.map {
+            StoredWorkspaceInput(kind: .environment, key: $0.key, value: $0.rememberedSecretUnavailable && $0.value.isEmpty ? nil : $0.value,
+                                 secretID: $0.rememberedSecretUnavailable && $0.value.isEmpty ? $0.rememberedSecretID : nil,
+                                 description: $0.description, sensitive: $0.sensitive, hcl: false)
+        }
+        let cleanupNotice = try workspaceInputStore.save(records, workspace: workspace)
+        rememberedInputLoadFailed = terraformVariables.contains(where: { $0.rememberedSecretUnavailable })
+            || environmentVariables.contains(where: { $0.rememberedSecretUnavailable })
+        let missingSecretNotice = rememberedInputLoadFailed
+            ? "A remembered sensitive input is unavailable in Keychain. Replace it with a new value or remove it before running Terraform."
+            : nil
+        rememberedInputsError = [missingSecretNotice, cleanupNotice].compactMap { $0 }.joined(separator: " ")
+        if rememberedInputsError?.isEmpty == true { rememberedInputsError = nil }
+    }
+
+    var hasUnavailableRememberedInputs: Bool { rememberedInputLoadFailed }
 
     private func persistWorkspaceDescription() {
         guard !isLoadingWorkspaceDescription, descriptionWorkspace != nil else { return }
@@ -755,6 +826,11 @@ class Workspace: ObservableObject {
     }
 
     private func validateConfiguration(completion: @escaping (Bool) -> Void) {
+        guard !rememberedInputLoadFailed else {
+            errorMessage = rememberedInputsError ?? "A remembered sensitive input is unavailable."
+            completion(false)
+            return
+        }
         guard !locked, let workingDirectory = self.workingDirectory else { completion(false); return }
         let lease: WorkspaceCommandCoordinator.Lease
         do { lease = try acquireCommandLease() }
@@ -851,7 +927,7 @@ class Workspace: ObservableObject {
 //    }
     
     func didPlan(run: TerraformRun, plan: StructuredLog) {
-        if self.autoApply {
+        if self.autoApply && !rememberedInputLoadFailed {
             run.doApply({ apply, error in
                 
             })
@@ -1021,7 +1097,8 @@ class Workspace: ObservableObject {
     }
 
     func queueRun(_ message: String? = nil, onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
-        guard !locked, !historyLoading, isValid, historyError == nil, let directory = workingDirectory else { return }
+        guard !locked, !historyLoading, isValid, historyError == nil,
+              !rememberedInputLoadFailed, let directory = workingDirectory else { return }
         refreshExecutionContext()
         let canonicalDirectory = RunHistoryStore.workspacePath(directory)
         let terraformVersion = self.terraformVersion
@@ -1114,10 +1191,14 @@ class Workspace: ObservableObject {
         try retirePlansForInputChange()
         variable.isUserInput = true
         terraformVariables.append(variable)
+        if variable.isRemembered {
+            do { try persistRememberedInputs() }
+            catch { terraformVariables.removeAll { $0 === variable }; throw error }
+        }
     }
 
     func updateTerraformVariable(_ existing: TerraformVariable, key: String, value: String,
-                                 description: String, sensitive: Bool, hcl: Bool) throws {
+                                 description: String, sensitive: Bool, hcl: Bool, remember: Bool? = nil) throws {
         guard existing.isUserInput, terraformVariables.contains(where: { $0 === existing }) else { return }
         let draft = TerraformVariable()
         draft.key = key; draft.value = value; draft.description = description
@@ -1126,17 +1207,29 @@ class Workspace: ObservableObject {
         guard !terraformVariables.contains(where: { $0 !== existing && $0.isUserInput && $0.key == key }) else {
             throw VariableInputError.duplicateKey(key)
         }
+        if existing.rememberedSecretUnavailable && value.isEmpty { throw WorkspaceInputStoreError.missingSecret(key) }
         let changesEffectiveInput = existing.key != key || existing.value != value
             || existing.sensitive != sensitive || existing.hcl != hcl
         if changesEffectiveInput { try retirePlansForInputChange() }
+        let old = (existing.key, existing.value, existing.description, existing.sensitive, existing.hcl, existing.isRemembered, existing.rememberedSecretUnavailable, existing.rememberedSecretID)
         existing.key = key; existing.value = value; existing.description = description
-        existing.sensitive = sensitive; existing.hcl = hcl
+        let shouldRemember = remember ?? old.5
+        existing.sensitive = sensitive; existing.hcl = hcl; existing.isRemembered = shouldRemember
+        existing.rememberedSecretUnavailable = false; existing.rememberedSecretID = nil
+        if old.5 || shouldRemember {
+            do { try persistRememberedInputs() }
+            catch { existing.key = old.0; existing.value = old.1; existing.description = old.2; existing.sensitive = old.3; existing.hcl = old.4; existing.isRemembered = old.5; existing.rememberedSecretUnavailable = old.6; existing.rememberedSecretID = old.7; throw error }
+        }
     }
 
     func removeTerraformVariable(_ variable: TerraformVariable) throws {
         guard variable.isUserInput, terraformVariables.contains(where: { $0 === variable }) else { return }
         try retirePlansForInputChange()
         terraformVariables.removeAll { $0 === variable }
+        if variable.isRemembered {
+            do { try persistRememberedInputs() }
+            catch { terraformVariables.append(variable); throw error }
+        }
     }
 
     func addEnvironmentVariable(_ variable: EnvironmentVariable) throws {
@@ -1148,10 +1241,14 @@ class Workspace: ObservableObject {
         try retirePlansForInputChange()
         variable.isUserInput = true
         environmentVariables.append(variable)
+        if variable.isRemembered {
+            do { try persistRememberedInputs() }
+            catch { environmentVariables.removeAll { $0 === variable }; throw error }
+        }
     }
 
     func updateEnvironmentVariable(_ existing: EnvironmentVariable, key: String, value: String,
-                                   description: String, sensitive: Bool) throws {
+                                   description: String, sensitive: Bool, remember: Bool? = nil) throws {
         guard existing.isUserInput, environmentVariables.contains(where: { $0 === existing }) else { return }
         let draft = EnvironmentVariable()
         draft.key = key; draft.value = value; draft.description = description
@@ -1159,17 +1256,29 @@ class Workspace: ObservableObject {
         guard !environmentVariables.contains(where: { $0 !== existing && $0.isUserInput && $0.key == key }) else {
             throw VariableInputError.duplicateKey(key)
         }
+        if existing.rememberedSecretUnavailable && value.isEmpty { throw WorkspaceInputStoreError.missingSecret(key) }
         if existing.key != key || existing.value != value || existing.sensitive != sensitive {
             try retirePlansForInputChange()
         }
+        let old = (existing.key, existing.value, existing.description, existing.sensitive, existing.isRemembered, existing.rememberedSecretUnavailable, existing.rememberedSecretID)
         existing.key = key; existing.value = value; existing.description = description
-        existing.sensitive = sensitive
+        let shouldRemember = remember ?? old.4
+        existing.sensitive = sensitive; existing.isRemembered = shouldRemember
+        existing.rememberedSecretUnavailable = false; existing.rememberedSecretID = nil
+        if old.4 || shouldRemember {
+            do { try persistRememberedInputs() }
+            catch { existing.key = old.0; existing.value = old.1; existing.description = old.2; existing.sensitive = old.3; existing.isRemembered = old.4; existing.rememberedSecretUnavailable = old.5; existing.rememberedSecretID = old.6; throw error }
+        }
     }
 
     func removeEnvironmentVariable(_ variable: EnvironmentVariable) throws {
         guard variable.isUserInput, environmentVariables.contains(where: { $0 === variable }) else { return }
         try retirePlansForInputChange()
         environmentVariables.removeAll { $0 === variable }
+        if variable.isRemembered {
+            do { try persistRememberedInputs() }
+            catch { environmentVariables.append(variable); throw error }
+        }
     }
 
     private func retirePlansForInputChange() throws {
