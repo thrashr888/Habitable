@@ -31,6 +31,11 @@ struct RunRecord: Codable, Sendable {
     var applyFinishedAt: Date? = nil
     var gitBranch: String? = nil
     var gitCommit: String? = nil
+    /// Optional additions preserve decoding of run records written by older releases.
+    var gitSubject: String? = nil
+    var gitDirty: Bool? = nil
+    var gitRemoteURL: String? = nil
+    var triggerSource: String? = nil
 }
 
 struct RunHistoryError: LocalizedError {
@@ -109,6 +114,47 @@ struct RunHistoryStore {
                 return record
             }
             return Page(records: records, totalCount: index.entries.count, offset: start)
+        }
+    }
+
+    /// Filtered history is deliberately loaded on the caller's background queue. Unfiltered
+    /// paging remains index-only; text search reads record payloads only when requested.
+    func loadFilteredPage(workspace: URL, offset: Int, limit: Int, status: RunStatus?,
+                          after: Date?, before: Date?, text: String?) throws -> Page {
+        let folder = workspaceDirectory(workspace)
+        guard FileManager.default.fileExists(atPath: folder.path) else {
+            return Page(records: [], totalCount: 0, offset: 0)
+        }
+        return try withLock(folder: folder) {
+            let index = try readOrBuildIndex(workspace: workspace)
+            var entries = index.entries.filter { entry in
+                (status == nil || entry.status == status!)
+                    && (after == nil || entry.createdAt >= after!)
+                    && (before == nil || entry.createdAt <= before!)
+            }.sorted { $0.number > $1.number }
+            let needle = text?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            if !needle.isEmpty {
+                entries = try entries.filter { entry in
+                    let record = try decode(file: recordURL(id: entry.id, workspace: workspace), workspace: workspace)
+                    let searchable = [record.message, record.errorMessage, record.planOutput, record.applyOutput,
+                                      record.planHistoryOutput, record.applyHistoryOutput, record.gitBranch,
+                                      record.gitCommit, record.gitSubject, record.backendIdentity,
+                                      record.selectedTerraformWorkspace, record.triggerSource,
+                                      record.terraformVersion, record.status.rawValue, String(record.number)]
+                        .compactMap { $0 }.joined(separator: "\n").lowercased()
+                    return searchable.contains(needle)
+                }
+            }
+            let boundedLimit = max(1, min(limit, Self.pageLimit))
+            let lastPageOffset = entries.isEmpty ? 0 : ((entries.count - 1) / boundedLimit) * boundedLimit
+            let start = min(max(offset, 0), lastPageOffset)
+            let end = min(start + boundedLimit, entries.count)
+            let records = try entries[start..<end].map { entry in
+                let record = try decode(file: recordURL(id: entry.id, workspace: workspace), workspace: workspace)
+                guard record.number == entry.number else { throw RunHistoryError(message: "Run history index does not match its record.") }
+                return record
+            }
+            return Page(records: records, totalCount: entries.count, offset: start)
         }
     }
 
@@ -193,7 +239,8 @@ struct RunHistoryStore {
     }
 
     func create(workspace: URL, terraformVersion: String, message: String?,
-                selectedTerraformWorkspace: String? = nil, backendIdentity: String? = nil) throws -> RunRecord {
+                selectedTerraformWorkspace: String? = nil, backendIdentity: String? = nil,
+                triggerSource: String? = "interactive") throws -> RunRecord {
         try withLock(folder: workspaceDirectory(workspace)) {
             var index = try readOrBuildIndex(workspace: workspace)
             let now = Date()
@@ -201,7 +248,8 @@ struct RunHistoryStore {
                                    workspacePath: Self.workspacePath(workspace), createdAt: now,
                                    updatedAt: now, status: .pending, terraformVersion: terraformVersion,
                                    selectedTerraformWorkspace: selectedTerraformWorkspace,
-                                   backendIdentity: backendIdentity, message: message)
+                                   backendIdentity: backendIdentity, message: message,
+                                   triggerSource: triggerSource)
             try markDirty(nextNumber: index.nextNumber, workspace: workspace)
             try write(record, workspace: workspace)
             index.nextNumber = record.number + 1

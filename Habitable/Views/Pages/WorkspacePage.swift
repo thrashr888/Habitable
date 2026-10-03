@@ -28,10 +28,10 @@ struct WorkspacePage: View {
     var onReviewRun: @MainActor @Sendable (UUID) -> Void = { _ in }
     var onOpenConfiguration: () -> Void = {}
     var onOpenInputs: () -> Void = {}
+    var onOpenMissingInputs: () -> Void = {}
 
     private var latestRun: TerraformRun? {
-        guard workspace.historyPageOffset == 0 else { return nil }
-        return workspace.runs.max { $0.number < $1.number }
+        workspace.latestOverviewRun
     }
 
     private var readiness: (title: String, detail: String, action: String) {
@@ -51,9 +51,12 @@ struct WorkspacePage: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let directory = workspace.workingDirectory {
-                        Text(directory.path)
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        HStack {
+                            Text(directory.path)
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                            SafeCopyButton(value: directory.path, label: "workspace path")
+                        }
                     }
                     Text(workspace.executionContextDisplay)
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -86,14 +89,14 @@ struct WorkspacePage: View {
                         if !readiness.action.isEmpty {
                             Button(readiness.action) {
                                 switch readiness.action {
-                                case "Inputs": onOpenInputs()
+                                case "Inputs": onOpenMissingInputs()
                                 case "Initialize": workspace.initialize()
                                 case "Validate": workspace.validate()
                                 default: workspace.validateAndQueueRun(onCreated: onReviewRun)
                                 }
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(workspace.locked)
+                            .disabled(workspace.locked || workspace.isInspectingInputs)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,6 +133,27 @@ struct WorkspacePage: View {
                              ? "Loading the latest run…" : "No saved runs. Create a plan to review the proposed changes."))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if let git = workspace.currentGitContext {
+                    WorkspaceCard("Current Git source") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("\(git.branch ?? "Detached HEAD") · \(git.shortCommit)")
+                                    .font(.callout.monospaced()).textSelection(.enabled)
+                                SafeCopyButton(value: git.commit, label: "full commit SHA")
+                            }
+                            if let subject = git.subject { Text(subject).fixedSize(horizontal: false, vertical: true) }
+                            Text(git.dirty.map { $0 ? "Working tree has changes" : "Working tree is clean" } ?? "Working tree status unavailable")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let remote = git.remoteURL, let url = URL(string: remote), url.scheme == "https" {
+                                HStack {
+                                    Link("Open repository", destination: url)
+                                    SafeCopyButton(value: remote, label: "repository URL")
+                                }
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
 
@@ -213,7 +237,7 @@ struct WorkspacePage: View {
         }
 
         .onAppear {
-            if workspace.historyPageOffset > 0, !workspace.locked { workspace.reloadRunHistory() }
+            workspace.refreshGitContext()
         }
         .toolbar {
             QuietToolbar {

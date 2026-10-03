@@ -85,7 +85,8 @@ final class RunHistoryTests: XCTestCase {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         object.removeValue(forKey: "selectedTerraformWorkspace")
         object.removeValue(forKey: "backendIdentity")
-        for key in ["planStartedAt", "planFinishedAt", "applyStartedAt", "applyFinishedAt", "gitBranch", "gitCommit"] {
+        for key in ["planStartedAt", "planFinishedAt", "applyStartedAt", "applyFinishedAt", "gitBranch", "gitCommit",
+                    "gitSubject", "gitDirty", "gitRemoteURL", "triggerSource"] {
             object.removeValue(forKey: key)
         }
         let legacyData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -101,6 +102,24 @@ final class RunHistoryTests: XCTestCase {
         XCTAssertNil(decoded.applyFinishedAt)
         XCTAssertNil(decoded.gitBranch)
         XCTAssertNil(decoded.gitCommit)
+    }
+
+    func testFilteredPageCombinesStatusDateAndTextWithoutChangingUnfilteredPages() throws {
+        var matching = try store.create(workspace: directory, terraformVersion: "1.16.4", message: "release bluebird")
+        matching.status = .applied
+        matching.gitBranch = "main"
+        matching.updatedAt = Date().addingTimeInterval(1)
+        try store.save(matching, workspace: directory)
+        _ = try store.create(workspace: directory, terraformVersion: "1.16.4", message: "release redwood")
+
+        let page = try store.loadFilteredPage(workspace: directory, offset: 0, limit: 50,
+                                              status: .applied,
+                                              after: matching.createdAt.addingTimeInterval(-1),
+                                              before: matching.createdAt.addingTimeInterval(1),
+                                              text: "BLUEBIRD")
+        XCTAssertEqual(page.totalCount, 1)
+        XCTAssertEqual(page.records.map(\.id), [matching.id])
+        XCTAssertEqual(try store.loadPage(workspace: directory, offset: 0, limit: 50).totalCount, 2)
     }
 
     func testCanonicalWorkspaceIdentityAndIndependentNumbering() throws {

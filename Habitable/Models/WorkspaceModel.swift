@@ -279,11 +279,22 @@ class Workspace: ObservableObject {
     @Published private(set) var historyLoading = false
     @Published private(set) var historyPageOffset = 0
     @Published private(set) var historyTotalCount = 0
+    @Published private(set) var latestOverviewRun: TerraformRun?
+    @Published private(set) var currentGitContext: RunGitContext?
+    @Published private(set) var historyStatusFilter: RunStatus?
+    @Published private(set) var historyAfterFilter: Date?
+    @Published private(set) var historyBeforeFilter: Date?
+    @Published private(set) var historyTextFilter = ""
+    var hasActiveHistoryFilters: Bool {
+        historyStatusFilter != nil || historyAfterFilter != nil || historyBeforeFilter != nil
+            || !historyTextFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
     let historyPageSize = 50
     @Published private(set) var coordinationRecoveryNotice: String?
     private var unsavedRuns: [UUID: (RunRecord, URL)] = [:]
     private var historyRequestID = UUID()
     private var historyActionRequestID = UUID()
+    private var gitContextRequestID = UUID()
 
     // state
     @Published var locked = false
@@ -481,8 +492,15 @@ class Workspace: ObservableObject {
         environmentVariables = []
         applyRememberedInputs(remembered)
         historyActionRequestID = UUID()
+        historyStatusFilter = nil
+        historyAfterFilter = nil
+        historyBeforeFilter = nil
+        historyTextFilter = ""
         workingDirectory = dir
+        latestOverviewRun = nil
+        currentGitContext = nil
         refreshExecutionContext()
+        refreshGitContext()
         lastWorkingDirectory = dir
         reloadRunHistory()
 
@@ -780,8 +798,9 @@ class Workspace: ObservableObject {
     /// Recovery always validates again; it cannot bypass configuration readiness
     /// or reuse the failed run's artifact.
     func validateAndQueueRun(onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
+        guard !isInspectingInputs else { return }
         validateConfiguration { valid in
-            if valid { self.queueRun(onCreated: onCreated) }
+            if valid { self.queueRun(triggerSource: "validated", onCreated: onCreated) }
         }
     }
 
@@ -916,6 +935,30 @@ class Workspace: ObservableObject {
         loadRunHistoryPage(offset: 0)
     }
 
+    func setRunHistoryFilters(status: RunStatus?, after: Date?, before: Date?, text: String) {
+        guard !locked else { return }
+        historyStatusFilter = status
+        historyAfterFilter = after
+        historyBeforeFilter = before
+        historyTextFilter = String(text.prefix(200))
+        loadRunHistoryPage(offset: 0)
+    }
+
+    func refreshGitContext() {
+        guard let directory = workingDirectory else { currentGitContext = nil; return }
+        let requestID = UUID()
+        gitContextRequestID = requestID
+        let canonicalDirectory = RunHistoryStore.workspacePath(directory)
+        DispatchQueue.global(qos: .utility).async {
+            let context = RunGitContext.capture(directory: directory)
+            DispatchQueue.main.async {
+                guard self.gitContextRequestID == requestID,
+                      self.workingDirectory.map(RunHistoryStore.workspacePath) == canonicalDirectory else { return }
+                self.currentGitContext = context
+            }
+        }
+    }
+
     func loadNextRunHistoryPage() {
         guard !locked, !historyLoading, historyError == nil,
               historyPageOffset + historyPageSize < historyTotalCount else { return }
@@ -935,15 +978,24 @@ class Workspace: ObservableObject {
         historyError = nil
         let store = historyStore
         let limit = historyPageSize
+        let status = historyStatusFilter
+        let after = historyAfterFilter
+        let before = historyBeforeFilter
+        let text = historyTextFilter
         let unsavedIDs = Set(unsavedRuns.keys)
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try store.loadPage(workspace: directory, offset: offset, limit: limit) }
+            let result = Result {
+                let page = try store.loadFilteredPage(workspace: directory, offset: offset, limit: limit,
+                                                      status: status, after: after, before: before, text: text)
+                let latest = try store.loadPage(workspace: directory, offset: 0, limit: 1).records.first
+                return (page, latest)
+            }
             DispatchQueue.main.async {
                 guard self.historyRequestID == requestID,
                       self.workingDirectory.map(RunHistoryStore.workspacePath) == RunHistoryStore.workspacePath(directory) else { return }
                 self.historyLoading = false
                 switch result {
-                case .success(let page):
+                case .success(let (page, latestRecord)):
                     // Keep this session's active runs visible; finished records follow the selected page.
                     let live = self.runs.filter { !$0.isPersisted || !$0.isFinished || $0.status == .interrupted || unsavedIDs.contains($0.id) }
                     let liveByID = Dictionary(uniqueKeysWithValues: live.map { ($0.id, $0) })
@@ -953,6 +1005,12 @@ class Workspace: ObservableObject {
                     self.historyPageOffset = page.offset
                     self.historyTotalCount = page.totalCount
                     self.historyError = nil
+                    if let latestRecord {
+                        self.latestOverviewRun = liveByID[latestRecord.id]
+                            ?? TerraformRun(workspace: self, record: latestRecord, restored: true)
+                    } else {
+                        self.latestOverviewRun = nil
+                    }
                 case .failure(let error):
                     self.historyError = error.localizedDescription
                 }
@@ -1056,8 +1114,9 @@ class Workspace: ObservableObject {
         return true
     }
 
-    func queueRun(_ message: String? = nil, onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
-        guard !locked, !historyLoading, isValid, historyError == nil,
+    func queueRun(_ message: String? = nil, triggerSource: String = "interactive",
+                  onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
+        guard !locked, !historyLoading, !isInspectingInputs, isValid, historyError == nil,
               !rememberedInputLoadFailed, let directory = workingDirectory else { return }
         refreshExecutionContext()
         let canonicalDirectory = RunHistoryStore.workspacePath(directory)
@@ -1067,6 +1126,10 @@ class Workspace: ObservableObject {
         let executionContext = executionContextIdentifier
         let store = historyStore
         let pageLimit = historyPageSize
+        let status = historyStatusFilter
+        let after = historyAfterFilter
+        let before = historyBeforeFilter
+        let text = historyTextFilter
         let requestID = UUID()
         historyRequestID = requestID
         historyLoading = true
@@ -1075,9 +1138,11 @@ class Workspace: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             let result: Result<(RunRecord, RunHistoryStore.Page), Error> = Result {
                 let record = try store.create(workspace: directory, terraformVersion: terraformVersion, message: message,
-                                              selectedTerraformWorkspace: selectedTerraformWorkspace, backendIdentity: backendIdentity)
+                                              selectedTerraformWorkspace: selectedTerraformWorkspace, backendIdentity: backendIdentity,
+                                              triggerSource: triggerSource)
                 do {
-                    let page = try store.loadPage(workspace: directory, offset: 0, limit: pageLimit)
+                    let page = try store.loadFilteredPage(workspace: directory, offset: 0, limit: pageLimit,
+                                                          status: status, after: after, before: before, text: text)
                     return (record, page)
                 } catch {
                     var retiredRecord = record
@@ -1133,6 +1198,7 @@ class Workspace: ObservableObject {
                     self.runs = pageRuns + retained.filter { !pageIDs.contains($0.id) }
                     self.historyPageOffset = page.offset
                     self.historyTotalCount = page.totalCount
+                    self.latestOverviewRun = run
                     onCreated?(run.id)
                     run.doPlan { _, _ in }
                 case .failure(let error):

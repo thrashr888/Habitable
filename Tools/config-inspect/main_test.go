@@ -22,11 +22,13 @@ func TestInspectRootDeclarationsAndDistinguishesNullDefault(t *testing.T) {
   }
   sensitive = true
 }
+
 variable "required" { type = string }
 variable "null_default" {
   type = string
   default = null
 }
+
 `
 	if err := os.WriteFile(filepath.Join(dir, "inputs.tf"), []byte(root), 0o600); err != nil {
 		t.Fatal(err)
@@ -57,6 +59,26 @@ variable "null_default" {
 	}
 	if _, ok := module.Variables["child_only"]; ok {
 		t.Fatal("child module declaration leaked into root inputs")
+	}
+}
+
+func TestMetadataIncludesManagedAndDataResourcePositions(t *testing.T) {
+	dir := t.TempDir()
+	source := `resource "aws_instance" "web" { ami = "ami-example" }
+data "aws_ami" "base" { most_recent = true }
+`
+	if err := os.WriteFile(filepath.Join(dir, "resources.tf"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := inspectMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for address, line := range map[string]int{"aws_instance.web": 1, "data.aws_ami.base": 2} {
+		item, ok := metadata.Resources[address]
+		if !ok || item.Pos.Filename == "" || item.Pos.Line != line {
+			t.Fatalf("resource %s metadata: %#v", address, item)
+		}
 	}
 }
 

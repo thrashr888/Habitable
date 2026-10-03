@@ -7,6 +7,13 @@ struct WorkspaceWindowActions {
     let openFolder: () -> Void
     let openRecent: (URL) -> Void
     let clearRecents: () -> Void
+    let plan: () -> Void
+    let initialize: () -> Void
+    let validate: () -> Void
+    let canPlan: Bool
+    let canInitialize: Bool
+    let canValidate: Bool
+    let planTitle: String
 }
 
 private struct WorkspaceWindowActionsKey: FocusedValueKey {
@@ -52,68 +59,17 @@ struct ContentView: View {
     @StateObject private var navigationTrace = NavigationTrace()
     @State private var selection: NavigationItem? = .workspace
     @State private var selectedRun: UUID?
+    @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
     @State private var selectedOutput: String?
+    @State private var showMissingInputs = false
+    @State private var declarationRequest: ConfigurationDeclarationRequest?
     @State private var sidebarVisible = true
     @State private var isOpenErrorPresented = false
     @State private var presentedOpenError: String?
 
     var body: some View {
-        Group {
-            if workspace.workingDirectory == nil {
-                BlankSlateView(recentFolders: recentWorkspaces.folders,
-                               onChooseFolder: openFolder,
-                               onOpenRecent: openRecent)
-            } else {
-                HSplitView {
-                    if sidebarVisible {
-                        sidebar.frame(minWidth: 180, idealWidth: 200, maxWidth: 240, maxHeight: .infinity)
-                    }
-                    VStack(spacing: 0) {
-                        if selection?.hasDetailList == true {
-                            HSplitView {
-                                collection
-                                    .frame(minWidth: 240, idealWidth: selection == .resources ? 460 : 280,
-                                           maxWidth: selection == .resources ? .infinity : 340,
-                                           maxHeight: .infinity)
-                                detail.frame(minWidth: selection == .resources ? 400 : 360, maxWidth: .infinity, maxHeight: .infinity)
-                            }
-                        } else {
-                            page.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .toolbar {
-                    QuietToolbar {
-                        ToolbarItem(placement: .navigation) {
-                            Button { sidebarVisible.toggle() } label: {
-                                Label(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
-                            }
-                            .buttonStyle(.borderless)
-                            .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
-                            .keyboardShortcut("s", modifiers: [.command, .control])
-                        }
-
-                    }
-                }
-            }
-        }
-        .background(WorkspaceWindowIdentity(title: "\((selection ?? .workspace).title) — \(workspaceName)"))
-        .environmentObject(workspace)
-        .environmentObject(editors)
-        .buttonStyle(.borderless)
-        .groupBoxStyle(QuietGroupBoxStyle())
-        .animation(nil, value: selection)
-        .background(NavigationLayoutProbe(trace: navigationTrace, page: selection?.rawValue ?? "workspace")
-            .allowsHitTesting(false))
-        .disclosureGroupStyle(FullHeaderDisclosureStyle())
-        .focusedSceneValue(\.workspaceWindowActions, WorkspaceWindowActions(
-            recentFolders: recentWorkspaces.folders,
-            openFolder: openFolder,
-            openRecent: openRecent,
-            clearRecents: recentWorkspaces.clear
-        ))
+        configuredWindowContent
         .onChange(of: workspace.workspaceOpenError) { error in
             if let error {
                 presentedOpenError = error
@@ -140,12 +96,17 @@ struct ContentView: View {
         }
         .onChange(of: workspace.workingDirectory) { _ in
             selectedRun = nil
+            selectedRunDetail = nil
             selectedResource = nil
             selectedOutput = nil
         }
-        .onChange(of: workspace.runs.map(\.id)) { ids in
-            if let selectedRun, !ids.contains(selectedRun) {
-                self.selectedRun = nil
+        .onChange(of: selectedRun) { id in
+            selectedRunDetail = workspace.runs.first { $0.id == id }
+                ?? (workspace.latestOverviewRun?.id == id ? workspace.latestOverviewRun : nil)
+        }
+        .onChange(of: workspace.runs.map(\.id)) { _ in
+            if let run = workspace.runs.first(where: { $0.id == selectedRun }) {
+                selectedRunDetail = run
             }
         }
         .onChange(of: workspace.state?.id) { _ in
@@ -158,6 +119,93 @@ struct ContentView: View {
                 self.selectedOutput = nil
             }
         }
+    }
+
+
+    private var configuredWindowContent: some View {
+        windowContent
+        .background(WorkspaceWindowIdentity(title: "\((selection ?? .workspace).title) — \(workspaceName)"))
+        .environmentObject(workspace)
+        .environmentObject(editors)
+        .buttonStyle(.borderless)
+        .groupBoxStyle(QuietGroupBoxStyle())
+        .animation(nil, value: selection)
+        .background(NavigationLayoutProbe(trace: navigationTrace, page: selection?.rawValue ?? "workspace")
+            .allowsHitTesting(false))
+        .disclosureGroupStyle(FullHeaderDisclosureStyle())
+        .focusedSceneValue(\.workspaceWindowActions, windowActions)
+    }
+
+    private var windowContent: some View {
+        Group {
+            if workspace.workingDirectory == nil {
+                BlankSlateView(recentFolders: recentWorkspaces.folders,
+                               onChooseFolder: openFolder,
+                               onOpenRecent: openRecent)
+            } else {
+                HSplitView {
+                    if sidebarVisible {
+                        sidebar.frame(minWidth: 180, idealWidth: 200, maxWidth: 240, maxHeight: .infinity)
+                    }
+                    destinationContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .toolbar {
+                    QuietToolbar {
+                        ToolbarItem(placement: .navigation) {
+                            Button { sidebarVisible.toggle() } label: {
+                                Label(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
+                            }
+                            .buttonStyle(.borderless)
+                            .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+                            .keyboardShortcut("s", modifiers: [.command, .control])
+                        }
+
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var destinationContent: some View {
+        if selection?.hasDetailList == true {
+            splitDestinationContent
+        } else {
+            page.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var splitDestinationContent: some View {
+        HSplitView {
+            collection.frame(minWidth: 240,
+                             idealWidth: selection == .resources ? 460 : 280,
+                             maxWidth: selection == .resources ? .infinity : 340,
+                             maxHeight: .infinity)
+            detail.frame(minWidth: selection == .resources ? 400 : 360,
+                         maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var windowActions: WorkspaceWindowActions {
+        WorkspaceWindowActions(
+            recentFolders: recentWorkspaces.folders,
+            openFolder: openFolder,
+            openRecent: openRecent,
+            clearRecents: recentWorkspaces.clear,
+            plan: {
+                workspace.validateAndQueueRun(onCreated: { id in
+                    selectedRun = id
+                    navigationSelection.wrappedValue = .runs
+                })
+            },
+            initialize: workspace.initialize,
+            validate: workspace.validate,
+            canPlan: workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
+                && workspace.historyError == nil && !workspace.isInspectingInputs && !workspace.hasUnavailableRememberedInputs,
+            canInitialize: workspace.workingDirectory != nil && !workspace.locked,
+            canValidate: workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
+            planTitle: workspace.autoApply ? "Plan and apply automatically" : "Plan"
+        )
     }
 
     private var workspaceName: String {
@@ -215,8 +263,9 @@ struct ContentView: View {
     @ViewBuilder private var detail: some View {
         switch selection {
         case .runs:
-            if let run = workspace.runs.first(where: { $0.id == selectedRun }) {
-                RunPageView(run: run).id(run.id)
+            if let run = workspace.runs.first(where: { $0.id == selectedRun })
+                ?? (selectedRunDetail?.id == selectedRun ? selectedRunDetail : nil) {
+                RunPageView(run: run, onOpenDeclaration: openDeclaration).id(run.id)
             } else {
                 placeholder("Select a run", message: "Choose a run to review its plan, results, and logs.")
             }
@@ -224,7 +273,8 @@ struct ContentView: View {
             if let address = selectedResource, let resource = workspace.state?.resources.first(where: { ($0.address ?? $0.id.uuidString) == address }) {
                 ShowResourceView(resource: resource, workspaceDirectory: workspace.workingDirectory,
                                  terraformExecutableURL: workspace.runner.executableURL,
-                                 workspaceInitialized: workspace.isInitialized)
+                                 workspaceInitialized: workspace.isInitialized,
+                                 onOpenDeclaration: openDeclaration)
             } else {
                 placeholder("Select a resource", message: "Choose a resource to inspect its details.")
             }
@@ -241,26 +291,39 @@ struct ContentView: View {
     @ViewBuilder private var page: some View {
         switch selection {
         case .readme: WorkspaceReadmePage(directory: workspace.workingDirectory, presentation: readme)
-        case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel)
-        case .variables: VariableListPage()
+        case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel,
+                                               declarationRequest: $declarationRequest)
+        case .variables: VariableListPage(showMissingOnly: showMissingInputs)
         case .envVariables: EnvVarListPage()
         case .settings: SettingsListPage(catalog: releaseCatalog)
         default: WorkspacePage(onReviewRun: { id in
             selectedRun = id
             navigationSelection.wrappedValue = .runs
         }, onOpenConfiguration: { navigationSelection.wrappedValue = .configuration },
-           onOpenInputs: { navigationSelection.wrappedValue = .variables })
+           onOpenInputs: {
+               showMissingInputs = false
+               navigationSelection.wrappedValue = .variables
+           }, onOpenMissingInputs: {
+               showMissingInputs = true
+               navigationSelection.wrappedValue = .variables
+           })
         }
     }
 
     private var navigationSelection: Binding<NavigationItem?> {
         Binding(get: { selection }, set: { page in
             guard page != selection else { return }
+            if page != .variables { showMissingInputs = false }
             navigationTrace.begin(page: page?.rawValue ?? "workspace")
             var transaction = Transaction(animation: nil)
             transaction.disablesAnimations = true
             withTransaction(transaction) { selection = page }
         })
+    }
+
+    private func openDeclaration(_ file: String, _ line: Int) {
+        declarationRequest = ConfigurationDeclarationRequest(file: file, line: line)
+        navigationSelection.wrappedValue = .configuration
     }
 
     private func placeholder(_ title: String, message: String) -> some View {

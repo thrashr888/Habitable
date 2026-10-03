@@ -3,7 +3,6 @@
 //  Habitable
 //
 
-import AppKit
 import SwiftUI
 
 struct ShowResourceView: View {
@@ -11,6 +10,7 @@ struct ShowResourceView: View {
     var workspaceDirectory: URL? = nil
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
+    var onOpenDeclaration: ((String, Int) -> Void)? = nil
     @State private var searchText = ""
     @State private var schemaSearchText = ""
     @State private var showSchemaAttributes = false
@@ -18,6 +18,7 @@ struct ShowResourceView: View {
     @State private var loadedDocumentationID: String?
     @State private var loadedProviderDocumentation: TerraformProviderDocumentation?
     @State private var loadedModuleDocumentation: TerraformModuleDocumentation?
+    @State private var loadedDeclarations: TerraformConfigurationMetadata?
 
     private var documentationID: String { "\(resource.id)-\(workspaceDirectory?.path ?? "")" }
 
@@ -62,20 +63,26 @@ struct ShowResourceView: View {
                 if let address = resource.address {
                     GridRow(alignment: .top) {
                         Text("Address").foregroundStyle(.secondary)
-                        Text(address)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(alignment: .top) {
+                            Text(address)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            SafeCopyButton(value: address, label: "Copy resource address \(address)")
+                        }
                     }
                 }
                 if let provider = resource.provider_name {
                     GridRow(alignment: .top) {
                         Text("Provider").foregroundStyle(.secondary)
                         if let url = providerDocumentation?.providerURL {
-                            Link(provider, destination: url)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .help("Open provider documentation for version \(providerDocumentation?.lockedVersion ?? "")")
-                                .accessibilityLabel("Provider documentation for \(provider) version \(providerDocumentation?.lockedVersion ?? "unknown")")
+                            HStack {
+                                Link(provider, destination: url)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .help("Open provider documentation for version \(providerDocumentation?.lockedVersion ?? "")")
+                                    .accessibilityLabel("Provider documentation for \(provider) version \(providerDocumentation?.lockedVersion ?? "unknown")")
+                                SafeCopyButton(value: url.absoluteString, label: "Copy provider documentation URL")
+                            }
                         } else {
                             Text(provider).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -114,9 +121,12 @@ struct ShowResourceView: View {
                         Text("Module").foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             if let url = module.registryURL {
-                                Link(module.source, destination: url)
-                                    .help("Open module documentation for version \(module.version ?? "")")
-                                    .accessibilityLabel("Module documentation for \(module.source) version \(module.version ?? "unknown")")
+                                HStack {
+                                    Link(module.source, destination: url)
+                                        .help("Open module documentation for version \(module.version ?? "")")
+                                        .accessibilityLabel("Module documentation for \(module.source) version \(module.version ?? "unknown")")
+                                    SafeCopyButton(value: url.absoluteString, label: "Copy module documentation URL")
+                                }
                             } else {
                                 Text(module.source).textSelection(.enabled)
                             }
@@ -131,6 +141,21 @@ struct ShowResourceView: View {
                 if let version = resource.schema_version { metadataRow("Schema version", value: String(version)) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let address = resource.address,
+               let metadata = loadedDeclarations,
+               let declaration = TerraformConfigurationInspector.declaration(for: address, in: metadata),
+               let line = declaration.sourceLine {
+                HStack {
+                    Text("Declared in \(declaration.sourceFile):\(line)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let onOpenDeclaration {
+                        Button("Open declaration") { onOpenDeclaration(declaration.sourceFile, line) }
+                            .buttonStyle(.borderless)
+                    }
+                }
+            }
 
             Divider()
             HStack {
@@ -221,15 +246,7 @@ struct ShowResourceView: View {
                             .font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(attribute.value, forType: .string)
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                        }
-                        .buttonStyle(.plain)
-                        .help("Copy value")
-                        .accessibilityLabel("Copy value for \(attribute.path)")
+                        SafeCopyButton(value: attribute.value, label: "Copy value for \(attribute.path)")
                     }
                     .padding(.vertical, 4)
                 }
@@ -248,11 +265,13 @@ struct ShowResourceView: View {
             let result = await Task.detached(priority: .utility) {
                 (TerraformProviderDocumentation.resolve(providerIdentity: identity, resourceType: type,
                     resourceMode: mode, lockFile: directory?.appendingPathComponent(".terraform.lock.hcl")),
-                 TerraformModuleDocumentation.resolve(resourceAddress: address, workspaceDirectory: directory))
+                 TerraformModuleDocumentation.resolve(resourceAddress: address, workspaceDirectory: directory),
+                 directory.map { TerraformConfigurationInspector.inspectMetadata(directory: $0) })
             }.value
             guard !Task.isCancelled else { return }
             loadedProviderDocumentation = result.0
             loadedModuleDocumentation = result.1
+            loadedDeclarations = result.2
             loadedDocumentationID = id
         }
         .onChange(of: resource.address) { _ in schemaHelp.reset() }

@@ -58,6 +58,7 @@
 		B1EAA330000000000000001 /* TerraformProviderSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000002 /* TerraformProviderSchema.swift */; };
 		B1EAA330000000000000003 /* TerraformConfigurationContextHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */; };
 		B1EAA330000000000000005 /* TerraformConfigurationContextHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */; };
+		AA6030000000000000000001 /* CopyButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000002 /* CopyButton.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -116,6 +117,7 @@
 		B1EAA330000000000000002 /* TerraformProviderSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformProviderSchema.swift; sourceTree = "<group>"; };
 		B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformConfigurationContextHelp.swift; sourceTree = "<group>"; };
 		B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformConfigurationContextHelpView.swift; sourceTree = "<group>"; };
+		AA6030000000000000000002 /* CopyButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyButton.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -134,6 +136,7 @@
 		8A0D933C263F717A001CB06C /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				AA6030000000000000000002 /* CopyButton.swift */,
 				8AA12B192642656C0048A4A9 /* StructuredLog.swift */,
 				8A926B67264E523500FDBA5C /* StructuredLog */,
 				8AA12B1F26427D340048A4A9 /* Pages */,
@@ -337,6 +340,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA6030000000000000000001 /* CopyButton.swift in Sources */,
 				2978C5D792C1476EACA795F2 /* TerraformConfigurationInspector.swift in Sources */,
 				B1EAA330000000000000001 /* TerraformProviderSchema.swift in Sources */,
 				B1EAA330000000000000003 /* TerraformConfigurationContextHelp.swift in Sources */,

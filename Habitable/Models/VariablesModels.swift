@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreFoundation
 
 enum VariableInputError: LocalizedError, Equatable {
     case invalidKey(String)
@@ -27,6 +28,63 @@ private func isTerraformIdentifier(_ key: String) -> Bool {
     key.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
 }
 
+enum TerraformVariableEditorMode: String, CaseIterable, Identifiable {
+    case string = "String"
+    case number = "Number"
+    case boolean = "Boolean"
+    case rawJSON = "Raw JSON"
+
+    var id: String { rawValue }
+
+    static func mode(for type: String?) -> TerraformVariableEditorMode {
+        let normalized = (type ?? "string").trimmingCharacters(in: .whitespacesAndNewlines)
+        switch normalized {
+        case "string": return .string
+        case "number": return .number
+        case "bool": return .boolean
+        default: return .rawJSON
+        }
+    }
+
+    static func reopeningMode(for type: String?, value: String, isJSON: Bool) -> TerraformVariableEditorMode {
+        let declaredMode = mode(for: type)
+        guard isJSON else { return declaredMode }
+        guard let data = value.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+              !(json is NSNull) else { return .rawJSON }
+        switch declaredMode {
+        case .boolean: return value == "true" || value == "false" ? .boolean : .rawJSON
+        case .number:
+            guard let number = json as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return .rawJSON }
+            return .number
+        case .string, .rawJSON: return .rawJSON
+        }
+    }
+
+    func encode(_ text: String, variable: String) throws -> (String, Bool) {
+        switch self {
+        case .string: return (text, false)
+        case .number:
+            guard let data = text.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+                  let number = value as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID() else {
+                throw VariableInputError.invalidJSON(variable)
+            }
+            return (text, true)
+        case .boolean:
+            guard text == "true" || text == "false" else { throw VariableInputError.invalidJSON(variable) }
+            return (text, true)
+        case .rawJSON:
+            guard let data = text.data(using: .utf8),
+                  (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil else {
+                throw VariableInputError.invalidJSON(variable)
+            }
+            return (text, true)
+        }
+    }
+}
+
 @MainActor
 class TerraformVariable: ObservableObject {
     var id = UUID()
@@ -45,6 +103,10 @@ class TerraformVariable: ObservableObject {
     @Published var discoveredSource: String?
     @Published var hasUnresolvedDiscoveredValue = false
     @Published var unresolvedSource: String?
+
+    var isMissingRequiredInput: Bool {
+        declaration?.required == true && !isUserInput && discoveredSource == nil && !hasUnresolvedDiscoveredValue
+    }
 
     /// The value to place in Terraform's JSON variable file. Structured values
     /// are entered as JSON so strings, equals signs, and nested values survive

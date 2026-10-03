@@ -33,7 +33,11 @@ struct TerraformVariableSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(variable.key).font(.body.weight(.medium))
+            HStack(spacing: 6) {
+                Text(variable.key).font(.body.weight(.medium))
+                SafeCopyButton(value: variable.key, label: "Copy input key \(variable.key)")
+                SafeCopyButton(value: "var.\(variable.key)", label: "Copy variable reference var.\(variable.key)")
+            }
             let details = variable.declaration?.description ?? variable.description
             if !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(details)
@@ -77,20 +81,32 @@ private struct TerraformVariableEditorContext: Identifiable {
 }
 
 struct VariableListPage: View {
+    var showMissingOnly: Bool = false
     @EnvironmentObject var workspace: Workspace
     
     @State private var terraformEditorContext: TerraformVariableEditorContext?
     @State private var inputError: String?
     @State private var requiredOnly = false
+    @State private var missingOnly = false
+    @State private var searchText = ""
+
+    init(showMissingOnly: Bool = false) {
+        self.showMissingOnly = showMissingOnly
+        _missingOnly = State(initialValue: showMissingOnly)
+    }
 
     private var visibleVariables: [TerraformVariable] {
-        workspace.terraformVariables.filter { !requiredOnly || $0.declaration?.required == true }
+        workspace.terraformVariables.filter { variable in
+            (!requiredOnly || variable.declaration?.required == true)
+                && (!missingOnly || variable.isMissingRequiredInput)
+                && (searchText.isEmpty || variable.key.localizedCaseInsensitiveContains(searchText)
+                    || (variable.declaration?.description ?? variable.description).localizedCaseInsensitiveContains(searchText))
+        }
     }
 
     private var missingRequiredCount: Int {
         workspace.terraformVariables.filter {
-            $0.declaration?.required == true && !$0.isUserInput
-                && $0.discoveredSource == nil && !$0.hasUnresolvedDiscoveredValue
+            $0.isMissingRequiredInput
         }.count
     }
 
@@ -127,9 +143,14 @@ struct VariableListPage: View {
                     Toggle("Required only", isOn: $requiredOnly)
                         .toggleStyle(.button)
                         .help("Show only root inputs without a Terraform default")
+                    Toggle("Missing only", isOn: $missingOnly)
+                        .toggleStyle(.button)
+                        .help("Show required root inputs without an app value or resolved workspace value")
                 }
             }
             .font(.callout).padding(.horizontal, 16).padding(.vertical, 8)
+            TextField("Search names and descriptions", text: $searchText)
+                .textFieldStyle(.roundedBorder).padding(.horizontal, 16).padding(.bottom, 6)
             List {
                 ForEach(visibleVariables, id: \.id) { variable in
                     HStack {
@@ -154,16 +175,16 @@ struct VariableListPage: View {
             .overlay {
                 if visibleVariables.isEmpty {
                     VStack(spacing: 10) {
-                        Image(systemName: requiredOnly && !workspace.terraformVariables.isEmpty ? "line.3.horizontal.decrease.circle" : "text.badge.plus")
+                        Image(systemName: (requiredOnly || missingOnly || !searchText.isEmpty) && !workspace.terraformVariables.isEmpty ? "line.3.horizontal.decrease.circle" : "text.badge.plus")
                             .font(.largeTitle).foregroundStyle(.secondary)
-                        Text(requiredOnly && !workspace.terraformVariables.isEmpty ? "No required inputs" : "No Terraform inputs").font(.headline)
-                        Text(requiredOnly && !workspace.terraformVariables.isEmpty
-                             ? "This root module has no required inputs. Turn off Required only to see optional inputs and values."
+                        Text((requiredOnly || missingOnly || !searchText.isEmpty) && !workspace.terraformVariables.isEmpty ? "No matching inputs" : "No Terraform inputs").font(.headline)
+                        Text((requiredOnly || missingOnly || !searchText.isEmpty) && !workspace.terraformVariables.isEmpty
+                             ? "Change the filters or search to see other Terraform inputs."
                              : "Declared root inputs appear here with their type, default, and source. Add an app value only when you want Habitable to override Terraform’s own inputs.")
                             .font(.callout).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
-                        if !requiredOnly || workspace.terraformVariables.isEmpty {
+                        if !requiredOnly && !missingOnly || workspace.terraformVariables.isEmpty {
                             Button("Add Terraform input") { openEditor(for: nil) }
                                 .disabled(workspace.locked)
                         }
@@ -175,6 +196,7 @@ struct VariableListPage: View {
 
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: showMissingOnly) { value in missingOnly = value }
 
         .toolbar {
             QuietToolbar {
@@ -255,8 +277,9 @@ struct VariableListPage: View {
                 draft.key = original.key
                 draft.description = original.declaration?.description ?? ""
                 draft.sensitive = original.declaration?.sensitive ?? false
+                draft.declaration = original.declaration
                 let type = original.declaration?.type ?? "string"
-                draft.hcl = type != "string" && type != "any"
+                draft.hcl = TerraformVariableEditorMode.mode(for: type) == .rawJSON
             }
             terraformEditorContext = TerraformVariableEditorContext(draft: draft, original: nil)
         }
@@ -270,6 +293,7 @@ struct VariableListPage: View {
 
 private struct TerraformVariableEditor: View {
     @ObservedObject var variable: TerraformVariable
+    @State private var editorMode: TerraformVariableEditorMode
     let existingKeys: Set<String>
     let errorMessage: String?
     let onCancel: () -> Void
@@ -277,31 +301,74 @@ private struct TerraformVariableEditor: View {
     @State private var didAttemptSave = false
     @State private var didEditKey = false
 
+    init(variable: TerraformVariable, existingKeys: Set<String>, errorMessage: String?,
+         onCancel: @escaping () -> Void, onSave: @escaping (TerraformVariable) -> Void) {
+        self.variable = variable
+        self.existingKeys = existingKeys
+        self.errorMessage = errorMessage
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _editorMode = State(initialValue: TerraformVariableEditorMode.reopeningMode(
+            for: variable.declaration?.type, value: variable.value, isJSON: variable.hcl))
+    }
+
     private var isDuplicate: Bool { existingKeys.contains(variable.key) }
+
+    private var availableEditorModes: [TerraformVariableEditorMode] {
+        guard variable.declaration != nil else { return TerraformVariableEditorMode.allCases }
+        let declaredMode = TerraformVariableEditorMode.mode(for: variable.declaration?.type)
+        guard declaredMode != .rawJSON else { return [.rawJSON] }
+        return [declaredMode, .rawJSON]
+    }
+
+    private var editorValidationError: String? {
+        do {
+            let encoded = try editorMode.encode(variable.value, variable: variable.key)
+            let candidate = TerraformVariable()
+            candidate.key = variable.key
+            candidate.value = encoded.0
+            candidate.hcl = encoded.1
+            return candidate.validationError
+        }
+        catch { return error.localizedDescription }
+    }
 
     var body: some View {
         Form {
             Section(header: Text("Save a Terraform variable").font(.headline)) {
-                Text("App inputs override workspace tfvars for plans started in Habitable. Choose Remember to keep this input for this workspace; otherwise it lasts for this app session.")
-                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-                Toggle("Remember for this workspace", isOn: $variable.isRemembered)
-                Text("Non-sensitive values are stored in a private local file. Sensitive values are stored in macOS Keychain.")
-                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-                if variable.rememberedSecretUnavailable {
-                    Text("This remembered secret is unavailable. Restore Keychain access or remove this input before running Terraform.")
-                        .font(.caption).foregroundColor(.red)
-                }
                 Text("Key").font(.caption).foregroundColor(.secondary)
                 TextField("Variable key", text: $variable.key).labelsHidden().accessibilityLabel("Variable key").multilineTextAlignment(.leading)
-                Text("Value").font(.caption).foregroundColor(.secondary)
-                if variable.sensitive {
-                    SecureField("Value", text: $variable.value)
-                } else {
-                    TextEditor(text: $variable.value)
-                        .frame(minHeight: 72)
-                        .multilineTextAlignment(.leading)
+                if let type = variable.declaration?.type {
+                    LabeledContent("Terraform type", value: type)
                 }
-                Toggle("Value is JSON (list, map, number, boolean, or null)", isOn: $variable.hcl)
+                if let details = variable.declaration?.description, !details.isEmpty {
+                    Text(details).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Value").font(.caption).foregroundColor(.secondary)
+                Picker("Entry format", selection: $editorMode) {
+                    ForEach(availableEditorModes) { mode in Text(mode.rawValue).tag(mode) }
+                }
+                Group {
+                    if editorMode == .boolean {
+                        Picker("Boolean value", selection: $variable.value) {
+                            Text("Choose a value").tag("")
+                            Text("True").tag("true")
+                            Text("False").tag("false")
+                        }.pickerStyle(.segmented)
+                    } else if editorMode == .number {
+                        TextField("Number value", text: $variable.value).multilineTextAlignment(.leading)
+                    } else if editorMode == .string {
+                        if variable.sensitive { SecureField("String value", text: $variable.value) }
+                        else { TextEditor(text: $variable.value).frame(minHeight: 72).multilineTextAlignment(.leading) }
+                    } else {
+                        if variable.sensitive { SecureField("JSON value", text: $variable.value) }
+                        else { TextEditor(text: $variable.value).frame(minHeight: 110).multilineTextAlignment(.leading) }
+                    }
+                }
+                if editorMode == .rawJSON {
+                    Text("Enter a JSON value, including lists, objects, numbers, booleans, or null.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("Sensitive", isOn: $variable.sensitive)
                     .disabled(variable.declaration?.sensitive == true)
                     .help(variable.declaration?.sensitive == true ? "Terraform declares this input sensitive." : "")
@@ -310,18 +377,33 @@ private struct TerraformVariableEditor: View {
                 Text("Description").font(.caption).foregroundColor(.secondary)
                 TextField("Optional description", text: $variable.description).labelsHidden().accessibilityLabel("Optional description")
                     .multilineTextAlignment(.leading)
-                if (didEditKey || didAttemptSave), let validationError = variable.validationError {
+                if (didEditKey || didAttemptSave), let validationError = editorValidationError {
                     Text(validationError).foregroundColor(.red)
                 } else if (didEditKey || didAttemptSave), isDuplicate {
                     Text("A variable with this key already exists.").foregroundColor(.red)
                 }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+                Toggle("Remember for this workspace", isOn: $variable.isRemembered)
+                Text(variable.isRemembered
+                     ? "This input is saved for the workspace; secrets use macOS Keychain."
+                     : "This input lasts for this app session only.")
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                if variable.rememberedSecretUnavailable {
+                    Text("This remembered secret is unavailable. Restore Keychain access or remove this input before running Terraform.")
+                        .font(.caption).foregroundColor(.red)
+                }
                 HStack {
                     Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                     Spacer()
                     Button("Save variable") {
                         didAttemptSave = true
-                        guard variable.validationError == nil, !isDuplicate else { return }
+                        guard editorValidationError == nil,
+                              availableEditorModes.contains(editorMode), !isDuplicate else { return }
+                        do {
+                            let encoded = try editorMode.encode(variable.value, variable: variable.key)
+                            variable.value = encoded.0
+                            variable.hcl = encoded.1
+                        } catch { return }
                         onSave(variable)
                     }
                         .keyboardShortcut(.return, modifiers: .command)

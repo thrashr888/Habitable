@@ -122,6 +122,7 @@ private struct TerraformSourceEditor: NSViewRepresentable {
 struct ConfigurationPage: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var model: ConfigurationModel
+    @Binding var declarationRequest: ConfigurationDeclarationRequest?
     @State private var showStarter = false
     @State private var starterCreated = false
     @State private var pendingFile: ConfigurationFile?
@@ -129,6 +130,13 @@ struct ConfigurationPage: View {
     @State private var jump: EditorLineJump?
     @State private var showUnsavedDecision = false
     @State private var showWorkspaceDecision = false
+
+    init(workspace: Workspace, model: ConfigurationModel,
+         declarationRequest: Binding<ConfigurationDeclarationRequest?> = .constant(nil)) {
+        self.workspace = workspace
+        self.model = model
+        self._declarationRequest = declarationRequest
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -148,13 +156,21 @@ struct ConfigurationPage: View {
         }
         }
 
-        .onAppear { model.attach(to: workspace); model.setVisible(true); model.readDiagnostics(from: workspace.textOutput) }
+        .onAppear {
+            model.attach(to: workspace)
+            model.setVisible(true)
+            model.readDiagnostics(from: workspace.textOutput)
+            consumeDeclarationRequest()
+        }
         .onDisappear { model.setVisible(false) }
         .onChange(of: workspace.workingDirectory) { _ in
             model.attach(to: workspace)
             if !model.isWorkspaceSwitchPending { starterCreated = false }
         }
         .onChange(of: workspace.textOutput) { output in model.readDiagnostics(from: output) }
+        .onChange(of: declarationRequest) { _ in
+            consumeDeclarationRequest()
+        }
         .onChange(of: model.isWorkspaceSwitchPending) { pending in showWorkspaceDecision = pending }
         .sheet(isPresented: $showStarter) { starterPreview }
         .alert("Unsaved Changes", isPresented: $showUnsavedDecision) {
@@ -173,7 +189,7 @@ struct ConfigurationPage: View {
                 self.pendingFile = nil
                 self.pendingJumpLine = nil
             }
-            Button("Cancel", role: .cancel) { pendingFile = nil }
+            Button("Cancel", role: .cancel) { pendingFile = nil; pendingJumpLine = nil }
         } message: {
             Text("Save your edits before opening another file, or discard them.")
         }
@@ -190,7 +206,10 @@ struct ConfigurationPage: View {
                     .help("Refresh files")
             }
             if let directory = workspace.workingDirectory {
-                Text(directory.lastPathComponent).font(.headline).lineLimit(1)
+                HStack {
+                    Text(directory.lastPathComponent).font(.headline).lineLimit(1)
+                    SafeCopyButton(value: directory.path, label: "Copy workspace path")
+                }
             }
             List(selection: Binding(get: { model.selectedFile?.id }, set: { value in
                 guard let file = model.files.first(where: { $0.id == value }), file != model.selectedFile else { return }
@@ -198,9 +217,13 @@ struct ConfigurationPage: View {
                 else { model.selectedFile = file }
             })) {
                 ForEach(model.files) { file in
-                    Label(file.name, systemImage: "doc.text")
-                        .tag(file.id)
-                        .lineLimit(1)
+                    HStack {
+                        Label(file.name, systemImage: "doc.text")
+                            .tag(file.id)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        SafeCopyButton(value: file.url.path, label: "Copy configuration path for \(file.name)")
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -253,6 +276,7 @@ struct ConfigurationPage: View {
                             }
                         }
                         Spacer(minLength: 4)
+                        SafeCopyButton(value: file.url.path, label: "Copy configuration path")
                         Button { model.save() } label: { Image(systemName: "square.and.arrow.down") }
                             .buttonStyle(.borderedProminent)
                             .accessibilityLabel("Save configuration")
@@ -268,6 +292,7 @@ struct ConfigurationPage: View {
                         Text(file.name).font(.headline)
                         Text(file.url.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
+                    SafeCopyButton(value: file.url.path, label: "Copy configuration path")
                     if model.hasUnsavedChanges {
                         Label("Unsaved changes", systemImage: "pencil.circle")
                             .font(.caption).foregroundStyle(.orange)
@@ -397,13 +422,17 @@ struct ConfigurationPage: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(diagnostic.message).font(.callout.weight(.medium))
                                 if let file = diagnostic.file {
-                                    Button {
-                                        if let match = model.file(matching: file) { requestSelection(match, line: diagnostic.line) }
-                                    } label: {
-                                        Label("\(file)\(diagnostic.line.map { ":\($0)" } ?? "")", systemImage: "arrow.up.left")
-                                            .font(.caption.monospaced())
+                                    HStack {
+                                        Button {
+                                            if let match = model.file(matching: file) { requestSelection(match, line: diagnostic.line) }
+                                        } label: {
+                                            Label("\(file)\(diagnostic.line.map { ":\($0)" } ?? "")", systemImage: "arrow.up.left")
+                                                .font(.caption.monospaced())
+                                        }
+                                        .buttonStyle(.link)
+                                        SafeCopyButton(value: "\(file)\(diagnostic.line.map { ":\($0)" } ?? "")",
+                                                       label: "Copy diagnostic source location")
                                     }
-                                    .buttonStyle(.link)
                                 }
                             }
                             Spacer(minLength: 0)
@@ -473,6 +502,17 @@ struct ConfigurationPage: View {
             model.selectedFile = file
             if let line { jump = EditorLineJump(line: line) }
         }
+    }
+
+    private func consumeDeclarationRequest() {
+        guard let request = declarationRequest else { return }
+        guard let file = model.file(matching: request.file) else {
+            declarationRequest = nil
+            model.message = "The declaration file is no longer available in this workspace."
+            return
+        }
+        requestSelection(file, line: request.line)
+        declarationRequest = nil
     }
 
     private func createStarter() {

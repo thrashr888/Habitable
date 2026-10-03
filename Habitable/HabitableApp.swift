@@ -40,5 +40,17 @@ private struct WorkspaceCommands: Commands {
             }
             .disabled(actions == nil)
         }
+        CommandMenu("Terraform") {
+            Button(actions?.planTitle ?? "Plan") { actions?.plan() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(actions == nil || actions?.canPlan != true)
+            Divider()
+            Button("Initialize Terraform") { actions?.initialize() }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(actions == nil || actions?.canInitialize != true)
+            Button("Validate Configuration") { actions?.validate() }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+                .disabled(actions == nil || actions?.canValidate != true)
+        }
     }
 }
