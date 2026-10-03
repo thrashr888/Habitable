@@ -28,6 +28,12 @@ struct RunListPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if workspace.autoApply {
+                Label("Automatic apply is on", systemImage: "exclamationmark.triangle")
+                    .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding()
+                    .help("A successful plan applies changes without another confirmation.")
+                Divider()
+            }
             if !workspace.isValid, workspace.workingDirectory != nil {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Planning needs a valid configuration", systemImage: "exclamationmark.triangle")
@@ -40,7 +46,7 @@ struct RunListPage: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     HStack {
-                        Button("Validate and plan") {
+                        Button(workspace.autoApply ? "Validate, plan and apply" : "Validate and plan") {
                             workspace.validateAndQueueRun { selection = $0 }
                         }
                         .disabled(workspace.locked || workspace.historyLoading || workspace.historyError != nil)
@@ -125,11 +131,11 @@ struct RunListPage: View {
                 Button(action: {
                     workspace.queueRun { selection = $0 }
                 }) {
-                    Label("Queue plan", systemImage: "text.badge.plus")
+                    Label(workspace.autoApply ? "Plan and apply automatically" : "Queue plan", systemImage: "text.badge.plus")
                 }
                 .labelStyle(.iconOnly)
-                .accessibilityLabel("Queue a Terraform plan")
-                .help("Queue a Terraform plan")
+                .accessibilityLabel(workspace.autoApply ? "Plan and apply automatically" : "Queue a Terraform plan")
+                .help(workspace.autoApply ? "Create a plan and automatically apply its changes" : "Queue a Terraform plan")
                 .disabled(workspace.locked || workspace.historyLoading || !workspace.isValid || workspace.historyError != nil)
             }
             ToolbarItem(placement: .automatic) {

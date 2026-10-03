@@ -11,7 +11,8 @@ struct RunPageView: View {
     @EnvironmentObject var workspace: Workspace
     @ObservedObject var run: TerraformRun
     
-    @State var selection: Int = 1
+    @State private var phaseSelection = RunPhaseSelection()
+    private var selection: Int { phaseSelection.phase.rawValue }
     
     static let taskDateFormat: DateFormatter = {
         let formatter = DateFormatter()
@@ -140,7 +141,7 @@ struct RunPageView: View {
                         if run.canConfirm {
                             Button("Confirm and apply") {
                                 run.doApply { _, error in
-                                    selection = error == nil ? 2 : 3
+                                    phaseSelection.receive(error == nil ? .apply : .errors)
                                 }
                             }
                             .buttonStyle(.borderedProminent)
@@ -154,22 +155,25 @@ struct RunPageView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if !run.canCancel && (run.apply != nil || run.errorMessage != nil) {
-                    Picker("Run phase", selection: $selection) {
+                if run.apply != nil || run.errorMessage != nil || run.status == .confirmed || run.status == .applying {
+                    Picker("Run phase", selection: Binding(get: { selection }, set: { phaseSelection.inspect(RunDisplayPhase(rawValue: $0) ?? .plan) })) {
                         Text("Plan").tag(1)
-                        if run.apply != nil { Text("Apply").tag(2) }
+                        if run.apply != nil || run.status == .confirmed || run.status == .applying { Text("Apply").tag(2) }
                         if run.errorMessage != nil { Text("Errors").tag(3) }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                    if run.canCancel && !phaseSelection.followsLive {
+                        Button("Follow active phase") {
+                            phaseSelection.resume(currentPhase)
+                        }
+                    }
                 }
 
             }
             Group {
-                if run.canCancel {
-                    if run.status == .confirmed || run.status == .applying {
-                        applyView
-                    } else if let plan = run.plan {
+                if run.canCancel && selection == 1 && run.status != .confirmed && run.status != .applying {
+                    if let plan = run.plan {
                         StructuredLogSections(logs: plan)
                     } else {
                         TextLogView(text: run.textOutput ?? "Waiting for Terraform output…")
@@ -193,9 +197,12 @@ struct RunPageView: View {
         .onChange(of: run.errorMessage) { _ in followCurrentPhase() }
     }
 
+    private var currentPhase: RunDisplayPhase {
+        RunDisplayPhase.current(status: run.status, hasApply: run.apply != nil, hasError: run.errorMessage != nil)
+    }
+
     private func followCurrentPhase() {
-        selection = RunDisplayPhase.current(status: run.status, hasApply: run.apply != nil,
-                                            hasError: run.errorMessage != nil).rawValue
+        phaseSelection.receive(currentPhase)
     }
 }
 

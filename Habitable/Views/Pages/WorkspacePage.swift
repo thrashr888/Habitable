@@ -25,7 +25,6 @@ struct CheckView: View {
 
 struct WorkspacePage: View {
     @EnvironmentObject var workspace: Workspace
-    @ObservedObject var readme: WorkspaceReadmePresentation
     var onReviewRun: @MainActor @Sendable (UUID) -> Void = { _ in }
     var onOpenConfiguration: () -> Void = {}
     var onOpenInputs: () -> Void = {}
@@ -44,7 +43,7 @@ struct WorkspacePage: View {
         if missing > 0 { return ("\(missing) required input\(missing == 1 ? "" : "s") need values", "Supply the missing values before creating a plan.", "Inputs") }
         if !workspace.isInitialized { return ("Initialization needed", "Install the selected backend and provider dependencies.", "Initialize") }
         if !workspace.isValid { return ("Configuration needs attention", "Validate the configuration, then review any errors before planning.", "Validate") }
-        return ("Ready to plan", "The folder is initialized and its configuration is valid.", "Plan")
+        return ("Ready to plan", "The folder is initialized and its configuration is valid.", workspace.autoApply ? "Plan and apply automatically" : "Plan")
     }
 
     var body: some View {
@@ -68,6 +67,39 @@ struct WorkspacePage: View {
                     Text(workspace.description)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+
+                GroupBox("Readiness") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(readiness.title, systemImage: readiness.action == "Plan" || readiness.action == "Plan and apply automatically" ? "checkmark.circle.fill" : "exclamationmark.circle")
+                            .font(.headline)
+                        Text(readiness.detail).foregroundStyle(.secondary)
+                        if workspace.autoApply {
+                            Label("Automatic apply is on. A successful plan will apply changes without another confirmation.", systemImage: "exclamationmark.triangle")
+                                .font(.callout).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if workspace.canCancelCommand {
+                            HStack {
+                                ProgressView().controlSize(.small)
+                                Text(workspace.isCancelingCommand ? "Stopping Terraform…" : "Terraform is running…")
+                                Spacer()
+                                Button("Cancel", action: workspace.cancelCommand).disabled(workspace.isCancelingCommand)
+                            }
+                        }
+                        if !readiness.action.isEmpty {
+                            Button(readiness.action) {
+                                switch readiness.action {
+                                case "Inputs": onOpenInputs()
+                                case "Initialize": workspace.initialize()
+                                case "Validate": workspace.validate()
+                                default: workspace.validateAndQueueRun(onCreated: onReviewRun)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(workspace.locked)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 HStack(spacing: 20) {
@@ -148,27 +180,6 @@ struct WorkspacePage: View {
                     .padding(.top, 12)
                 }
 
-                GroupBox("Readiness") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(readiness.title, systemImage: workspace.isInitialized && workspace.isValid ? "checkmark.circle.fill" : "exclamationmark.circle")
-                            .font(.headline)
-                        Text(readiness.detail).foregroundStyle(.secondary)
-                        if !readiness.action.isEmpty {
-                            Button(readiness.action) {
-                                switch readiness.action {
-                                case "Inputs": onOpenInputs()
-                                case "Initialize": workspace.initialize()
-                                case "Validate": workspace.validate()
-                                default: workspace.validateAndQueueRun(onCreated: onReviewRun)
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(workspace.locked)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
                 GroupBox("Checks") {
                     VStack(alignment: .leading, spacing: 8) {
                         CheckView(label: "Initialized", check: workspace.isInitialized)
@@ -189,18 +200,6 @@ struct WorkspacePage: View {
                 if let error = workspace.rememberedInputsError { ErrorView(message: error) }
                 if let error = workspace.errorMessage { ErrorView(message: error) }
 
-                WorkspaceReadmeView(directory: workspace.workingDirectory, presentation: readme)
-
-                if workspace.canCancelCommand {
-                    HStack(spacing: 10) {
-                        ProgressView().controlSize(.small)
-                        Text(workspace.isCancelingCommand ? "Stopping Terraform…" : "Terraform is running…")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Cancel", action: workspace.cancelCommand)
-                            .disabled(workspace.isCancelingCommand)
-                    }
-                }
 
                 if let text = workspace.textOutput {
                     VStack(alignment: .leading, spacing: 8) {
@@ -238,49 +237,55 @@ struct WorkspacePage: View {
     }
 }
 
-private struct WorkspaceReadmeView: View {
+struct WorkspaceReadmePage: View {
     let directory: URL?
     @ObservedObject var presentation: WorkspaceReadmePresentation
     @State private var refreshID = UUID()
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                if presentation.loading || !presentation.matches(directory: directory) {
-                    ProgressView("Reading README…")
-                } else if let document = presentation.prepared?.document {
-                    Text(document.file.path)
-                        .font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                    if let markdown = presentation.prepared?.markdown {
-                        Markdown(markdown, baseURL: document.file.deletingLastPathComponent())
-                            .markdownImageProvider(ReadmeImageLinks())
-                            .markdownTextStyle { FontSize(14) }
+        ScrollView {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    if presentation.loading || !presentation.matches(directory: directory) {
+                        ProgressView("Reading README…")
+                    } else if let document = presentation.prepared?.document {
+                        Text(document.file.path)
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
                             .textSelection(.enabled)
-                            .environment(\.openURL, OpenURLAction { url in
-                                guard WorkspaceReadme.canOpen(url, relativeTo: document.root) else { return .discarded }
-                                return .systemAction
-                            })
+                        if let markdown = presentation.prepared?.markdown {
+                            Markdown(markdown, baseURL: document.file.deletingLastPathComponent())
+                                .markdownImageProvider(ReadmeImageLinks())
+                                .markdownTextStyle { FontSize(14) }
+                                .textSelection(.enabled)
+                                .environment(\.openURL, OpenURLAction { url in
+                                    guard WorkspaceReadme.canOpen(url, relativeTo: document.root) else { return .discarded }
+                                    return .systemAction
+                                })
+                        } else {
+                            Text(document.content).textSelection(.enabled)
+                        }
+                        ExternalEditorPicker(file: document.file)
                     } else {
-                        Text(document.content).textSelection(.enabled)
+                        Text(presentation.loadError ?? "Add a README.md to your repository to describe this workspace and how to use it.")
+                            .foregroundStyle(.secondary)
                     }
-                    Button("Open README") { NSWorkspace.shared.open(document.file) }
-                } else {
-                    Text(presentation.loadError ?? "Add a README.md to your repository to describe this workspace and how to use it.")
-                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                HStack {
+                    Text("README").font(.headline)
+                    Spacer()
+                    Button { refreshID = UUID() } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.plain)
+                        .help("Refresh README")
+                        .accessibilityLabel("Refresh README")
                 }
             }
+            .frame(maxWidth: 900, alignment: .leading)
+            .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            HStack {
-                Text("README").font(.headline)
-                Spacer()
-                Button { refreshID = UUID() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.plain)
-                    .help("Refresh README")
-                    .accessibilityLabel("Refresh README")
-            }
         }
+        .navigationTitle("README")
         .task(id: "\(directory?.path ?? "")-\(refreshID)") {
             await presentation.load(directory: directory)
         }
@@ -300,7 +305,7 @@ private struct ReadmeImageLinks: ImageProvider {
 
 struct WorkspacePage_Previews: PreviewProvider {
     static var previews: some View {
-        WorkspacePage(readme: WorkspaceReadmePresentation())
+        WorkspacePage()
             .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
     }
 }

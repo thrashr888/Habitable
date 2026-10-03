@@ -281,11 +281,6 @@ final class ConfigurationModel: ObservableObject {
         }
     }
 
-    func openInEditor() {
-        guard let url = selectedFile?.url else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     func file(matching sourcePath: String) -> ConfigurationFile? {
         let cleaned = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleaned.contains("/") {
