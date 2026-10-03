@@ -46,4 +46,44 @@ final class RunGitContextTests: XCTestCase {
         try "ref: refs/heads/../../secret".write(to: metadata.appendingPathComponent("HEAD"), atomically: true, encoding: .utf8)
         XCTAssertNil(RunGitContext.capture(directory: worktree))
     }
+
+    func testLiveSnapshotIncludesTruthfulProvenanceAndStripsRemoteCredentials() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-b", "main"], at: root)
+        try git(["config", "user.name", "Habitable Tests"], at: root)
+        try git(["config", "user.email", "habitable@example.invalid"], at: root)
+        try "terraform {}\n".write(to: root.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try git(["add", "main.tf"], at: root)
+        try git(["commit", "-m", "initial fixture"], at: root)
+        try git(["remote", "add", "origin", "https://user:secret@github.com/example/repo.git?token=secret"], at: root)
+
+        let clean = try XCTUnwrap(RunGitContext.capture(directory: root))
+        XCTAssertEqual(clean.branch, "main")
+        XCTAssertEqual(clean.subject, "initial fixture")
+        XCTAssertEqual(clean.dirty, false)
+        XCTAssertEqual(clean.remoteURL, "https://github.com/example/repo")
+        XCTAssertFalse(clean.remoteURL?.contains("secret") == true)
+
+        try git(["remote", "set-url", "origin", "git@github.com:example/repo.git"], at: root)
+        XCTAssertEqual(RunGitContext.capture(directory: root)?.remoteURL, "https://github.com/example/repo")
+
+        try "resource \"x\" {}\n".write(to: root.appendingPathComponent("new.tf"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(RunGitContext.capture(directory: root)?.dirty, true)
+        try git(["checkout", "--detach"], at: root)
+        XCTAssertEqual(RunGitContext.capture(directory: root)?.isDetached, true)
+    }
+
+    private func git(_ arguments: [String], at directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, "git \(arguments.joined(separator: " ")) failed")
+    }
 }

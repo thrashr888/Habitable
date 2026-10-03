@@ -3,7 +3,6 @@
 //  Habitable
 //
 
-import AppKit
 import SwiftUI
 
 struct OutputPageView: View {
@@ -18,9 +17,12 @@ struct OutputPageView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 10) {
                     GridRow(alignment: .top) {
-                        Text("Name").foregroundStyle(.secondary)
-                        Text(output.key).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+                    Text("Name").foregroundStyle(.secondary)
+                        HStack(alignment: .top) {
+                            Text(output.key).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            SafeCopyButton(value: output.key, label: "Copy output name \(output.key)")
+                        }
                     }
                     if let type = output.type {
                         GridRow(alignment: .top) {
@@ -37,15 +39,7 @@ struct OutputPageView: View {
                     Text("Value").font(.headline)
                     Spacer()
                     if !output.sensitive, output.value != nil {
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(displayedValue, forType: .string)
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(.plain)
-                        .help("Copy output value")
-                        .accessibilityLabel("Copy value for output \(output.key)")
+                        SafeCopyButton(value: displayedValue, label: "Copy value for output \(output.key)", showsTitle: true)
                     }
                 }
                 Text(displayedValue)

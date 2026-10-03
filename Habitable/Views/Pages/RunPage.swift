@@ -10,6 +10,7 @@ import SwiftUI
 struct RunPageView: View {
     @EnvironmentObject var workspace: Workspace
     @ObservedObject var run: TerraformRun
+    var onOpenDeclaration: ((String, Int) -> Void)? = nil
     
     @State private var phaseSelection = RunPhaseSelection()
     private var selection: Int { phaseSelection.phase.rawValue }
@@ -35,7 +36,9 @@ struct RunPageView: View {
     var planView: some View {
         Group {
             if let plan = run.plan {
-                PlanReviewSections(plan: plan, diff: run.planDiff)
+                PlanReviewSections(plan: plan, diff: run.planDiff,
+                                   workspaceDirectory: workspace.workingDirectory,
+                                   onOpenDeclaration: onOpenDeclaration)
             } else {
                 Text(run.isFinished ? "No plan output was captured for this run." : "Planning…")
             }
@@ -62,8 +65,14 @@ struct RunPageView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     ForEach(diagnostics, id: \.id) { diagnostic in
-                        DiagnosticView(diagnostic: diagnostic.diagnostic,
-                                       workingDirectory: workspace.workingDirectory)
+                        VStack(alignment: .leading, spacing: 8) {
+                            DiagnosticView(diagnostic: diagnostic.diagnostic,
+                                           workingDirectory: workspace.workingDirectory)
+                            if let filename = diagnostic.diagnostic.range?.filename {
+                                let location = "\(filename)\(diagnostic.diagnostic.range?.start.map { ":\($0.line)" } ?? "")"
+                                SafeCopyButton(value: location, label: "Copy diagnostic source location", showsTitle: true)
+                            }
+                        }
                     }
                 }
             }
@@ -91,9 +100,28 @@ struct RunPageView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         if let commit = run.gitCommit {
-                            Text("\(run.gitBranch ?? "Detached HEAD") · \(commit.prefix(8))")
-                                .font(.caption.monospaced()).foregroundStyle(.secondary)
-                                .help(commit)
+                            HStack(spacing: 6) {
+                                Text("\(run.gitBranch ?? "Detached HEAD") · \(commit.prefix(8))")
+                                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                                    .help(commit)
+                                SafeCopyButton(value: commit, label: "Copy full commit SHA", showsTitle: true)
+                            }
+                        }
+                        if let source = run.triggerSource {
+                            Text("Trigger: \(source)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let subject = run.gitSubject {
+                            Text("Commit: \(subject)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        if let dirty = run.gitDirty {
+                            Text("Captured source: \(dirty ? "Dirty" : "Clean")")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Git working-tree status unavailable")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let remote = run.gitRemoteURL {
+                            SafeCopyButton(value: remote, label: "Copy Git remote URL", showsTitle: true)
                         }
                         Text(run.executionContextDescription)
                             .font(.caption)
@@ -234,6 +262,9 @@ private struct ScopedPlanAttribute: Identifiable {
 private struct PlanReviewSections: View {
     let plan: StructuredLog
     let diff: TerraformPlan?
+    let workspaceDirectory: URL?
+    let onOpenDeclaration: ((String, Int) -> Void)?
+    @State private var declarations: TerraformConfigurationMetadata?
     @State private var addressFilter = ""
     @State private var operationFilter = "All"
 
@@ -297,6 +328,22 @@ private struct PlanReviewSections: View {
                 ForEach(visibleChanges) { change in
                     Section {
                         DisclosureGroup {
+                            SafeCopyButton(value: change.address,
+                                           label: "Copy resource address \(change.address)",
+                                           showsTitle: true)
+                            if let declarations,
+                               let declaration = TerraformConfigurationInspector.declaration(for: change.address, in: declarations),
+                               let line = declaration.sourceLine {
+                                HStack {
+                                    Text("Current declaration: \(declaration.sourceFile):\(line)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    if let onOpenDeclaration {
+                                        Button("Open current declaration") { onOpenDeclaration(declaration.sourceFile, line) }
+                                            .buttonStyle(.borderless)
+                                    }
+                                }
+                            }
                             if let originalAddress = change.originalAddress {
                                 LabeledContent("Moved from") {
                                     Text(originalAddress).textSelection(.enabled)
@@ -398,6 +445,14 @@ private struct PlanReviewSections: View {
                      : "Waiting for Terraform events…")
                     .foregroundStyle(.secondary)
             }
+        }
+        .task(id: workspaceDirectory?.path) {
+            guard let workspaceDirectory else { declarations = nil; return }
+            let inspected = await Task.detached(priority: .utility) {
+                TerraformConfigurationInspector.inspectMetadata(directory: workspaceDirectory)
+            }.value
+            guard !Task.isCancelled else { return }
+            declarations = inspected
         }
     }
 

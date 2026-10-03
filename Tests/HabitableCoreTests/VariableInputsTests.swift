@@ -45,6 +45,51 @@ final class VariableInputsTests: XCTestCase {
         XCTAssertNotNil(invalidJSON.validationError)
     }
 
+    func testDeclaredTypeEditorsEncodePrimitiveAndRawJSONValues() throws {
+        XCTAssertEqual(try TerraformVariableEditorMode.string.encode("", variable: "label").0, "")
+        XCTAssertEqual(try TerraformVariableEditorMode.boolean.encode("false", variable: "enabled").1, true)
+        XCTAssertThrowsError(try TerraformVariableEditorMode.boolean.encode("yes", variable: "enabled"))
+        XCTAssertEqual(try TerraformVariableEditorMode.number.encode("0", variable: "count").0, "0")
+        XCTAssertEqual(try TerraformVariableEditorMode.number.encode("1", variable: "count").0, "1")
+        XCTAssertEqual(try TerraformVariableEditorMode.number.encode("-1.25e3", variable: "count").0, "-1.25e3")
+        XCTAssertThrowsError(try TerraformVariableEditorMode.number.encode("true", variable: "count"))
+        XCTAssertThrowsError(try TerraformVariableEditorMode.number.encode("null", variable: "count"))
+        XCTAssertEqual(try TerraformVariableEditorMode.rawJSON.encode("null", variable: "value").0, "null")
+        XCTAssertEqual(TerraformVariableEditorMode.mode(for: "list(string)"), .rawJSON)
+    }
+
+    func testReopeningCompatiblePrimitiveJSONUsesTypedEditorsButPreservesNullAndQuotedStrings() {
+        XCTAssertEqual(TerraformVariableEditorMode.reopeningMode(for: "bool", value: "false", isJSON: true), .boolean)
+        XCTAssertEqual(TerraformVariableEditorMode.reopeningMode(for: "number", value: "1.25e2", isJSON: true), .number)
+        XCTAssertEqual(TerraformVariableEditorMode.reopeningMode(for: "number", value: "true", isJSON: true), .rawJSON)
+        XCTAssertEqual(TerraformVariableEditorMode.reopeningMode(for: "string", value: #""quoted""#, isJSON: true), .rawJSON)
+        XCTAssertEqual(TerraformVariableEditorMode.reopeningMode(for: "bool", value: "null", isJSON: true), .rawJSON)
+        XCTAssertEqual(TerraformVariableEditorMode.reopeningMode(for: "string", value: "", isJSON: false), .string)
+    }
+
+    func testMissingRequiredInputExcludesAppValuesWorkspaceValuesAndUnknownValues() {
+        let missing = TerraformVariable()
+        missing.declaration = TerraformDeclaredInput(name: "region", type: "string", description: nil,
+            hasDefault: false, defaultJSON: nil, required: true, sensitive: false, ephemeral: nil,
+            sourceFile: "variables.tf", sourceLine: 1)
+        XCTAssertTrue(missing.isMissingRequiredInput)
+
+        let supplied = TerraformVariable()
+        supplied.declaration = missing.declaration
+        supplied.isUserInput = true
+        XCTAssertFalse(supplied.isMissingRequiredInput)
+
+        let fromWorkspace = TerraformVariable()
+        fromWorkspace.declaration = missing.declaration
+        fromWorkspace.discoveredSource = "terraform.tfvars"
+        XCTAssertFalse(fromWorkspace.isMissingRequiredInput)
+
+        let unresolved = TerraformVariable()
+        unresolved.declaration = missing.declaration
+        unresolved.hasUnresolvedDiscoveredValue = true
+        XCTAssertFalse(unresolved.isMissingRequiredInput)
+    }
+
     func testEnvironmentVariableValidationAndSensitiveMetadata() throws {
         let variable = EnvironmentVariable()
         variable.key = "APP_TOKEN"

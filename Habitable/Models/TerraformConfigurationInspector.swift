@@ -50,6 +50,20 @@ struct TerraformModuleCallMetadata: Identifiable, Equatable, Sendable {
     var id: String { name }
 }
 
+struct TerraformResourceDeclaration: Identifiable, Equatable, Sendable {
+    let address: String
+    let sourceFile: String
+    let sourceLine: Int?
+    var id: String { address }
+    var sourceLocation: String { sourceLine.map { "\(sourceFile):\($0)" } ?? sourceFile }
+}
+
+struct ConfigurationDeclarationRequest: Identifiable, Equatable {
+    let id = UUID()
+    let file: String
+    let line: Int
+}
+
 struct TerraformOutputMetadata: Identifiable, Equatable, Sendable {
     let name: String
     let description: String?
@@ -65,6 +79,7 @@ struct TerraformConfigurationMetadata: Sendable {
     var outputs: [TerraformOutputMetadata] = []
     var providers: [TerraformProviderRequirementMetadata] = []
     var modules: [TerraformModuleCallMetadata] = []
+    var resources: [TerraformResourceDeclaration] = []
     var requiredCore: [String] = []
     var diagnostics: [String] = []
 }
@@ -109,12 +124,13 @@ enum TerraformConfigurationInspector {
         var outputs: [String: MetadataOutput]?
         var requiredProviders: [String: MetadataProvider]?
         var moduleCalls: [String: MetadataModuleCall]?
+        var resources: [String: MetadataResource]?
         var requiredCore: [String]?
         var diagnostics: [Diagnostic]?
         enum CodingKeys: String, CodingKey {
             case variables, outputs, diagnostics
             case requiredProviders = "required_providers"
-            case moduleCalls = "module_calls"
+            case moduleCalls = "module_calls", resources
             case requiredCore = "required_core"
         }
     }
@@ -132,6 +148,58 @@ enum TerraformConfigurationInspector {
     }
     private struct MetadataAlias: Decodable { var name: String; var alias: String? }
     private struct MetadataModuleCall: Decodable { var name: String; var source: String; var version: String?; var pos: Position? }
+    private struct MetadataResource: Decodable { var address: String; var pos: Position? }
+
+    /// Resolves only root-module declarations represented by config-inspect metadata.
+    /// Child-module, generated, and otherwise unindexed addresses intentionally have no result.
+    static func declaration(for address: String, in metadata: TerraformConfigurationMetadata) -> TerraformResourceDeclaration? {
+        guard !address.hasPrefix("module."), let declarationKey = rootDeclarationKey(for: address) else { return nil }
+        return metadata.resources.first { $0.address == declarationKey && $0.sourceLine != nil }
+    }
+
+    private static func rootDeclarationKey(for address: String) -> String? {
+        var components: [String] = []
+        var component = ""
+        var bracketDepth = 0
+        var quoted = false
+        var escaped = false
+        for character in address {
+            if quoted {
+                component.append(character)
+                if escaped { escaped = false }
+                else if character == "\\" { escaped = true }
+                else if character == "\"" { quoted = false }
+            } else if character == "\"" {
+                quoted = true
+                component.append(character)
+            } else if character == "[" {
+                bracketDepth += 1
+                component.append(character)
+            } else if character == "]" {
+                bracketDepth -= 1
+                guard bracketDepth >= 0 else { return nil }
+                component.append(character)
+            } else if character == "." && bracketDepth == 0 {
+                components.append(component)
+                component = ""
+            } else {
+                component.append(character)
+            }
+        }
+        guard bracketDepth == 0, !quoted else { return nil }
+        components.append(component)
+        guard components.count >= 2 else { return nil }
+        let typeIndex = components.first == "data" ? 1 : 0
+        guard components.count > typeIndex + 1 else { return nil }
+        let rawName = String(components[typeIndex + 1])
+        let name = String(rawName.prefix { $0 != "[" })
+        guard !name.isEmpty else { return nil }
+        let key = typeIndex == 1 ? "data.\(components[typeIndex]).\(name)" : "\(components[typeIndex]).\(name)"
+        // Reject traversal or malformed suffixes; only instance keys after the resource name are allowed.
+        guard components.count == typeIndex + 2,
+              rawName == name || rawName.hasPrefix(name + "[") else { return nil }
+        return key
+    }
 
     /// JSON values are retained as their original JSON representation so null and
     /// empty strings remain distinct from an absent value.
@@ -267,6 +335,11 @@ enum TerraformConfigurationInspector {
                 return TerraformModuleCallMetadata(name: item.name, source: item.source, version: item.version,
                     sourceFile: URL(fileURLWithPath: path).lastPathComponent, sourceLine: item.pos?.line)
             }.sorted { $0.name < $1.name }
+            result.resources = (metadata.resources ?? [:]).values.map { item in
+                let path = item.pos?.filename ?? "(unknown source)"
+                return TerraformResourceDeclaration(address: item.address,
+                    sourceFile: URL(fileURLWithPath: path).lastPathComponent, sourceLine: item.pos?.line)
+            }.sorted { $0.address < $1.address }
             result.requiredCore = metadata.requiredCore ?? []
             result.diagnostics = (metadata.diagnostics ?? []).map(\.summary)
         } catch {

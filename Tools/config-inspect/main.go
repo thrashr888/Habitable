@@ -27,8 +27,14 @@ type metadataOutput struct {
 	Outputs           map[string]outputMetadataOutput     `json:"outputs"`
 	RequiredProviders map[string]providerMetadataOutput   `json:"required_providers"`
 	ModuleCalls       map[string]moduleCallMetadataOutput `json:"module_calls"`
+	Resources         map[string]resourceMetadataOutput   `json:"resources"`
 	RequiredCore      []string                            `json:"required_core,omitempty"`
 	Diagnostics       tfconfig.Diagnostics                `json:"diagnostics,omitempty"`
+}
+
+type resourceMetadataOutput struct {
+	Address string             `json:"address"`
+	Pos     tfconfig.SourcePos `json:"pos"`
 }
 
 type variableMetadataOutput struct {
@@ -192,9 +198,18 @@ func inspectMetadata(directory string) (*metadataOutput, error) {
 	for name, item := range module.ModuleCalls {
 		moduleCalls[name] = moduleCallMetadataOutput{Name: item.Name, Source: item.Source, Version: item.Version, Pos: item.Pos}
 	}
+	resources := make(map[string]resourceMetadataOutput, len(module.ManagedResources)+len(module.DataResources))
+	for _, item := range module.ManagedResources {
+		address := item.MapKey()
+		resources[address] = resourceMetadataOutput{Address: address, Pos: item.Pos}
+	}
+	for _, item := range module.DataResources {
+		address := item.MapKey()
+		resources[address] = resourceMetadataOutput{Address: address, Pos: item.Pos}
+	}
 	diagnostics = append(diagnostics, propDiagnostics...)
 	return &metadataOutput{Path: module.Path, Variables: variables, Outputs: outputs,
-		RequiredProviders: providers, ModuleCalls: moduleCalls, RequiredCore: module.RequiredCore, Diagnostics: diagnostics}, nil
+		RequiredProviders: providers, ModuleCalls: moduleCalls, Resources: resources, RequiredCore: module.RequiredCore, Diagnostics: diagnostics}, nil
 }
 
 func readValues(filename string) (*valueOutput, error) {

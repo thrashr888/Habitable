@@ -208,6 +208,12 @@ class TerraformRun: ObservableObject, Identifiable {
     @Published private(set) var applyFinishedAt: Date?
     private(set) var gitBranch: String?
     private(set) var gitCommit: String?
+    private(set) var gitSubject: String?
+    private(set) var gitDirty: Bool?
+    private(set) var gitRemoteURL: String?
+    private(set) var triggerSource: String?
+    var gitShortCommit: String? { gitCommit.map { String($0.prefix(12)) } }
+    var gitIsDetached: Bool { gitBranch == nil && gitCommit != nil }
 
     var planDuration: TimeInterval? {
         guard let start = planStartedAt, let finish = planFinishedAt, finish >= start else { return nil }
@@ -433,6 +439,8 @@ class TerraformRun: ObservableObject, Identifiable {
         planStartedAt = record.planStartedAt; planFinishedAt = record.planFinishedAt
         applyStartedAt = record.applyStartedAt; applyFinishedAt = record.applyFinishedAt
         gitBranch = record.gitBranch; gitCommit = record.gitCommit
+        gitSubject = record.gitSubject; gitDirty = record.gitDirty
+        gitRemoteURL = record.gitRemoteURL; triggerSource = record.triggerSource
         terraformVersion = record.terraformVersion
         selectedTerraformWorkspace = record.selectedTerraformWorkspace ?? selectedTerraformWorkspace
         backendIdentity = record.backendIdentity ?? backendIdentity
@@ -473,7 +481,9 @@ class TerraformRun: ObservableObject, Identifiable {
                                added: added, changed: changed, destroyed: destroyed,
                                planStartedAt: planStartedAt, planFinishedAt: planFinishedAt,
                                applyStartedAt: applyStartedAt, applyFinishedAt: applyFinishedAt,
-                               gitBranch: gitBranch, gitCommit: gitCommit)
+                               gitBranch: gitBranch, gitCommit: gitCommit,
+                               gitSubject: gitSubject, gitDirty: gitDirty,
+                               gitRemoteURL: gitRemoteURL, triggerSource: triggerSource)
         return workspace.persistRun(record, directory: directory)
     }
 
@@ -578,6 +588,60 @@ class TerraformRun: ObservableObject, Identifiable {
                             workspace: Workspace, lease: WorkspaceCommandCoordinator.Lease,
                             context: WorkspaceContextCaptureContext, fingerprint: String,
                             completion: @escaping (StructuredLog?, String?) -> Void) {
+        isCheckingContext = true
+        contextVerificationTask = Task { [self, workspace] in
+            do {
+                let git = await Task.detached(priority: .utility) {
+                    RunGitContext.capture(directory: context.directory)
+                }.value
+                guard !Task.isCancelled, status == .planning else {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                let capture = WorkspaceContextFingerprint.captureOffMainActor(context)
+                contextFingerprintTask = capture
+                let currentFingerprint = try await capture.value
+                contextFingerprintTask = nil
+                guard !Task.isCancelled, status == .planning else {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                    return
+                }
+                guard currentInputsFingerprint(in: workspace) == context.inputsFingerprint else {
+                    failContextCheck(workspace: workspace, lease: lease, status: .expired,
+                                     message: "Terraform variable inputs changed before planning started. Try planning again.",
+                                     completion: completion)
+                    return
+                }
+                guard currentFingerprint == fingerprint else {
+                    failContextCheck(workspace: workspace, lease: lease, status: .expired,
+                                     message: "Terraform configuration or execution context changed before planning started. Create a new plan.",
+                                     completion: completion)
+                    return
+                }
+                gitBranch = git?.branch; gitCommit = git?.commit
+                gitSubject = git?.subject; gitDirty = git?.dirty
+                gitRemoteURL = git?.remoteURL
+                isCheckingContext = false
+                contextVerificationTask = nil
+                beginPlan(variables: variables, environmentVariables: environmentVariables,
+                          workspace: workspace, lease: lease, context: context,
+                          fingerprint: fingerprint, completion: completion)
+            } catch {
+                if Task.isCancelled || status == .canceled {
+                    finishCanceledContextCheck(workspace: workspace, lease: lease, completion: completion)
+                } else {
+                    failContextCheck(workspace: workspace, lease: lease, status: .expired,
+                                     message: "Could not verify the execution context before planning: \(error.localizedDescription)",
+                                     completion: completion)
+                }
+            }
+        }
+    }
+
+    private func beginPlan(variables: [TerraformVariable], environmentVariables: [EnvironmentVariable],
+                           workspace: Workspace, lease: WorkspaceCommandCoordinator.Lease,
+                           context: WorkspaceContextCaptureContext, fingerprint: String,
+                           completion: @escaping (StructuredLog?, String?) -> Void) {
         let runner = workspace.runner
         textOutput = ""
         planHistoryOutput = nil
@@ -586,8 +650,6 @@ class TerraformRun: ObservableObject, Identifiable {
         let liveLog = StructuredLog()
         let decoder = NDJSONStreamDecoder()
         plan = liveLog
-        let git = RunGitContext.capture(directory: context.directory)
-        gitBranch = git?.branch; gitCommit = git?.commit
         planStartedAt = Date()
         guard persist() else {
             planStartedAt = nil

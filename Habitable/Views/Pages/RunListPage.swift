@@ -15,6 +15,11 @@ struct RunListPage: View {
     @State private var showDeleteConfirmation = false
     @State private var showRetentionConfirmation = false
     @State private var retentionDays = 90
+    @State private var filterText = ""
+    @State private var filterStatus = ""
+    @State private var filterByDate = false
+    @State private var filterAfter = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+    @State private var filterBefore = Date()
 
     private var selectedSavedRun: TerraformRun? {
         guard let selection else { return nil }
@@ -46,10 +51,10 @@ struct RunListPage: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     HStack {
-                        Button(workspace.autoApply ? "Validate, plan and apply" : "Validate and plan") {
+                        Button(workspace.autoApply ? "Validate, plan and apply automatically" : "Validate and plan") {
                             workspace.validateAndQueueRun { selection = $0 }
                         }
-                        .disabled(workspace.locked || workspace.historyLoading || workspace.historyError != nil)
+                        .disabled(workspace.locked || workspace.historyLoading || workspace.isInspectingInputs || workspace.historyError != nil)
                         if !workspace.isInitialized {
                             Button("Initialize workspace", action: workspace.initialize)
                                 .disabled(workspace.locked)
@@ -68,13 +73,56 @@ struct RunListPage: View {
                 }
                 .padding()
             }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("Search saved runs", text: $filterText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(applyFilters)
+                        .accessibilityLabel("Search saved run history")
+                    Button(action: applyFilters) {
+                        Label("Apply history filters", systemImage: "line.3.horizontal.decrease")
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel("Apply history filters")
+                    .disabled(workspace.locked || workspace.historyLoading)
+                }
+                HStack(spacing: 10) {
+                    Picker("Status", selection: $filterStatus) {
+                        Text("All statuses").tag("")
+                        ForEach(RunStatus.allCasesForHistory, id: \.rawValue) { status in
+                            Text(status.historyLabel).tag(status.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 140, alignment: .leading)
+                    Toggle("Date range", isOn: $filterByDate)
+                        .toggleStyle(.checkbox)
+                }
+                if filterByDate {
+                    VStack(alignment: .leading, spacing: 4) {
+                        DatePicker("From", selection: $filterAfter, displayedComponents: .date)
+                        DatePicker("To", selection: $filterBefore, displayedComponents: .date)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .onAppear {
+                filterText = workspace.historyTextFilter
+                filterStatus = workspace.historyStatusFilter?.rawValue ?? ""
+                filterByDate = workspace.historyAfterFilter != nil || workspace.historyBeforeFilter != nil
+                if let value = workspace.historyAfterFilter { filterAfter = value }
+                if let value = workspace.historyBeforeFilter { filterBefore = value }
+            }
             List(selection: $selection) {
                 if workspace.historyLoading && workspace.runs.isEmpty {
                     ProgressView("Loading saved runs…")
                 } else if workspace.runs.isEmpty {
-                    Text(workspace.historyTotalCount == 0
-                         ? "No runs yet. Queue a plan to view potential changes."
-                         : "No saved runs on this page.")
+                    Text(workspace.historyTotalCount == 0 && workspace.hasActiveHistoryFilters
+                         ? "No matching runs. Adjust or clear the filters."
+                         : (workspace.historyTotalCount == 0
+                            ? "No runs yet. Queue a plan to view potential changes."
+                            : "No saved runs on this page."))
                 }
                 ForEach(workspace.runs.sorted { $0.number > $1.number }) { run in
                     RunSummaryView(run: run)
@@ -130,14 +178,16 @@ struct RunListPage: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: {
-                        workspace.queueRun { selection = $0 }
+                        workspace.validateAndQueueRun { selection = $0 }
                     }) {
-                        Label(workspace.autoApply ? "Plan and apply automatically" : "Queue plan", systemImage: "text.badge.plus")
+                        Label(workspace.autoApply ? "Plan and apply automatically" : "Plan",
+                              systemImage: "text.badge.plus")
                     }
-                    .labelStyle(.iconOnly)
-                    .accessibilityLabel(workspace.autoApply ? "Plan and apply automatically" : "Queue a Terraform plan")
-                    .help(workspace.autoApply ? "Create a plan and automatically apply its changes" : "Queue a Terraform plan")
-                    .disabled(workspace.locked || workspace.historyLoading || !workspace.isValid || workspace.historyError != nil)
+                    .accessibilityLabel(workspace.autoApply ? "Plan and apply automatically" : "Plan")
+                    .help(workspace.autoApply
+                          ? "Validate, plan and apply changes automatically"
+                          : "Validate the configuration and create a Terraform plan")
+                    .disabled(workspace.locked || workspace.historyLoading || workspace.isInspectingInputs || !workspace.isValid || workspace.historyError != nil)
                 }
                 ToolbarItem(placement: .automatic) {
                     Menu {
@@ -187,6 +237,13 @@ struct RunListPage: View {
         }
     }
 
+    private func applyFilters() {
+        let status = RunStatus(rawValue: filterStatus)
+        let start = filterByDate ? Calendar.current.startOfDay(for: filterAfter) : nil
+        let end = filterByDate ? Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: filterBefore))?.addingTimeInterval(-0.001) : nil
+        workspace.setRunHistoryFilters(status: status, after: start, before: end, text: filterText)
+    }
+
     private func exportSelectedRun() {
         guard let selectedSavedRun else { return }
         let panel = NSSavePanel()
@@ -197,6 +254,13 @@ struct RunListPage: View {
             workspace.exportSavedRun(selectedSavedRun.id, to: destination)
         }
     }
+}
+
+private extension RunStatus {
+    static var allCasesForHistory: [RunStatus] {
+        [.pending, .planning, .planned, .confirmed, .applying, .applied, .discarded, .errored, .canceled, .expired, .interrupted]
+    }
+    var historyLabel: String { rawValue.lowercased().capitalized }
 }
 
 struct RunListPage_Previews: PreviewProvider {

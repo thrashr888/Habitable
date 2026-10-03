@@ -5,6 +5,23 @@ import Darwin
 
 @MainActor
 final class ConfigurationModelTests: XCTestCase {
+    func testResourceDeclarationResolutionIsLimitedToKnownRootDeclarations() {
+        var metadata = TerraformConfigurationMetadata()
+        metadata.resources = [
+            TerraformResourceDeclaration(address: "aws_instance.web", sourceFile: "main.tf", sourceLine: 12),
+            TerraformResourceDeclaration(address: "data.aws_ami.base", sourceFile: "data.tf", sourceLine: 4),
+            TerraformResourceDeclaration(address: "aws_instance.unknown", sourceFile: "main.tf", sourceLine: nil)
+        ]
+
+        XCTAssertEqual(TerraformConfigurationInspector.declaration(for: "aws_instance.web[0]", in: metadata)?.sourceLocation,
+                       "main.tf:12")
+        XCTAssertEqual(TerraformConfigurationInspector.declaration(for: "data.aws_ami.base", in: metadata)?.sourceLocation,
+                       "data.tf:4")
+        XCTAssertNil(TerraformConfigurationInspector.declaration(for: "module.child.aws_instance.web", in: metadata))
+        XCTAssertNil(TerraformConfigurationInspector.declaration(for: "aws_instance.unknown", in: metadata))
+        XCTAssertNil(TerraformConfigurationInspector.declaration(for: "aws_instance.missing", in: metadata))
+    }
+
     func testExternalEditPreventsSavingDraftOverChangedFile() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
