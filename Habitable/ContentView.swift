@@ -134,8 +134,10 @@ struct ContentView: View {
                 if workspace.locked {
                     ProgressView().controlSize(.small)
                     Text("Running Terraform").lineLimit(1)
+                } else if workspace.isInitialized && workspace.isValid {
+                    Label("Ready to plan", systemImage: "checkmark.circle")
                 } else {
-                    Label("Ready", systemImage: "checkmark.circle")
+                    Label("Idle", systemImage: "minus.circle")
                 }
                 Spacer()
             }

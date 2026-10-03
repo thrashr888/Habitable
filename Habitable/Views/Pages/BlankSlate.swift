@@ -16,7 +16,7 @@ struct BlankSlateView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Open a Terraform folder")
                     .font(.largeTitle.weight(.semibold))
-                Text("Choose a local folder with Terraform configuration to inspect its runs, resources, outputs, and variables.")
+                Text("Open a local folder with Terraform configuration to inspect its runs, resources, outputs, and variables. Habitable can initialize it and create plans for you.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Choose Folder…", action: onChooseFolder)
@@ -26,9 +26,9 @@ struct BlankSlateView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Getting started").font(.headline)
-                Label("Choose a folder containing one or more .tf files.", systemImage: "folder")
-                Label("Initialize it with terraform init if it has not been initialized.", systemImage: "shippingbox")
-                Label("A named Terraform workspace is selected inside the folder after it opens.", systemImage: "square.stack.3d.up")
+                Label("Open a folder containing your .tf files.", systemImage: "folder")
+                Label("Initialize Terraform in Habitable when prompted.", systemImage: "shippingbox")
+                Label("Choose the Terraform workspace, then validate and plan.", systemImage: "square.stack.3d.up")
             }
             .foregroundStyle(.secondary)
 

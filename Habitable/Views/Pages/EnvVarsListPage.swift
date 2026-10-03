@@ -37,21 +37,36 @@ struct EnvVarListPage: View {
             if let error = workspace.rememberedInputsError {
                 Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
             }
-            List {
-                ForEach(workspace.environmentVariables, id: \.id) { variable in
-                    HStack {
-                        EnvironmentVariableSummaryView(variable: variable)
-                        Spacer()
-                        if variable.isUserInput {
-                            Button("Edit") { openEditor(for: variable) }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
-                            Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
-                                .accessibilityLabel("Remove app input \(variable.key)")
-                                .help("Remove app input")
+            if workspace.environmentVariables.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "text.badge.plus").font(.largeTitle).foregroundColor(.secondary)
+                    Text("No environment variable inputs").font(.headline)
+                    Text("Environment variables declared by the process appear here as read-only values. Add an app override to supply or replace a value for plans started from Habitable.")
+                        .font(.callout).foregroundColor(.secondary).multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 420)
+                    Button("Add environment variable") { openEditor(for: nil) }
+                        .disabled(workspace.locked)
+                        .accessibilityHint("Create an app override for an environment variable")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .contain)
+            } else {
+                List {
+                    ForEach(workspace.environmentVariables, id: \.id) { variable in
+                        HStack {
+                            EnvironmentVariableSummaryView(variable: variable)
+                            Spacer()
+                            if variable.isUserInput {
+                                Button("Edit") { openEditor(for: variable) }
+                                    .buttonStyle(.borderless).disabled(workspace.locked)
+                                Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless).disabled(workspace.locked)
+                                    .accessibilityLabel("Remove app input \(variable.key)")
+                                    .help("Remove app input")
+                            }
                         }
+                        .accessibilityElement(children: .contain)
                     }
-                    .accessibilityElement(children: .contain)
                 }
             }
         }
@@ -138,49 +153,59 @@ private struct EnvironmentVariableEditor: View {
     let errorMessage: String?
     let onCancel: () -> Void
     let onSave: (EnvironmentVariable) -> Void
+    @State private var didAttemptSave = false
+    @State private var didEditKey = false
 
     private var isDuplicate: Bool { existingKeys.contains(variable.key) }
 
     var body: some View {
         Form {
             Section(header: Text("Save an environment variable").font(.headline)) {
-                Text("App inputs apply to plans started in this session and override process environment values.")
-                    .font(.caption).foregroundColor(.secondary)
+                Text("App inputs override process environment values for plans started in Habitable. Choose Remember to keep this input for this workspace; otherwise it lasts for this app session.")
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 Toggle("Remember for this workspace", isOn: $variable.isRemembered)
                 Text("Non-sensitive values are stored in a private local file. Sensitive values are stored in macOS Keychain.")
-                    .font(.caption).foregroundColor(.secondary)
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 if variable.rememberedSecretUnavailable {
                     Text("This remembered secret is unavailable. Restore Keychain access or remove this input before running Terraform.")
                         .font(.caption).foregroundColor(.red)
                 }
-                TextField("Key", text: $variable.key)
+                Text("Key").font(.caption).foregroundColor(.secondary)
+                TextField("Environment variable key", text: $variable.key).multilineTextAlignment(.leading)
                 Toggle("Sensitive", isOn: $variable.sensitive)
                 Text("Hides this value in Habitable. Terraform plan output follows the sensitivity declared in your Terraform configuration.")
-                    .font(.caption).foregroundColor(.secondary)
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Value").font(.caption).foregroundColor(.secondary)
                 if variable.sensitive {
                     SecureField("Value", text: $variable.value)
                 } else {
                     TextField("Value", text: $variable.value)
                         .multilineTextAlignment(.leading)
                 }
-                TextField("Description", text: $variable.description)
+                Text("Description").font(.caption).foregroundColor(.secondary)
+                TextField("Optional description", text: $variable.description)
                     .multilineTextAlignment(.leading)
-                if let validationError = variable.validationError {
+                if (didEditKey || didAttemptSave), let validationError = variable.validationError {
                     Text(validationError).foregroundColor(.red)
-                } else if isDuplicate {
+                } else if (didEditKey || didAttemptSave), isDuplicate {
                     Text("An environment variable with this key already exists.").foregroundColor(.red)
                 }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
                 HStack {
                     Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                     Spacer()
-                    Button("Save") { onSave(variable) }
-                        .disabled(variable.validationError != nil || isDuplicate)
+                    Button("Save") {
+                        didAttemptSave = true
+                        guard variable.validationError == nil, !isDuplicate else { return }
+                        onSave(variable)
+                    }
                         .keyboardShortcut(.return, modifiers: .command)
                 }
             }
         }
         .padding(.all)
+        .frame(minWidth: 420, idealWidth: 520, minHeight: 360, idealHeight: 500)
+        .onChange(of: variable.key) { _ in didEditKey = true }
     }
 }
 

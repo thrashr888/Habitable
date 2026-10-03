@@ -3,6 +3,30 @@ import SwiftyJSON
 @testable import HabitableCore
 
 final class JsonLogTests: XCTestCase {
+    func testPlanRedactsSensitiveKeysReplacementPathsAndTextualScalarEchoes() throws {
+        let plan = try XCTUnwrap(parseTerraformPlan(#"{"format_version":"1.2","resource_changes":[{"address":"terraform_data.example","change":{"actions":["create","delete"],"before":{"private_map":{"synthetic-key-secret":"protected-value"},"number":9842},"before_sensitive":{"private_map":true,"number":true},"after":{"echo":{"synthetic-key-secret":"provider echoed 9842"},"control":"x9842 98420 ordinary"},"after_sensitive":{},"replace_paths":[["private_map","synthetic-key-secret"]]}}]}"#))
+        let rendered = String(describing: plan)
+        XCTAssertFalse(rendered.contains("synthetic-key-secret"))
+        XCTAssertFalse(rendered.contains("provider echoed 9842"))
+        XCTAssertTrue(rendered.contains("x9842 98420 ordinary"))
+        XCTAssertEqual(plan.resourceChanges.first?.actionOrder, ["create", "delete"])
+    }
+
+    func testPlanRedactsEchoesAcrossResourcesOutputsAndCompositeTransitions() throws {
+        let source = #"{"format_version":"1.2","resource_changes":[{"address":"terraform_data.secret","change":{"actions":["update"],"before":{"input":{"private":"synthetic-echo-secret","number":9842},"output":{"private":"synthetic-echo-secret","public":"visible"}},"before_sensitive":{"input":{"private":true,"number":true}},"after":{"input":{"private":"new-echo-secret"},"output":"prefix synthetic-echo-secret new-echo-secret"},"after_sensitive":{"input":{"private":true}}}},{"address":"terraform_data.other","change":{"actions":["update"],"before":{"echo":["synthetic-echo-secret",9842],"public":"unchanged-public"},"after":{"echo":"new-echo-secret","public":"visible-after"},"before_sensitive":{},"after_sensitive":{}}}],"output_changes":{"echo":{"actions":["update"],"before":{"synthetic-echo-secret":"synthetic-echo-secret"},"after":["new-echo-secret",9842],"before_sensitive":false,"after_sensitive":false}}}"#
+        let plan = try XCTUnwrap(parseTerraformPlan(source))
+        let rendered = String(describing: plan)
+        for secret in ["synthetic-echo-secret", "new-echo-secret", "9842"] {
+            XCTAssertFalse(rendered.contains(secret), secret)
+        }
+        XCTAssertTrue(rendered.contains("visible"))
+        XCTAssertTrue(rendered.contains("unchanged-public"))
+        XCTAssertTrue(rendered.contains("visible-after"))
+        XCTAssertEqual(plan.resourceChanges.count, 2)
+        XCTAssertEqual(plan.outputChanges.count, 1)
+        XCTAssertEqual(plan.resourceChanges.first?.attributes.first { $0.path == "$[\"input\"][\"private\"]" }?.before, .sensitive)
+    }
+
     func testRealSavedPlanPreservesNoOpMovesImportsModulesAndSensitiveOutput() throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "terraform-1.16.5-complex-plan", withExtension: "json", subdirectory: "Fixtures"))
         let plan = try XCTUnwrap(parseTerraformPlan(String(contentsOf: url, encoding: .utf8)))
