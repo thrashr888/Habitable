@@ -19,6 +19,7 @@ class StructuredLog: ObservableObject {
     var resources: [ResourceState] = [] { willSet { objectWillChange.send() } }
     var outputs: [OutputsMessage] = [] { willSet { objectWillChange.send() } }
     var isComplete = false { willSet { objectWillChange.send() } }
+    var schemaError: String? { willSet { objectWillChange.send() } }
     var createdAt = Date()
 
     func appendLog(_ message: LogMessage) {
@@ -76,11 +77,25 @@ struct PlanAttributeChange: Identifiable, Equatable, Sendable {
 struct PlanResourceChange: Identifiable, Equatable, Sendable {
     let address: String
     let action: String
+    let actionOrder: [String]
     let attributes: [PlanAttributeChange]
     let replacementPaths: [String]
+    let originalAddress: String?
+    let importingID: String?
 
     var id: String { address }
-    var isReplacement: Bool { action == "replace" }
+    var isReplacement: Bool { action == "replace" || (actionOrder.contains("create") && actionOrder.contains("delete")) }
+
+    init(address: String, action: String, attributes: [PlanAttributeChange], replacementPaths: [String],
+         actionOrder: [String] = [], originalAddress: String? = nil, importingID: String? = nil) {
+        self.address = address
+        self.action = action
+        self.actionOrder = actionOrder
+        self.attributes = attributes
+        self.replacementPaths = replacementPaths
+        self.originalAddress = originalAddress
+        self.importingID = importingID
+    }
 }
 
 struct PlanOutputChange: Identifiable, Equatable, Sendable {
@@ -94,6 +109,16 @@ struct PlanOutputChange: Identifiable, Equatable, Sendable {
 struct TerraformPlan: Equatable, Sendable {
     let resourceChanges: [PlanResourceChange]
     let outputChanges: [PlanOutputChange]
+    let formatVersion: String?
+    let terraformVersion: String?
+
+    init(resourceChanges: [PlanResourceChange], outputChanges: [PlanOutputChange],
+         formatVersion: String? = nil, terraformVersion: String? = nil) {
+        self.resourceChanges = resourceChanges
+        self.outputChanges = outputChanges
+        self.formatVersion = formatVersion
+        self.terraformVersion = terraformVersion
+    }
 }
 
 func transformPlan(_ log: JSON) -> TerraformPlan {
@@ -101,7 +126,9 @@ func transformPlan(_ log: JSON) -> TerraformPlan {
         resourceChanges: log["resource_changes"].arrayValue.map(transformPlanResourceChange),
         outputChanges: log["output_changes"].dictionaryValue.keys.sorted().map { name in
             transformPlanOutputChange(name: name, change: log["output_changes"][name])
-        }
+        },
+        formatVersion: log["format_version"].string,
+        terraformVersion: log["terraform_version"].string
     )
 }
 
@@ -121,7 +148,8 @@ private func transformPlanOutputChange(name: String, change: JSON) -> PlanOutput
 
 func parseTerraformPlan(_ output: String) -> TerraformPlan? {
     guard let data = output.data(using: .utf8), let json = try? JSON(data: data),
-          json.type == .dictionary, json["format_version"].string != nil else { return nil }
+          json.type == .dictionary, let formatVersion = json["format_version"].string,
+          supportsTerraformJSONMajor(formatVersion, supported: [1]) else { return nil }
     if let resourceChanges = json.dictionaryObject?["resource_changes"] {
         guard JSON(resourceChanges).type == .array else { return nil }
     } else {
@@ -131,6 +159,14 @@ func parseTerraformPlan(_ output: String) -> TerraformPlan? {
         guard json["planned_values"].type == .dictionary else { return nil }
     }
     return transformPlan(json)
+}
+
+func supportsTerraformJSONMajor(_ version: String, supported: Set<Int>) -> Bool {
+    let components = version.split(separator: ".", omittingEmptySubsequences: false)
+    guard components.count >= 2,
+          components.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
+          let major = components.first.flatMap({ Int($0) }) else { return false }
+    return supported.contains(major)
 }
 
 private func transformPlanResourceChange(_ resourceChange: JSON) -> PlanResourceChange {
@@ -146,7 +182,10 @@ private func transformPlanResourceChange(_ resourceChange: JSON) -> PlanResource
         address: resourceChange["address"].stringValue,
         action: action.isEmpty ? "no-op" : action,
         attributes: attributes,
-        replacementPaths: change["replace_paths"].arrayValue.map(planPath)
+        replacementPaths: change["replace_paths"].arrayValue.map(planPath),
+        actionOrder: actions,
+        originalAddress: resourceChange["previous_address"].string,
+        importingID: change["importing"]["id"].string
     )
 }
 

@@ -152,7 +152,12 @@ final class CancellationModelTests: XCTestCase {
         XCTAssertFalse(run.canCancel)
         XCTAssertNotNil(workspace.state, "Canceled apply outcome is uncertain, so state must be refreshed")
         XCTAssertTrue(run.textOutput?.contains("cleanup-finished") == true)
-        XCTAssertEqual(try history.readPersistedRecord(id: run.id, workspace: root).status, .canceled)
+        let persisted = try history.readPersistedRecord(id: run.id, workspace: root)
+        XCTAssertEqual(persisted.status, .canceled)
+        XCTAssertTrue(persisted.applyHistoryOutput?.contains("cleanup-finished") == true)
+        let reopened = TerraformRun(workspace: workspace, record: persisted, restored: true)
+        XCTAssertEqual(reopened.status, .canceled)
+        XCTAssertTrue(reopened.apply?.logs.contains(where: { $0.message?.contains("cleanup-finished") == true }) == true)
         let available = try coordinator.acquire(workspace: root, contextIdentity: workspace.executionContextIdentifier)
         available.release()
     }
@@ -168,6 +173,7 @@ final class CancellationModelTests: XCTestCase {
         case "$1" in
           version) echo '{"terraform_version":"fixture"}' ;;
           plan)
+            printf '{"type":"version","terraform":"1.16.4","ui":"1.7"}\n'
             i=0
             while [ "$i" -lt 18000 ]; do
               printf '{"type":"log","@message":"filler-%05d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}\n' "$i"
@@ -220,7 +226,31 @@ final class CancellationModelTests: XCTestCase {
         XCTAssertFalse(run.textOutput?.contains("stream-secret") == true)
         XCTAssertFalse(run.textOutput?.contains("\u{001B}") == true)
         XCTAssertTrue(run.plan?.isComplete == true)
-        XCTAssertNotNil(try history.readPersistedRecord(id: run.id, workspace: root).planOutput)
+        let persisted = try history.readPersistedRecord(id: run.id, workspace: root)
+        XCTAssertNotNil(persisted.planOutput)
+        XCTAssertTrue(persisted.planHistoryOutput?.contains("Late overflow failure") == true)
+        XCTAssertTrue(persisted.planHistoryOutput?.contains("provider stderr (sensitive) after overflow") == true)
+        XCTAssertFalse(persisted.planHistoryOutput?.contains("stream-secret") == true)
+        XCTAssertEqual(persisted.planHistoryOutputTruncated, true)
+        let historyBytes = try XCTUnwrap(persisted.planHistoryOutput?.data(using: .utf8))
+        XCTAssertLessThanOrEqual(historyBytes.count, 256 * 1024)
+        let historyLines = try XCTUnwrap(String(data: historyBytes, encoding: .utf8))
+            .split(separator: "\n")
+        XCTAssertFalse(historyLines.isEmpty)
+        for line in historyLines {
+            let event = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            XCTAssertNotNil(event["type"])
+        }
+        let firstHistoryEvent = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(historyLines[0].utf8)) as? [String: Any])
+        XCTAssertEqual(firstHistoryEvent["type"] as? String, "version")
+
+        let reopened = TerraformRun(workspace: workspace, record: persisted, restored: true)
+        XCTAssertEqual(reopened.status, .errored)
+        XCTAssertEqual(reopened.plan?.diagnostics.last?.diagnostic.summary, "Late overflow failure")
+        let reopenedStderr = try XCTUnwrap(reopened.plan?.logs.first(where: { $0.message?.contains("provider stderr") == true })?.message)
+        XCTAssertTrue(reopenedStderr.contains("provider stderr (sensitive) after overflow"))
+        XCTAssertFalse(reopenedStderr.contains("stream-secret"))
+        XCTAssertTrue(reopened.historyNotice?.contains("Earlier streamed events omitted") == true)
         let available = try coordinator.acquire(workspace: root, contextIdentity: workspace.executionContextIdentifier)
         available.release()
     }

@@ -7,7 +7,7 @@ let package = Package(
     dependencies: [.package(url: "https://github.com/SwiftyJSON/SwiftyJSON.git", exact: "5.0.2")],
     targets: [
         .target(name: "HabitableCore", dependencies: ["SwiftyJSON"], path: "Habitable/Models"),
-        .testTarget(name: "HabitableCoreTests", dependencies: ["HabitableCore"])
+        .testTarget(name: "HabitableCoreTests", dependencies: ["HabitableCore"], resources: [.copy("Fixtures")])
     ],
     swiftLanguageModes: [.v6]
 )

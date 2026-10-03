@@ -194,13 +194,30 @@ private struct PlanReviewView: View {
         TabView(selection: $selection) {
             if let diff {
                 List {
-                    if diff.resourceChanges.allSatisfy({ $0.action == "no-op" }) &&
+                    if diff.resourceChanges.allSatisfy({ $0.action == "no-op" && $0.originalAddress == nil && $0.importingID == nil }) &&
                         diff.outputChanges.allSatisfy({ $0.action == "no-op" }) {
                         Text("No changes in this plan.")
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(diff.resourceChanges.filter { $0.action != "no-op" }) { change in
+                    ForEach(diff.resourceChanges.filter { $0.action != "no-op" || $0.originalAddress != nil || $0.importingID != nil }) { change in
                         Section {
+                            if let originalAddress = change.originalAddress {
+                                LabeledContent("Moved from") {
+                                    Text(originalAddress).textSelection(.enabled)
+                                }
+                            }
+                            if let importingID = change.importingID {
+                                LabeledContent("Import ID") {
+                                    Text(importingID).textSelection(.enabled)
+                                }
+                            }
+                            if change.actionOrder == ["create", "delete"] {
+                                Text("Creates the replacement before destroying the existing resource.")
+                                    .foregroundStyle(.secondary)
+                            } else if change.actionOrder == ["delete", "create"] {
+                                Text("Destroys the existing resource before creating the replacement.")
+                                    .foregroundStyle(.secondary)
+                            }
                             if change.attributes.isEmpty {
                                 Text("Terraform reported no attribute changes.")
                                     .foregroundStyle(.secondary)
@@ -238,7 +255,9 @@ private struct PlanReviewView: View {
                             HStack {
                                 Text(change.address)
                                 Spacer()
-                                Text(change.action.capitalized).foregroundStyle(.secondary)
+                                Text(change.action == "no-op"
+                                     ? (change.importingID != nil ? "Import" : "Move")
+                                     : change.action.capitalized).foregroundStyle(.secondary)
                             }
                         }
                     }

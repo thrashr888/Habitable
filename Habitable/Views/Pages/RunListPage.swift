@@ -28,6 +28,32 @@ struct RunListPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !workspace.isValid, workspace.workingDirectory != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Planning needs a valid configuration", systemImage: "exclamationmark.triangle")
+                        .font(.headline)
+                    Text("After fixing any input or configuration errors, validate and create a fresh plan.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let error = workspace.errorMessage {
+                        Text(error).font(.callout).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack {
+                        Button("Validate and plan") {
+                            workspace.validateAndQueueRun { selection = $0 }
+                        }
+                        .disabled(workspace.locked || workspace.historyLoading || workspace.historyError != nil)
+                        if !workspace.isInitialized {
+                            Button("Initialize workspace", action: workspace.initialize)
+                                .disabled(workspace.locked)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                Divider()
+            }
             if let error = workspace.historyError {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(error).font(.callout).textSelection(.enabled)

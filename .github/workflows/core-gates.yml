@@ -1,0 +1,61 @@
+name: Core and universal release gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: core-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core-and-universal-build:
+    # Xcode 27 is currently supplied by GitHub's public-preview xcode-27 image.
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      TERRAFORM_TEST_VERSION: 1.15.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcodebuild -version | grep -q 'Xcode 27\.'
+      - name: Install pinned Terraform test binary
+        run: |
+          case "$(uname -m)" in
+            arm64) terraform_arch=arm64 ;;
+            x86_64) terraform_arch=amd64 ;;
+            *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          filename="terraform_${TERRAFORM_TEST_VERSION}_darwin_${terraform_arch}.zip"
+          base="https://releases.hashicorp.com/terraform/${TERRAFORM_TEST_VERSION}"
+          curl --fail --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 180 --retry 2 "$base/terraform_${TERRAFORM_TEST_VERSION}_SHA256SUMS" -o "$RUNNER_TEMP/terraform.SHA256SUMS"
+          curl --fail --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 180 --retry 2 "$base/$filename" -o "$RUNNER_TEMP/$filename"
+          expected="$(awk -v wanted="$filename" '$2 == wanted { count++; digest = $1 } END { if (count != 1) exit 1; print digest }' "$RUNNER_TEMP/terraform.SHA256SUMS")"
+          [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { echo "Missing or invalid official checksum for $filename" >&2; exit 1; }
+          actual="$(shasum -a 256 "$RUNNER_TEMP/$filename" | awk '{print $1}')"
+          [[ "$actual" == "$expected" ]] || { echo "Terraform checksum mismatch" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/terraform-bin"
+          ditto -x -k "$RUNNER_TEMP/$filename" "$RUNNER_TEMP/terraform-bin"
+          chmod 755 "$RUNNER_TEMP/terraform-bin/terraform"
+          "$RUNNER_TEMP/terraform-bin/terraform" version -json | grep -Eq "\"terraform_version\"[[:space:]]*:[[:space:]]*\"$TERRAFORM_TEST_VERSION\""
+      - name: Run core tests and official managed-release download test
+        env:
+          HABITABLE_TEST_TERRAFORM: ${{ runner.temp }}/terraform-bin/terraform
+          HABITABLE_TEST_RELEASES: '1'
+        run: swift test --package-path . --scratch-path "$RUNNER_TEMP/habitable-swiftpm"
+      - name: Build universal Release app
+        run: |
+          xcodebuild -project Habitable.xcodeproj -scheme Habitable \
+            -configuration Release -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/habitable-derived" \
+            ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+      - name: Verify universal app architectures
+        run: scripts/verify-universal-app.sh --allow-unsigned "$RUNNER_TEMP/habitable-derived/Build/Products/Release/Habitable.app"

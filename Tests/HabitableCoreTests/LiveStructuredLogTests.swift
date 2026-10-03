@@ -69,6 +69,22 @@ final class LiveStructuredLogTests: XCTestCase {
     }
 
     @MainActor
+    func testVersionGateAcceptsMinorUpdatesAndStopsOnUnsupportedMajor() {
+        let supported = StructuredLog()
+        consumeTerraformEvent(JSON(parseJSON: #"{"type":"version","terraform":"1.16.4","ui":"1.7"}"#), into: supported)
+        consumeTerraformEvent(JSON(parseJSON: #"{"type":"future_event","value":true}"#), into: supported)
+        XCTAssertNil(supported.schemaError)
+        XCTAssertTrue(supported.logs.last?.message?.contains("future_event") == true)
+
+        let unsupported = StructuredLog()
+        consumeTerraformEvent(JSON(parseJSON: #"{"type":"version","terraform":"2.0.0","ui":"2.0"}"#), into: unsupported)
+        consumeTerraformEvent(JSON(parseJSON: #"{"type":"change_summary","changes":{"add":3,"change":0,"remove":0}}"#), into: unsupported)
+        XCTAssertTrue(try! XCTUnwrap(unsupported.schemaError).contains("2.0"))
+        XCTAssertTrue(unsupported.changeSummaries.isEmpty, "Events after an unsupported schema declaration must not be interpreted")
+        XCTAssertTrue(unsupported.logs.last?.message?.contains("Unsupported Terraform") == true)
+    }
+
+    @MainActor
     func testOversizedPartialRecordIsDiscardedWithReadableFallback() {
         let decoder = NDJSONStreamDecoder(maximumLineBytes: 8)
         XCTAssertTrue(decoder.append("123456789").isEmpty)

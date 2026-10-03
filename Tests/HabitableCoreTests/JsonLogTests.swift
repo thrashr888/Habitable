@@ -3,6 +3,27 @@ import SwiftyJSON
 @testable import HabitableCore
 
 final class JsonLogTests: XCTestCase {
+    func testRealSavedPlanPreservesNoOpMovesImportsModulesAndSensitiveOutput() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "terraform-1.16.5-complex-plan", withExtension: "json", subdirectory: "Fixtures"))
+        let plan = try XCTUnwrap(parseTerraformPlan(String(contentsOf: url, encoding: .utf8)))
+        XCTAssertEqual(plan.formatVersion, "1.2")
+        XCTAssertEqual(plan.resourceChanges.count, 7)
+        let moved = try XCTUnwrap(plan.resourceChanges.first { $0.originalAddress != nil })
+        XCTAssertEqual(moved.action, "no-op")
+        XCTAssertEqual(moved.originalAddress, "terraform_data.legacy")
+        let imported = try XCTUnwrap(plan.resourceChanges.first { $0.importingID != nil })
+        XCTAssertEqual(imported.action, "no-op")
+        XCTAssertEqual(imported.importingID, "batch-three-import")
+        let replacement = try XCTUnwrap(plan.resourceChanges.first { $0.isReplacement })
+        XCTAssertEqual(replacement.actionOrder, ["create", "delete"])
+        XCTAssertEqual(replacement.replacementPaths, ["$[\"triggers_replace\"]"])
+        XCTAssertEqual(plan.resourceChanges.filter { $0.address.hasPrefix("module.child[") }.count, 4)
+        let nested = try XCTUnwrap(plan.outputChanges.first { $0.name == "nested" })
+        XCTAssertTrue(nested.attributes.allSatisfy { $0.after == .sensitive })
+        XCTAssertFalse(String(describing: plan).contains("synthetic-qa-secret"))
+        XCTAssertEqual(plan.outputChanges.first { $0.name == "removed" }?.action, "delete")
+    }
+
     func testDiagnosticUsesSnippetStartLineAndPreservesHighlightOffsets() throws {
         let fixture = JSON(parseJSON: #"{"type":"diagnostic","diagnostic":{"severity":"error","range":{"filename":"main.tf","start":{"line":4,"column":2,"byte":1},"end":{"line":4,"column":5,"byte":4},"snippet":{"start_line":99}},"snippet":{"code":"first\n🚀bad","start_line":10,"highlight_start_offset":10,"highlight_end_offset":13}}}"#)
 
@@ -85,6 +106,28 @@ final class JsonLogTests: XCTestCase {
         XCTAssertEqual(parsedOutputOnly.outputChanges[0].name, "message")
         XCTAssertEqual(parsedOutputOnly.outputChanges[0].attributes.first,
                        PlanAttributeChange(path: "$", before: .absent, after: .value("hello")))
+    }
+
+    func testJSONSchemaVersionsAcceptNewMinorAndRejectUnknownMajors() throws {
+        XCTAssertTrue(supportsTerraformJSONMajor("1.99", supported: [1]))
+        XCTAssertFalse(supportsTerraformJSONMajor("2.0", supported: [1]))
+        XCTAssertFalse(supportsTerraformJSONMajor("future", supported: [1]))
+        XCTAssertFalse(supportsTerraformJSONMajor("1.x", supported: [1]))
+        XCTAssertNotNil(parseTerraformPlan(#"{"format_version":"1.4","resource_changes":[],"terraform_version":"1.16.4"}"#))
+        XCTAssertNil(parseTerraformPlan(#"{"format_version":"2.0","resource_changes":[]}"#))
+    }
+
+    func testPlanRetainsReplacementOrderingMovedAndImportMetadata() throws {
+        let fixture = #"{"format_version":"1.2","terraform_version":"1.16.4","resource_changes":[{"address":"module.app.aws_instance.web[\"blue\"]","previous_address":"module.old.aws_instance.web[\"blue\"]","change":{"actions":["delete","create"],"before":{"name":"old"},"after":{"name":"new"},"replace_paths":[["name"]]}},{"address":"aws_instance.imported","change":{"actions":["create"],"importing":{"id":"i-123"},"before":null,"after":{"id":"i-123"}}}],"output_changes":{}}"#
+        let plan = try XCTUnwrap(parseTerraformPlan(fixture))
+        XCTAssertEqual(plan.formatVersion, "1.2")
+        XCTAssertEqual(plan.terraformVersion, "1.16.4")
+        XCTAssertEqual(plan.resourceChanges.map(\.address), ["module.app.aws_instance.web[\"blue\"]", "aws_instance.imported"])
+        XCTAssertEqual(plan.resourceChanges[0].actionOrder, ["delete", "create"])
+        XCTAssertTrue(plan.resourceChanges[0].isReplacement)
+        XCTAssertEqual(plan.resourceChanges[0].originalAddress, "module.old.aws_instance.web[\"blue\"]")
+        XCTAssertEqual(plan.resourceChanges[0].replacementPaths, ["$[\"name\"]"])
+        XCTAssertEqual(plan.resourceChanges[1].importingID, "i-123")
     }
 
     func testPlanOutputChangesMaskNestedSensitiveAndUnknownValuesAndIgnoreNoOps() throws {
