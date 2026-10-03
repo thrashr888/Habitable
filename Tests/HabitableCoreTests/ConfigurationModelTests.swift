@@ -167,11 +167,14 @@ esac
         try await waitForValidationCount(1, at: validationLog)
         try await Task.sleep(nanoseconds: 600_000_000)
         XCTAssertEqual(try validationCount(at: validationLog), 1)
-        XCTAssertTrue(model.message?.contains("saved on-disk configuration is valid") == true)
+        XCTAssertTrue(workspace.isValid)
+        XCTAssertEqual(model.validationActivity, .idle)
 
         model.draft = "terraform { # canceled validation\n}\n"
         model.save()
         model.setVisible(false)
+        XCTAssertEqual(model.validationActivity, .idle)
+        XCTAssertFalse(model.message?.contains("no longer visible") == true)
         try await Task.sleep(nanoseconds: 700_000_000)
         XCTAssertEqual(try validationCount(at: validationLog), 1)
 
@@ -188,7 +191,8 @@ esac
         try await waitForValidationCount(2, at: validationLog)
         XCTAssertEqual(model.draft, unsavedDraft)
         XCTAssertTrue(model.hasConflict)
-        XCTAssertTrue(model.message?.contains("unsaved editor draft is excluded") == true || model.message?.contains("unsaved editor text was not included") == true)
+        XCTAssertTrue(model.hasUnsavedChanges)
+        XCTAssertNotEqual(model.savedText, unsavedDraft)
     }
 
     private func makeTerraformScript(in directory: URL, body: String) throws -> URL {

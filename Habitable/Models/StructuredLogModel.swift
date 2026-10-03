@@ -112,12 +112,47 @@ struct TerraformPlan: Equatable, Sendable {
     let formatVersion: String?
     let terraformVersion: String?
 
+    var consequences: PlanConsequences { PlanConsequences(plan: self) }
+
     init(resourceChanges: [PlanResourceChange], outputChanges: [PlanOutputChange],
          formatVersion: String? = nil, terraformVersion: String? = nil) {
         self.resourceChanges = resourceChanges
         self.outputChanges = outputChanges
         self.formatVersion = formatVersion
         self.terraformVersion = terraformVersion
+    }
+}
+
+/// Replacement is its own action, avoiding duplicate create/destroy totals.
+struct PlanConsequences: Equatable, Sendable {
+    var create = 0
+    var update = 0
+    var replace = 0
+    var destroy = 0
+    var read = 0
+    var imports = 0
+    var moves = 0
+    var outputs = 0
+
+    init(plan: TerraformPlan) {
+        for change in plan.resourceChanges {
+            if change.isReplacement { replace += 1 }
+            else if change.action == "create" { create += 1 }
+            else if change.action == "update" { update += 1 }
+            else if change.action == "delete" { destroy += 1 }
+            else if change.action == "read" { read += 1 }
+            if change.importingID != nil { imports += 1 }
+            if change.originalAddress != nil { moves += 1 }
+        }
+        outputs = plan.outputChanges.filter { $0.action != "no-op" }.count
+    }
+
+    var summary: String {
+        let parts = [(create, "create"), (update, "update"), (replace, "replace"),
+                     (destroy, "destroy"), (read, "read"), (imports, "import"), (moves, "move")]
+            .filter { $0.0 > 0 }.map { "\($0.0) to \($0.1)" }
+        let resources = parts.isEmpty ? "No resource changes" : parts.joined(separator: " · ")
+        return outputs > 0 ? "\(resources) · \(outputs) output\(outputs == 1 ? "" : "s") to change" : resources
     }
 }
 

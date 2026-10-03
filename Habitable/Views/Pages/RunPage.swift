@@ -133,6 +133,23 @@ struct RunPageView: View {
                 }
 
                 if run.canDiscard || run.canConfirm {
+                    if run.canConfirm {
+                        if let plan = run.planDiff {
+                            let consequences = plan.consequences
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(consequences.summary).font(.callout.weight(.medium))
+                                if consequences.replace > 0 || consequences.destroy > 0 {
+                                    Label(consequences.replace > 0
+                                          ? "Replacements destroy and recreate resources. Review these changes before applying."
+                                          : "This plan destroys resources.", systemImage: "exclamationmark.triangle")
+                                        .font(.callout).foregroundStyle(.orange)
+                                }
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text("Apply the changes in this run’s plan.").font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
                     HStack {
                         Spacer()
                         if run.canDiscard {

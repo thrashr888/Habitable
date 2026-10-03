@@ -1,7 +1,21 @@
 import XCTest
+import SwiftyJSON
 @testable import HabitableCore
 
 final class RunPresentationTests: XCTestCase {
+    func testApplyConsequencesSeparateReplacementAndIncludeOutputOnlyPlans() {
+        let plan = transformPlan(JSON(parseJSON: #"{"resource_changes":[{"address":"terraform_data.a","change":{"actions":["delete","create"]}},{"address":"terraform_data.b","change":{"actions":["delete"]}},{"address":"terraform_data.c","change":{"actions":["no-op"],"importing":{"id":"fixture"}}}],"output_changes":{"result":{"actions":["update"],"before":"a","after":"b","before_sensitive":false,"after_sensitive":false}}}"#))
+        let counts = plan.consequences
+        XCTAssertEqual(counts.replace, 1)
+        XCTAssertEqual(counts.destroy, 1)
+        XCTAssertEqual(counts.create, 0)
+        XCTAssertEqual(counts.imports, 1)
+        XCTAssertEqual(counts.outputs, 1)
+        XCTAssertTrue(counts.summary.contains("1 to replace"))
+        let outputOnly = TerraformPlan(resourceChanges: [], outputChanges: plan.outputChanges).consequences
+        XCTAssertEqual(outputOnly.summary, "No resource changes · 1 output to change")
+    }
+
     func testFollowingRunKeepsApplyVisibleAtCompletionAndShowsFailures() {
         XCTAssertEqual(RunDisplayPhase.current(status: .planning, hasApply: false, hasError: false), .plan)
         XCTAssertEqual(RunDisplayPhase.current(status: .confirmed, hasApply: false, hasError: false), .apply)

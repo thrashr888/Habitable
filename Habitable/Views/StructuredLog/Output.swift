@@ -12,16 +12,17 @@ struct OutputView: View {
     var body: some View {
         VStack(alignment: .leading) {
             ForEach(outputs, id: \.id) { output in
-                HStack {
+                VStack(alignment: .leading, spacing: 6) {
                     if let type = output.type {
                         Text("\(output.key) [\(type)]: ")
                     } else {
                         Text("\(output.key): ")
                     }
                     if output.sensitive {
-                        Text("(sensitive)")
+                        Label("Sensitive value hidden", systemImage: "lock.fill")
+                            .foregroundStyle(.secondary)
                     } else {
-                        Text("\(output.value ?? "n/a")")
+                        Text(output.displayValue).textSelection(.enabled)
                     }
                 }
             }

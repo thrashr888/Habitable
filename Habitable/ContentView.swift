@@ -24,6 +24,20 @@ struct ContentView: View {
     enum NavigationItem: String {
         case workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings
 
+        var title: String {
+            switch self {
+            case .workspace: "Workspace"
+            case .readme: "README"
+            case .configuration: "Configuration"
+            case .runs: "Runs"
+            case .resources: "Resources"
+            case .outputs: "Outputs"
+            case .variables: "Variables"
+            case .envVariables: "Environment Variables"
+            case .settings: "Settings"
+            }
+        }
+
         var hasDetailList: Bool {
             self == .runs || self == .resources || self == .outputs
         }
@@ -68,6 +82,17 @@ struct ContentView: View {
                     }
                 }
                 .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        VStack(spacing: 2) {
+                            Text((selection ?? .workspace).title)
+                                .font(.headline).fixedSize(horizontal: true, vertical: false)
+                            Text(workspaceName).font(.caption).foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                        .frame(maxWidth: 320)
+                        .help(workspace.workingDirectory?.path ?? workspaceName)
+                        .accessibilityElement(children: .combine)
+                    }
                     ToolbarItem(placement: .navigation) {
                         Button { sidebarVisible.toggle() } label: {
                             Label(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
@@ -78,6 +103,7 @@ struct ContentView: View {
                 }
             }
         }
+        .background(WorkspaceWindowIdentity(title: "\(workspaceName) — \((selection ?? .workspace).title)"))
         .environmentObject(workspace)
         .environmentObject(editors)
         .animation(nil, value: selection)
@@ -134,6 +160,11 @@ struct ContentView: View {
                 self.selectedOutput = nil
             }
         }
+    }
+
+    private var workspaceName: String {
+        guard let directory = workspace.workingDirectory else { return "Habitable" }
+        return directory.lastPathComponent.isEmpty ? directory.path : directory.lastPathComponent
     }
 
     private var sidebar: some View {
@@ -318,4 +349,26 @@ private struct NavigationLayoutProbe: NSViewRepresentable {
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View { ContentView() }
+}
+
+/// Keep Window-menu identity useful while the principal toolbar owns the visible
+/// title. Native sidebar-bound titles can clip at the sidebar divider.
+private struct WorkspaceWindowIdentity: NSViewRepresentable {
+    let title: String
+    func makeNSView(context: Context) -> IdentityView { IdentityView() }
+    func updateNSView(_ view: IdentityView, context: Context) {
+        view.title = title
+        view.updateIdentity()
+    }
+    final class IdentityView: NSView {
+        var title = "Habitable"
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            updateIdentity()
+        }
+        func updateIdentity() {
+            window?.title = title
+            window?.titleVisibility = .hidden
+        }
+    }
 }
