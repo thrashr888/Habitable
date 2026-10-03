@@ -21,27 +21,34 @@ struct ShowResourceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 7) {
+            Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 10) {
                 if let address = resource.address {
-                    LabeledContent("Address") {
-                        Text(address).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    GridRow(alignment: .top) {
+                        Text("Address").foregroundStyle(.secondary)
+                        Text(address)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if let provider = resource.provider_name {
-                    LabeledContent("Provider") {
+                    GridRow(alignment: .top) {
+                        Text("Provider").foregroundStyle(.secondary)
                         if let url = terraformProviderRegistryURL(provider) {
                             Link(provider, destination: url)
+                                .fixedSize(horizontal: false, vertical: true)
                         } else {
                             Text(provider).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
-                if let mode = resource.mode { LabeledContent("Mode", value: mode) }
-                if let type = resource.type { LabeledContent("Type", value: type) }
-                if let name = resource.name { LabeledContent("Name", value: name) }
-                if let version = resource.schema_version { LabeledContent("Schema version", value: String(version)) }
+                if let mode = resource.mode { metadataRow("Mode", value: mode) }
+                if let type = resource.type { metadataRow("Type", value: type) }
+                if let name = resource.name { metadataRow("Name", value: name) }
+                if let version = resource.schema_version { metadataRow("Schema version", value: String(version)) }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Divider()
             HStack {
@@ -90,7 +97,14 @@ struct ShowResourceView: View {
             }
         }
         .padding()
-        .frame(minWidth: 400, minHeight: 360)
+        .frame(minWidth: 400, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity, alignment: .topLeading)
+    }
+    private func metadataRow(_ label: String, value: String) -> some View {
+        GridRow(alignment: .top) {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
