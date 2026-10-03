@@ -25,6 +25,8 @@ struct CheckView: View {
 struct WorkspacePage: View {
     @EnvironmentObject var workspace: Workspace
     var onReviewRun: (UUID) -> Void = { _ in }
+    var onOpenConfiguration: () -> Void = {}
+    var onOpenInputs: () -> Void = {}
 
     private var latestRun: TerraformRun? {
         guard workspace.historyPageOffset == 0 else { return nil }
@@ -33,6 +35,11 @@ struct WorkspacePage: View {
 
     private var readiness: (title: String, detail: String, action: String) {
         if workspace.locked { return ("Terraform is running", "Wait for the current command to finish.", "") }
+        if workspace.isInspectingInputs { return ("Reading configuration inputs", "Discovering variables and their value sources…", "") }
+        let missing = workspace.terraformVariables.filter {
+            $0.declaration?.required == true && !$0.isUserInput && $0.discoveredSource == nil && !$0.hasUnresolvedDiscoveredValue
+        }.count
+        if missing > 0 { return ("\(missing) required input\(missing == 1 ? "" : "s") need values", "Supply the missing values before creating a plan.", "Inputs") }
         if !workspace.isInitialized { return ("Initialization needed", "Install the selected backend and provider dependencies.", "Initialize") }
         if !workspace.isValid { return ("Configuration needs attention", "Validate the configuration, then review any errors before planning.", "Validate") }
         return ("Ready to plan", "The folder is initialized and its configuration is valid.", "Plan")
@@ -109,6 +116,36 @@ struct WorkspacePage: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                DisclosureGroup("Getting started with Terraform") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("1. Describe what you want").font(.headline)
+                            Text("Configuration files describe your resources. Providers connect Terraform to services; this app can also run local examples.")
+                                .foregroundStyle(.secondary)
+                            Button("Browse configuration", action: onOpenConfiguration)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("2. Supply your inputs").font(.headline)
+                            Text("Variables customize your configuration. Required inputs need values; defaults can be left alone.")
+                                .foregroundStyle(.secondary)
+                            Button("Review variables", action: onOpenInputs)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("3. Initialize, validate, and plan").font(.headline)
+                            Text("Initialize prepares dependencies. Validate checks the configuration. A plan previews changes before you decide to apply them.")
+                                .foregroundStyle(.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("4. Review before applying").font(.headline)
+                            Text("Review creations, updates, and deletions. A replacement recreates a resource and may interrupt it. State records what Terraform manages; keep it secure.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+                }
+
                 GroupBox("Readiness") {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(readiness.title, systemImage: workspace.isInitialized && workspace.isValid ? "checkmark.circle.fill" : "exclamationmark.circle")
@@ -117,6 +154,7 @@ struct WorkspacePage: View {
                         if !readiness.action.isEmpty {
                             Button(readiness.action) {
                                 switch readiness.action {
+                                case "Inputs": onOpenInputs()
                                 case "Initialize": workspace.initialize()
                                 case "Validate": workspace.validate()
                                 default: workspace.validateAndQueueRun()
@@ -134,7 +172,7 @@ struct WorkspacePage: View {
                         CheckView(label: "Initialized", check: workspace.isInitialized)
                         CheckView(label: "Configuration is valid", check: workspace.isValid)
                         CheckView(label: "State available", check: workspace.hasState, failureIsError: false)
-                        CheckView(label: ".tfvars file exists (optional)", check: workspace.hasVariables, failureIsError: false)
+                        CheckView(label: "Configuration inputs discovered", check: workspace.hasVariables, failureIsError: false)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

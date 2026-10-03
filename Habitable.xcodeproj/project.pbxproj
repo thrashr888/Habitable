@@ -48,6 +48,13 @@
 		8AF2133F263A0CFB009F97C2 /* JsonLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF2133E263A0CFB009F97C2 /* JsonLog.swift */; };
 		8AF21343263A2DE9009F97C2 /* ResourceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF21342263A2DE9009F97C2 /* ResourceState.swift */; };
 		8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF2134B263C97B6009F97C2 /* Ansi.swift */; };
+		45C6675D39CF46A2A199AD8B /* ConfigurationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EEE1ABBAF394D628B436560 /* ConfigurationModel.swift */; };
+		093095698F3E40D39EF8EB1B /* RunGitContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550D972CC34B47978D05B9F9 /* RunGitContext.swift */; };
+		587D4C19FB214DC5A16904A8 /* ConfigurationPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A1CB43A70346349C859ABE /* ConfigurationPage.swift */; };
+		2978C5D792C1476EACA795F2 /* TerraformConfigurationInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */; };
+		B1EAA330000000000000001 /* TerraformProviderSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000002 /* TerraformProviderSchema.swift */; };
+		B1EAA330000000000000003 /* TerraformConfigurationContextHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */; };
+		B1EAA330000000000000005 /* TerraformConfigurationContextHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -97,6 +104,13 @@
 		8AF2133E263A0CFB009F97C2 /* JsonLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JsonLog.swift; sourceTree = "<group>"; };
 		8AF21342263A2DE9009F97C2 /* ResourceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceState.swift; sourceTree = "<group>"; };
 		8AF2134B263C97B6009F97C2 /* Ansi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Ansi.swift; sourceTree = "<group>"; };
+		0EEE1ABBAF394D628B436560 /* ConfigurationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationModel.swift; sourceTree = "<group>"; };
+		550D972CC34B47978D05B9F9 /* RunGitContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunGitContext.swift; sourceTree = "<group>"; };
+		E8A1CB43A70346349C859ABE /* ConfigurationPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationPage.swift; sourceTree = "<group>"; };
+		0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformConfigurationInspector.swift; sourceTree = "<group>"; };
+		B1EAA330000000000000002 /* TerraformProviderSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformProviderSchema.swift; sourceTree = "<group>"; };
+		B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformConfigurationContextHelp.swift; sourceTree = "<group>"; };
+		B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformConfigurationContextHelpView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -127,6 +141,11 @@
 		8A0D933D263F7186001CB06C /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */,
+				B1EAA330000000000000002 /* TerraformProviderSchema.swift */,
+				B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */,
+				550D972CC34B47978D05B9F9 /* RunGitContext.swift */,
+				0EEE1ABBAF394D628B436560 /* ConfigurationModel.swift */,
 				8A926B572648C48E00FDBA5C /* ndjson.swift */,
 				8AF2133E263A0CFB009F97C2 /* JsonLog.swift */,
 				8AF21342263A2DE9009F97C2 /* ResourceState.swift */,
@@ -161,6 +180,8 @@
 		8AA12B1F26427D340048A4A9 /* Pages */ = {
 			isa = PBXGroup;
 			children = (
+				B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */,
+				E8A1CB43A70346349C859ABE /* ConfigurationPage.swift */,
 				8A926B5B2649007800FDBA5C /* BlankSlate.swift */,
 				8AA12B152642614F0048A4A9 /* WorkspacePage.swift */,
 				8AA12B0D264260570048A4A9 /* RunListPage.swift */,
@@ -223,6 +244,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 8AF213312639E8BF009F97C2 /* Build configuration list for PBXNativeTarget "Habitable" */;
 			buildPhases = (
+				DDAA33000000000000000001 /* Build configuration inspector */,
 				8AF2131D2639E8BC009F97C2 /* Sources */,
 				8AF2131E2639E8BC009F97C2 /* Frameworks */,
 				8AF2131F2639E8BC009F97C2 /* Resources */,
@@ -286,11 +308,32 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+        DDAA33000000000000000001 /* Build configuration inspector */ = {
+            isa = PBXShellScriptBuildPhase;
+            buildActionMask = 2147483647;
+            files = ();
+            inputPaths = ("$(SRCROOT)/Tools/config-inspect/go.mod", "$(SRCROOT)/Tools/config-inspect/go.sum", "$(SRCROOT)/Tools/config-inspect/main.go", "$(SRCROOT)/scripts/build-config-inspector.sh");
+            name = "Build configuration inspector";
+            outputPaths = ("$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/habitable-config-inspect");
+            runOnlyForDeploymentPostprocessing = 0;
+            shellPath = /bin/bash;
+            shellScript = "export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH\n/bin/bash \"$SRCROOT/scripts/build-config-inspector.sh\"\n";
+        };
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		8AF2131D2639E8BC009F97C2 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2978C5D792C1476EACA795F2 /* TerraformConfigurationInspector.swift in Sources */,
+				B1EAA330000000000000001 /* TerraformProviderSchema.swift in Sources */,
+				B1EAA330000000000000003 /* TerraformConfigurationContextHelp.swift in Sources */,
+				B1EAA330000000000000005 /* TerraformConfigurationContextHelpView.swift in Sources */,
+				587D4C19FB214DC5A16904A8 /* ConfigurationPage.swift in Sources */,
+				093095698F3E40D39EF8EB1B /* RunGitContext.swift in Sources */,
+				45C6675D39CF46A2A199AD8B /* ConfigurationModel.swift in Sources */,
 				8AF2133F263A0CFB009F97C2 /* JsonLog.swift in Sources */,
 				8AA12B0E264260570048A4A9 /* RunListPage.swift in Sources */,
 				8A926B69264E524C00FDBA5C /* ChangeSummary.swift in Sources */,

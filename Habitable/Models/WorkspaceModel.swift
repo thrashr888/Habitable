@@ -339,11 +339,19 @@ class Workspace: ObservableObject {
     @Published var runs: [TerraformRun] = []
     @Published var state: ShowMessage?
     @Published var terraformVariables: [TerraformVariable] = []
+    @Published private(set) var terraformInputDiagnostics: [String] = []
+    @Published private(set) var isInspectingInputs = false
     @Published var environmentVariables: [EnvironmentVariable] = []
     @Published private(set) var rememberedInputsError: String?
     @Published private(set) var workspaceOpenError: String?
     private var rememberedInputLoadFailed = false
+    private var variableInspectionRequestID = UUID()
+    private var variableInspectionTask: Task<Void, Never>?
     private let workspaceInputStore: WorkspaceInputStore
+
+    var declaredTerraformInputs: [TerraformDeclaredInput] {
+        terraformVariables.compactMap(\.declaration).sorted { $0.name < $1.name }
+    }
 
     init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard,
          historyStore: RunHistoryStore = RunHistoryStore(),
@@ -636,146 +644,98 @@ class Workspace: ObservableObject {
     
     func checkVariables() {
         guard let dir = workingDirectory else {
+            variableInspectionTask?.cancel()
+            variableInspectionTask = nil
+            variableInspectionRequestID = UUID()
+            isInspectingInputs = false
             hasVariables = false
             return
         }
 
-        // Keep editor-created inputs stable while replacing all file/environment
-        // discoveries. This also removes values whose source file was deleted.
+        let requestID = UUID()
+        variableInspectionRequestID = requestID
+        variableInspectionTask?.cancel()
+        isInspectingInputs = true
+        let canonicalDirectory = RunHistoryStore.workspacePath(dir)
+        var environment = ProcessInfo.processInfo.environment
+        let appEnvironmentKeys = Set(environmentVariables.filter { $0.isUserInput }.map(\.key))
+        for variable in environmentVariables where variable.isUserInput {
+            if variable.rememberedSecretUnavailable { environment.removeValue(forKey: variable.key) }
+            else { environment[variable.key] = variable.value }
+        }
+        let inspectionEnvironment = environment
+        variableInspectionTask = Task.detached(priority: .utility) {
+            let inspected = TerraformConfigurationInspector.inspect(directory: dir, environment: inspectionEnvironment,
+                appEnvironmentKeys: appEnvironmentKeys, shouldCancel: { withUnsafeCurrentTask { $0?.isCancelled ?? false } })
+            await MainActor.run {
+                guard self.variableInspectionRequestID == requestID,
+                      self.workingDirectory.map(RunHistoryStore.workspacePath) == canonicalDirectory else { return }
+                self.mergeInspectedVariables(inspected)
+                self.isInspectingInputs = false
+                self.variableInspectionTask = nil
+            }
+        }
+    }
+
+    private func mergeInspectedVariables(_ inspected: TerraformInspectedInputs) {
+        // User entries stay owned by the editor. File, environment, and declaration
+        // rows are rebuilt from disk so deleted declarations disappear on refresh.
         let userVariables = terraformVariables.filter(\.isUserInput)
         let userEnvironmentVariables = environmentVariables.filter(\.isUserInput)
-        var discoveredVariables: [TerraformVariable] = []
-        let fileManager = FileManager.default
-        let textFile = dir.appendingPathComponent("terraform.tfvars")
-        if fileManager.fileExists(atPath: textFile.path) {
-            discoveredVariables += parseTextVariables(file: textFile)
+        terraformInputDiagnostics = inspected.diagnostics
+        let declarations = Dictionary(uniqueKeysWithValues: inspected.declarations.map { ($0.name, $0) })
+        var rowsByKey: [String: TerraformVariable] = [:]
+        for (key, data) in inspected.values {
+            let row = TerraformVariable()
+            row.key = key
+            row.value = String(data: data, encoding: .utf8) ?? ""
+            row.hcl = true
+            row.discoveredSource = inspected.valueSources[key]
+            row.declaration = declarations[key]
+            row.sensitive = row.declaration?.sensitive ?? false
+            rowsByKey[key] = row
         }
-        let jsonFile = dir.appendingPathComponent("terraform.tfvars.json")
-        if fileManager.fileExists(atPath: jsonFile.path) {
-            discoveredVariables += parseJSONVariables(file: jsonFile)
+        for declaration in inspected.declarations where rowsByKey[declaration.name] == nil {
+            let row = TerraformVariable()
+            row.key = declaration.name
+            row.declaration = declaration
+            row.sensitive = declaration.sensitive
+            row.hasUnresolvedDiscoveredValue = inspected.unresolvedValues.contains(declaration.name)
+            rowsByKey[declaration.name] = row
         }
-
-        // Keep one display entry per key, with the later-discovered JSON file
-        // taking precedence when both conventional tfvars files define it.
-        var discoveredByKey: [String: TerraformVariable] = [:]
-        for variable in discoveredVariables { discoveredByKey[variable.key] = variable }
-
-        terraformVariables = userVariables + discoveredByKey.values.sorted { $0.key < $1.key }
+        for key in inspected.unresolvedValues where rowsByKey[key] == nil {
+            let row = TerraformVariable()
+            row.key = key
+            row.hasUnresolvedDiscoveredValue = true
+            row.unresolvedSource = inspected.unresolvedValueSources[key]
+            rowsByKey[key] = row
+        }
+        for key in inspected.unresolvedValues {
+            rowsByKey[key]?.hasUnresolvedDiscoveredValue = true
+            rowsByKey[key]?.unresolvedSource = inspected.unresolvedValueSources[key]
+        }
+        // App inputs are the highest-precedence source, then resolved tfvars or
+        // TF_VAR values. An app value remains intact while gaining declaration metadata.
+        let userKeys = Set(userVariables.map(\.key))
+        for variable in userVariables {
+            variable.declaration = declarations[variable.key]
+            variable.discoveredSource = inspected.valueSources[variable.key]
+            variable.sensitive = variable.sensitive || (variable.declaration?.sensitive ?? false)
+            variable.hasUnresolvedDiscoveredValue = false
+            variable.unresolvedSource = nil
+        }
+        terraformVariables = userVariables + rowsByKey.values.filter { !userKeys.contains($0.key) }.sorted { $0.key < $1.key }
         environmentVariables = userEnvironmentVariables + parseEnvironmentVariables()
-        hasVariables = fileManager.fileExists(atPath: textFile.path)
-            || fileManager.fileExists(atPath: jsonFile.path)
+        hasVariables = !inspected.declarations.isEmpty || !inspected.values.isEmpty || environmentVariables.count > userEnvironmentVariables.count
     }
 
     private func parseEnvironmentVariables() -> [EnvironmentVariable] {
-        var discovered: [EnvironmentVariable] = []
-        for (key, value) in ProcessInfo.processInfo.environment {
-            guard key.hasPrefix("TF_VAR_") else { continue }
+        ProcessInfo.processInfo.environment.keys.sorted().compactMap { key in
+            guard key.hasPrefix("TF_VAR_"), let value = ProcessInfo.processInfo.environment[key] else { return nil }
             let variable = EnvironmentVariable()
             variable.key = key
             variable.value = value
-            discovered.append(variable)
-        }
-        return discovered
-    }
-
-    /// Discovers only simple, single-line assignments. This intentionally does
-    /// not claim to parse HCL expressions or multiline collections; Terraform
-    /// remains the authority for interpreting the original file.
-    private func parseTextVariables(file: URL) -> [TerraformVariable] {
-        do {
-            let vars = try String(contentsOf: file, encoding: .utf8)
-            var discovered: [TerraformVariable] = []
-            var nestedExpressionDepth = 0
-            var blockComment = false
-            var heredocTerminator: String?
-            for line in vars.split(whereSeparator: \.isNewline) {
-                var trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let terminator = heredocTerminator {
-                    if trimmed == terminator { heredocTerminator = nil }
-                    continue
-                }
-                if blockComment {
-                    guard let end = trimmed.range(of: "*/") else { continue }
-                    trimmed = String(trimmed[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                    blockComment = false
-                }
-                if trimmed.hasPrefix("/*") {
-                    guard let end = trimmed.range(of: "*/", range: trimmed.index(trimmed.startIndex, offsetBy: 2)..<trimmed.endIndex) else {
-                        blockComment = true
-                        continue
-                    }
-                    trimmed = String(trimmed[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                if trimmed.isEmpty || trimmed.hasPrefix("#") || trimmed.hasPrefix("//") { continue }
-                if nestedExpressionDepth > 0 {
-                    nestedExpressionDepth += expressionDepthDelta(in: trimmed)
-                    nestedExpressionDepth = max(0, nestedExpressionDepth)
-                    continue
-                }
-                guard let equals = trimmed.firstIndex(of: "=") else { continue }
-                let key = String(trimmed[..<equals]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let value = String(trimmed[trimmed.index(after: equals)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !key.isEmpty, !value.isEmpty else { continue }
-                if let markerRange = value.range(of: #"<<-?\s*([A-Za-z_][A-Za-z0-9_]*)"#, options: .regularExpression) {
-                    let marker = value[markerRange].replacingOccurrences(of: #"^<<-?\s*"#, with: "", options: .regularExpression)
-                    heredocTerminator = marker
-                    continue
-                }
-                let depth = expressionDepthDelta(in: value)
-                guard depth == 0 else {
-                    nestedExpressionDepth = max(0, depth)
-                    continue
-                }
-                let variable = TerraformVariable()
-                variable.key = key
-                variable.value = value
-                discovered.append(variable)
-            }
-            return discovered
-        } catch {
-            print(error.localizedDescription)
-            return []
-        }
-    }
-
-    private func expressionDepthDelta(in text: String) -> Int {
-        var depth = 0
-        var inString = false
-        var escaped = false
-        for character in text {
-            if inString {
-                if escaped { escaped = false }
-                else if character == "\\" { escaped = true }
-                else if character == "\"" { inString = false }
-                continue
-            }
-            if character == "\"" { inString = true }
-            else if "[{(".contains(character) { depth += 1 }
-            else if "]})".contains(character) { depth -= 1 }
-        }
-        return depth
-    }
-
-    private func parseJSONVariables(file: URL) -> [TerraformVariable] {
-        do {
-            let data = try Data(contentsOf: file)
-            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-            return object.keys.sorted().compactMap { key in
-                guard let value = object[key] else { return nil }
-                let variable = TerraformVariable()
-                variable.key = key
-                if let string = value as? String, !(value is NSNumber) {
-                    variable.value = string
-                } else if let encoded = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]),
-                          let rendered = String(data: encoded, encoding: .utf8) {
-                    variable.value = rendered
-                    variable.hcl = true
-                }
-                return variable
-            }
-        } catch {
-            print(error.localizedDescription)
-            return []
+            return variable
         }
     }
 
@@ -1195,6 +1155,7 @@ class Workspace: ObservableObject {
             do { try persistRememberedInputs() }
             catch { terraformVariables.removeAll { $0 === variable }; throw error }
         }
+        checkVariables()
     }
 
     func updateTerraformVariable(_ existing: TerraformVariable, key: String, value: String,
@@ -1220,6 +1181,7 @@ class Workspace: ObservableObject {
             do { try persistRememberedInputs() }
             catch { existing.key = old.0; existing.value = old.1; existing.description = old.2; existing.sensitive = old.3; existing.hcl = old.4; existing.isRemembered = old.5; existing.rememberedSecretUnavailable = old.6; existing.rememberedSecretID = old.7; throw error }
         }
+        checkVariables()
     }
 
     func removeTerraformVariable(_ variable: TerraformVariable) throws {
@@ -1230,6 +1192,7 @@ class Workspace: ObservableObject {
             do { try persistRememberedInputs() }
             catch { terraformVariables.append(variable); throw error }
         }
+        checkVariables()
     }
 
     func addEnvironmentVariable(_ variable: EnvironmentVariable) throws {
@@ -1245,6 +1208,7 @@ class Workspace: ObservableObject {
             do { try persistRememberedInputs() }
             catch { environmentVariables.removeAll { $0 === variable }; throw error }
         }
+        checkVariables()
     }
 
     func updateEnvironmentVariable(_ existing: EnvironmentVariable, key: String, value: String,
@@ -1269,6 +1233,7 @@ class Workspace: ObservableObject {
             do { try persistRememberedInputs() }
             catch { existing.key = old.0; existing.value = old.1; existing.description = old.2; existing.sensitive = old.3; existing.isRemembered = old.4; existing.rememberedSecretUnavailable = old.5; existing.rememberedSecretID = old.6; throw error }
         }
+        checkVariables()
     }
 
     func removeEnvironmentVariable(_ variable: EnvironmentVariable) throws {
@@ -1279,6 +1244,7 @@ class Workspace: ObservableObject {
             do { try persistRememberedInputs() }
             catch { environmentVariables.append(variable); throw error }
         }
+        checkVariables()
     }
 
     private func retirePlansForInputChange() throws {
@@ -1287,5 +1253,11 @@ class Workspace: ObservableObject {
         defer { lease.release() }
         try lease.invalidatePlans()
         for run in runs { run.doDiscard() }
+    }
+
+    /// Invalidates reviewed plans after a successful change to Terraform configuration files.
+    func configurationDidSave() throws {
+        try retirePlansForInputChange()
+        checkVariables()
     }
 }

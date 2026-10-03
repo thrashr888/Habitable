@@ -8,7 +8,13 @@ import SwiftUI
 
 struct ShowResourceView: View {
     var resource: ShowResource
+    var workspaceDirectory: URL? = nil
+    var terraformExecutableURL: URL? = nil
+    var workspaceInitialized = false
     @State private var searchText = ""
+    @State private var schemaSearchText = ""
+    @State private var showSchemaAttributes = false
+    @StateObject private var schemaHelp = TerraformProviderSchemaHelpModel()
 
     private var attributes: [ResourceAttribute] {
         resourceAttributes(values: resource.values, sensitiveValues: resource.sensitiveValues)
@@ -17,6 +23,37 @@ struct ShowResourceView: View {
     private var filteredAttributes: [ResourceAttribute] {
         guard !searchText.isEmpty else { return attributes }
         return attributes.filter { $0.searchableText.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var providerDocumentation: TerraformProviderDocumentation? {
+        TerraformProviderDocumentation.resolve(
+            providerIdentity: resource.provider_name,
+            resourceType: resource.type,
+            resourceMode: resource.mode,
+            lockFile: workspaceDirectory?.appendingPathComponent(".terraform.lock.hcl")
+        )
+    }
+
+    private var builtInResourceDocumentation: URL? {
+        guard resource.provider_name == "terraform.io/builtin/terraform",
+              resource.type == "terraform_data" else { return nil }
+        return URL(string: "https://developer.hashicorp.com/terraform/language/resources/terraform-data")
+    }
+
+    private var moduleDocumentation: TerraformModuleDocumentation? {
+        TerraformModuleDocumentation.resolve(resourceAddress: resource.address, workspaceDirectory: workspaceDirectory)
+    }
+
+    private var schemaAttributes: [TerraformSchemaAttribute]? {
+        schemaHelp.attributes(for: resource.provider_name, resourceType: resource.type, mode: resource.mode)
+    }
+
+    private var filteredSchemaAttributes: [TerraformSchemaAttribute] {
+        guard let schemaAttributes, !schemaSearchText.isEmpty else { return schemaAttributes ?? [] }
+        return schemaAttributes.filter {
+            $0.path.localizedCaseInsensitiveContains(schemaSearchText) ||
+            ($0.description?.localizedCaseInsensitiveContains(schemaSearchText) ?? false)
+        }
     }
 
     var body: some View {
@@ -34,9 +71,11 @@ struct ShowResourceView: View {
                 if let provider = resource.provider_name {
                     GridRow(alignment: .top) {
                         Text("Provider").foregroundStyle(.secondary)
-                        if let url = terraformProviderRegistryURL(provider) {
+                        if let url = providerDocumentation?.providerURL {
                             Link(provider, destination: url)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .help("Open provider documentation for version \(providerDocumentation?.lockedVersion ?? "")")
+                                .accessibilityLabel("Provider documentation for \(provider) version \(providerDocumentation?.lockedVersion ?? "unknown")")
                         } else {
                             Text(provider).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -44,7 +83,49 @@ struct ShowResourceView: View {
                     }
                 }
                 if let mode = resource.mode { metadataRow("Mode", value: mode) }
-                if let type = resource.type { metadataRow("Type", value: type) }
+                if let type = resource.type {
+                    GridRow(alignment: .top) {
+                        Text("Type").foregroundStyle(.secondary)
+                        if let url = providerDocumentation?.resourceURL ?? builtInResourceDocumentation {
+                            Link(type, destination: url).fixedSize(horizontal: false, vertical: true)
+                                .help("Open documentation for resource type \(type)")
+                                .accessibilityLabel("Documentation for resource type \(type)")
+                        } else {
+                            Text(type).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                if resource.provider_name?.hasPrefix("registry.terraform.io/") == true,
+                   providerDocumentation?.lockedVersion == nil {
+                    GridRow(alignment: .top) {
+                        Text("Documentation").foregroundStyle(.secondary)
+                        Text("Version unavailable — check .terraform.lock.hcl")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if let version = providerDocumentation?.lockedVersion {
+                    metadataRow("Provider version", value: version)
+                }
+                if let module = moduleDocumentation {
+                    GridRow(alignment: .top) {
+                        Text("Module").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let url = module.registryURL {
+                                Link(module.source, destination: url)
+                                    .help("Open module documentation for version \(module.version ?? "")")
+                                    .accessibilityLabel("Module documentation for \(module.source) version \(module.version ?? "unknown")")
+                            } else {
+                                Text(module.source).textSelection(.enabled)
+                            }
+                            if let version = module.version {
+                                Text("Version \(version)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if let name = resource.name { metadataRow("Name", value: name) }
                 if let version = resource.schema_version { metadataRow("Schema version", value: String(version)) }
             }
@@ -55,6 +136,64 @@ struct ShowResourceView: View {
                 Text("Attributes").font(.headline)
                 Spacer()
                 Text("\(filteredAttributes.count)").foregroundStyle(.secondary)
+                if resource.provider_name != nil {
+                    Button {
+                        schemaHelp.load(directory: workspaceDirectory, executable: terraformExecutableURL,
+                                       workspaceInitialized: workspaceInitialized,
+                                       providerIdentity: resource.provider_name,
+                                       resourceType: resource.type, mode: resource.mode)
+                    } label: {
+                        Label("Load attribute help", systemImage: "info.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(schemaHelp.isLoading || !workspaceInitialized || terraformExecutableURL == nil)
+                    .help("Read schemas from providers already installed for this workspace. No provider installation runs.")
+                }
+            }
+            if schemaHelp.isLoading(for: resource.provider_name, resourceType: resource.type, mode: resource.mode) {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading installed provider schemas…").foregroundStyle(.secondary) }
+            } else if let message = schemaHelp.message(for: resource.provider_name, resourceType: resource.type, mode: resource.mode) {
+                Text(message).font(.callout).foregroundStyle(.secondary)
+            }
+            if let schemaAttributes, !schemaAttributes.isEmpty {
+                DisclosureGroup("Attribute help · \(schemaAttributes.count)", isExpanded: $showSchemaAttributes) {
+                    TextField("Search attribute help", text: $schemaSearchText)
+                        .textFieldStyle(.roundedBorder)
+                    Text("\(filteredSchemaAttributes.count) of \(schemaAttributes.count) attributes")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if filteredSchemaAttributes.isEmpty {
+                        Text("No matching attributes").font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(filteredSchemaAttributes) { attribute in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(attribute.path).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        HStack(spacing: 8) {
+                                            if attribute.required { schemaBadge("Required") }
+                                            if attribute.optional { schemaBadge("Optional") }
+                                            if attribute.computed { schemaBadge("Computed") }
+                                            if attribute.sensitive { schemaBadge("Sensitive") }
+                                        }
+                                        .fixedSize(horizontal: false, vertical: true)
+                                            if let type = attribute.type { Text(type).font(.caption.monospaced()).foregroundStyle(.secondary) }
+                                            if let description = attribute.description, !description.isEmpty {
+                                                Text(description).font(.callout).foregroundStyle(.secondary)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            }
+                                    }
+                                    .padding(.vertical, 5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .accessibilityElement(children: .combine)
+                                    Divider()
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 280)
+                    }
+                }
+                .font(.callout)
             }
             if !attributes.isEmpty {
                 TextField("Search attributes", text: $searchText)
@@ -98,6 +237,9 @@ struct ShowResourceView: View {
         }
         .padding()
         .frame(minWidth: 400, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: resource.address) { _ in schemaHelp.reset() }
+        .onChange(of: workspaceDirectory?.path) { _ in schemaHelp.reset() }
+        .onChange(of: terraformExecutableURL?.path) { _ in schemaHelp.reset() }
     }
     private func metadataRow(_ label: String, value: String) -> some View {
         GridRow(alignment: .top) {
@@ -105,6 +247,10 @@ struct ShowResourceView: View {
             Text(value).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func schemaBadge(_ title: String) -> some View {
+        Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
     }
 }
 

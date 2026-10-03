@@ -82,6 +82,19 @@ struct RunPageView: View {
                     Text("\(run.createdAt, formatter: Self.taskDateFormat)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let duration = run.planDuration {
+                        Text("Plan duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let duration = run.applyDuration {
+                        Text("Apply duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let commit = run.gitCommit {
+                        Text("\(run.gitBranch ?? "Detached HEAD") · \(commit.prefix(8))")
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .help(commit)
+                    }
                     Text(run.executionContextDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -22,6 +22,15 @@ jobs:
       TERRAFORM_TEST_VERSION: 1.15.5
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: Tools/config-inspect/go.sum
+      - name: Test configuration parser
+        working-directory: Tools/config-inspect
+        run: go test ./...
+      - name: Build configuration parser for core tests
+        run: TARGET_BUILD_DIR="$RUNNER_TEMP/habitable-helper" CONTENTS_FOLDER_PATH=Contents bash scripts/build-config-inspector.sh
       - name: Confirm toolchain
         run: |
           xcodebuild -version
@@ -50,6 +59,7 @@ jobs:
         env:
           HABITABLE_TEST_TERRAFORM: ${{ runner.temp }}/terraform-bin/terraform
           HABITABLE_TEST_RELEASES: '1'
+          HABITABLE_CONFIG_INSPECT_PATH: ${{ runner.temp }}/habitable-helper/Contents/Helpers/habitable-config-inspect
         run: swift test --package-path . --scratch-path "$RUNNER_TEMP/habitable-swiftpm"
       - name: Build universal Release app
         run: |

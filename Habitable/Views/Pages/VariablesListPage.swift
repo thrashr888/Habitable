@@ -13,32 +13,58 @@ struct TerraformVariableSummaryView: View {
     private var safeValuePreview: String {
         if variable.rememberedSecretUnavailable { return "Remembered value unavailable" }
         if variable.sensitive { return "Sensitive value hidden" }
+        if !variable.isUserInput && variable.discoveredSource == nil { return "No value supplied" }
         return variable.value.isEmpty ? "(empty)" : variable.value
+    }
+
+    private var status: String {
+        if variable.isUserInput {
+            if let source = variable.discoveredSource { return "Habitable value · overrides \(source)" }
+            return "Habitable value · used for plans"
+        }
+        if let source = variable.discoveredSource { return "Value from \(source)" }
+        if variable.hasUnresolvedDiscoveredValue {
+            if let source = variable.unresolvedSource { return "Value from \(source) could not be resolved without Terraform" }
+            return "Value could not be resolved without Terraform"
+        }
+        if variable.declaration?.hasDefault == true { return "Uses Terraform default" }
+        return variable.declaration?.required == true ? "Required · unset" : "Optional · unset"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(variable.key).font(.body.weight(.medium))
-            if !variable.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(variable.description)
+            let details = variable.declaration?.description ?? variable.description
+            if !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(details)
                     .font(.callout).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 8) {
-                if variable.hcl { Text("JSON") }
-                if variable.sensitive { Text("Sensitive") }
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                if let type = variable.declaration?.type {
+                    let compactType = type.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                    Text(compactType).lineLimit(1).truncationMode(.middle)
+                        .help(type).accessibilityLabel("Type: \(type)")
+                }
+                if variable.declaration?.required == true { Text("Required") }
+                if variable.declaration?.hasDefault == true { Text("Default") }
+                if variable.sensitive { Label("Sensitive", systemImage: "eye.slash") }
+                if variable.declaration?.ephemeral == true { Text("Ephemeral") }
                 if variable.isRemembered { Text("Remembered") }
                 else if variable.isUserInput { Text("This session") }
                 if variable.rememberedSecretUnavailable { Text("Unavailable") }
             }
-            .font(.caption).foregroundColor(.secondary)
-            Text(safeValuePreview)
-                .font(.callout).foregroundColor(.secondary)
-                .lineLimit(2).truncationMode(.middle)
-            Text(variable.isUserInput
-                 ? "Source: Habitable app override · takes precedence over workspace tfvars · editable"
-                 : "Source: workspace tfvars · read-only")
-                .font(.caption).foregroundColor(.secondary)
+            .font(.caption).foregroundColor(.secondary).lineLimit(2)
+            Text(status).font(.callout.weight(.medium))
+                .foregroundStyle(variable.isUserInput || variable.discoveredSource != nil ? .primary : .secondary)
+            if variable.isUserInput || variable.discoveredSource != nil {
+                Text(safeValuePreview).font(.callout).foregroundColor(.secondary)
+                    .lineLimit(2).truncationMode(.middle)
+            }
+            if let source = variable.declaration?.sourceLocation {
+                Text("Declared in \(source)").font(.caption).foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            }
         }
     }
 }
@@ -55,14 +81,57 @@ struct VariableListPage: View {
     
     @State private var terraformEditorContext: TerraformVariableEditorContext?
     @State private var inputError: String?
+    @State private var requiredOnly = false
+
+    private var visibleVariables: [TerraformVariable] {
+        workspace.terraformVariables.filter { !requiredOnly || $0.declaration?.required == true }
+    }
+
+    private var missingRequiredCount: Int {
+        workspace.terraformVariables.filter {
+            $0.declaration?.required == true && !$0.isUserInput
+                && $0.discoveredSource == nil && !$0.hasUnresolvedDiscoveredValue
+        }.count
+    }
 
     var body: some View {
         VStack(alignment: .leading) {
+            if !workspace.terraformInputDiagnostics.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Some Terraform inputs could not be inspected", systemImage: "exclamationmark.triangle")
+                        .font(.callout.weight(.medium))
+                    ForEach(Array(workspace.terraformInputDiagnostics.enumerated()), id: \.offset) { _, message in
+                        Text(message).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+            }
             if let error = workspace.rememberedInputsError {
                 Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
             }
+            HStack(spacing: 10) {
+                if workspace.isInspectingInputs {
+                    ProgressView().controlSize(.small)
+                    Text("Checking Terraform inputs…").foregroundStyle(.secondary)
+                } else if missingRequiredCount > 0 {
+                    Label("\(missingRequiredCount) required input\(missingRequiredCount == 1 ? "" : "s") need a value",
+                          systemImage: "exclamationmark.circle")
+                        .foregroundStyle(.secondary)
+                } else if !workspace.declaredTerraformInputs.isEmpty {
+                    Label("Required inputs are set", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !workspace.declaredTerraformInputs.isEmpty {
+                    Toggle("Required only", isOn: $requiredOnly)
+                        .toggleStyle(.button)
+                        .help("Show only root inputs without a Terraform default")
+                }
+            }
+            .font(.callout).padding(.horizontal, 16).padding(.vertical, 8)
             List {
-                ForEach(workspace.terraformVariables, id: \.id) { variable in
+                ForEach(visibleVariables, id: \.id) { variable in
                     HStack {
                         TerraformVariableSummaryView(variable: variable)
                         Spacer()
@@ -73,23 +142,31 @@ struct VariableListPage: View {
                                 .buttonStyle(.borderless).disabled(workspace.locked)
                                 .accessibilityLabel("Remove app input \(variable.key)")
                                 .help("Remove app input")
+                        } else if variable.declaration != nil {
+                            Button(variable.discoveredSource == nil ? "Set value" : "Override") { openEditor(for: variable) }
+                                .buttonStyle(.borderless).disabled(workspace.locked)
+                                .accessibilityLabel("Set value for \(variable.key)")
                         }
                     }
                     .accessibilityElement(children: .contain)
                 }
             }
             .overlay {
-                if workspace.terraformVariables.isEmpty {
+                if visibleVariables.isEmpty {
                     VStack(spacing: 10) {
-                        Image(systemName: "text.badge.plus")
+                        Image(systemName: requiredOnly && !workspace.terraformVariables.isEmpty ? "line.3.horizontal.decrease.circle" : "text.badge.plus")
                             .font(.largeTitle).foregroundStyle(.secondary)
-                        Text("No Terraform inputs").font(.headline)
-                        Text("Add a Terraform variable override. Values from workspace tfvars appear here as read-only inputs.")
+                        Text(requiredOnly && !workspace.terraformVariables.isEmpty ? "No required inputs" : "No Terraform inputs").font(.headline)
+                        Text(requiredOnly && !workspace.terraformVariables.isEmpty
+                             ? "This root module has no required inputs. Turn off Required only to see optional inputs and values."
+                             : "Declared root inputs appear here with their type, default, and source. Add an app value only when you want Habitable to override Terraform’s own inputs.")
                             .font(.callout).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("Add Terraform input") { openEditor(for: nil) }
-                            .disabled(workspace.locked)
+                        if !requiredOnly || workspace.terraformVariables.isEmpty {
+                            Button("Add Terraform input") { openEditor(for: nil) }
+                                .disabled(workspace.locked)
+                        }
                     }
                     .frame(maxWidth: 420)
                     .padding(20)
@@ -105,7 +182,7 @@ struct VariableListPage: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .help("Refresh variables")
                 }
-                .disabled(workspace.locked)
+                .disabled(workspace.locked || workspace.isInspectingInputs)
             }
             ToolbarItem(placement: .primaryAction) {
                 // TODO move to footer
@@ -160,14 +237,27 @@ struct VariableListPage: View {
         result.isRemembered = source.isRemembered
         result.rememberedSecretUnavailable = source.rememberedSecretUnavailable
         result.rememberedSecretID = source.rememberedSecretID
+        result.declaration = source.declaration
+        result.discoveredSource = source.discoveredSource
+        result.hasUnresolvedDiscoveredValue = source.hasUnresolvedDiscoveredValue
         return result
     }
 
     private func openEditor(for original: TerraformVariable?) {
         inputError = nil
-        terraformEditorContext = TerraformVariableEditorContext(
-            draft: original.map(copy) ?? TerraformVariable(), original: original
-        )
+        if let original, original.isUserInput {
+            terraformEditorContext = TerraformVariableEditorContext(draft: copy(original), original: original)
+        } else {
+            let draft = TerraformVariable()
+            if let original {
+                draft.key = original.key
+                draft.description = original.declaration?.description ?? ""
+                draft.sensitive = original.declaration?.sensitive ?? false
+                let type = original.declaration?.type ?? "string"
+                draft.hcl = type != "string" && type != "any"
+            }
+            terraformEditorContext = TerraformVariableEditorContext(draft: draft, original: nil)
+        }
     }
 
     private func remove(_ variable: TerraformVariable) {
@@ -200,7 +290,7 @@ private struct TerraformVariableEditor: View {
                         .font(.caption).foregroundColor(.red)
                 }
                 Text("Key").font(.caption).foregroundColor(.secondary)
-                TextField("Variable key", text: $variable.key).multilineTextAlignment(.leading)
+                TextField("Variable key", text: $variable.key).labelsHidden().accessibilityLabel("Variable key").multilineTextAlignment(.leading)
                 Text("Value").font(.caption).foregroundColor(.secondary)
                 if variable.sensitive {
                     SecureField("Value", text: $variable.value)
@@ -211,10 +301,12 @@ private struct TerraformVariableEditor: View {
                 }
                 Toggle("Value is JSON (list, map, number, boolean, or null)", isOn: $variable.hcl)
                 Toggle("Sensitive", isOn: $variable.sensitive)
+                    .disabled(variable.declaration?.sensitive == true)
+                    .help(variable.declaration?.sensitive == true ? "Terraform declares this input sensitive." : "")
                 Text("Hides this value and redacts matching input values from Habitable run logs and reviews. Also mark it sensitive in your Terraform configuration for Terraform’s own output.")
                     .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 Text("Description").font(.caption).foregroundColor(.secondary)
-                TextField("Optional description", text: $variable.description)
+                TextField("Optional description", text: $variable.description).labelsHidden().accessibilityLabel("Optional description")
                     .multilineTextAlignment(.leading)
                 if (didEditKey || didAttemptSave), let validationError = variable.validationError {
                     Text(validationError).foregroundColor(.red)

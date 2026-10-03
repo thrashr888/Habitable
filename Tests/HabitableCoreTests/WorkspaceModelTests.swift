@@ -317,10 +317,12 @@ final class WorkspaceModelTests: XCTestCase {
 
         try "from_file = \"old\"\n".write(to: directory.appendingPathComponent("terraform.tfvars"), atomically: true, encoding: .utf8)
         workspace.checkVariables()
+        try await waitUntil { !workspace.isInspectingInputs }
         XCTAssertEqual(workspace.terraformVariables.map(\.key), ["saved", "from_file"])
         XCTAssertTrue(workspace.hasVariables)
         try FileManager.default.removeItem(at: directory.appendingPathComponent("terraform.tfvars"))
         workspace.checkVariables()
+        try await waitUntil { !workspace.isInspectingInputs }
 
         XCTAssertEqual(workspace.terraformVariables.map(\.key), ["saved"])
         XCTAssertTrue(workspace.terraformVariables[0].sensitive)
@@ -345,24 +347,57 @@ final class WorkspaceModelTests: XCTestCase {
     }
 
     @MainActor
-    func testTfvarsDiscoveryPreservesEqualsAndTypedJSONValues() throws {
+    func testTfvarsDiscoveryPreservesEqualsAndTypedJSONValues() async throws {
         workspaceFile("message = \"east=west\"\nlist = [\"a\", \"b\"]\nobject = {\n  ignored = true\n}\n# comment\n", named: "terraform.tfvars")
         workspaceFile(#"{"enabled":true,"count":3,"message":"north=south","nullable":null,"items":[1,"x"],"settings":{"region":"west"}}"#, named: "terraform.tfvars.json")
         let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
                                   commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         workspace.workingDirectory = directory
         workspace.checkVariables()
+        try await waitUntil { !workspace.isInspectingInputs }
 
         let discovered = Dictionary(uniqueKeysWithValues: workspace.terraformVariables.map { ($0.key, $0) })
-        XCTAssertEqual(discovered["message"]?.value, "north=south")
-        XCTAssertEqual(discovered["list"]?.value, "[\"a\", \"b\"]")
-        XCTAssertNil(discovered["object"], "Multiline HCL values are outside this discovery reader's supported syntax")
+        XCTAssertEqual(try discovered["message"]?.terraformJSONValue() as? String, "north=south")
+        XCTAssertEqual(try discovered["list"]?.terraformJSONValue() as? [String], ["a", "b"])
+        XCTAssertNotNil(discovered["object"], "Multiline nested HCL values are parsed by the HCL helper")
         XCTAssertEqual(discovered["enabled"]?.value, "true")
         XCTAssertEqual(discovered["count"]?.value, "3")
         XCTAssertEqual(discovered["nullable"]?.value, "null")
         XCTAssertTrue(discovered["nullable"]?.hcl == true)
         XCTAssertEqual(discovered["items"]?.value, "[1,\"x\"]")
         XCTAssertEqual(discovered["settings"]?.value, #"{"region":"west"}"#)
+    }
+
+    @MainActor
+    func testAppTFVarEnvironmentAppearsAndYieldsToFilesAfterRefresh() async throws {
+        let terraformKey = "habitable_app_env_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())"
+        workspaceFile("variable \"\(terraformKey)\" { type = string }", named: "variables.tf")
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.workingDirectory = directory
+        let appEnvironment = EnvironmentVariable()
+        appEnvironment.key = "TF_VAR_\(terraformKey)"
+        appEnvironment.value = "from-app-environment"
+        try workspace.addEnvironmentVariable(appEnvironment)
+        try await waitUntil { !workspace.isInspectingInputs }
+
+        let overridden = try XCTUnwrap(workspace.terraformVariables.first { $0.key == terraformKey })
+        XCTAssertEqual(try overridden.terraformJSONValue() as? String, "from-app-environment")
+        XCTAssertEqual(overridden.discoveredSource, "Habitable environment override")
+        XCTAssertEqual(workspace.environmentVariables.filter(\.isUserInput).map(\.key), ["TF_VAR_\(terraformKey)"])
+
+        workspaceFile("\(terraformKey) = \"from-file\"", named: "terraform.tfvars")
+        workspace.checkVariables()
+        try await waitUntil { !workspace.isInspectingInputs }
+        let fileWins = try XCTUnwrap(workspace.terraformVariables.first { $0.key == terraformKey })
+        XCTAssertEqual(try fileWins.terraformJSONValue() as? String, "from-file")
+        XCTAssertEqual(fileWins.discoveredSource, "terraform.tfvars")
+
+        try workspace.removeEnvironmentVariable(appEnvironment)
+        try await waitUntil { !workspace.isInspectingInputs }
+        let restored = try XCTUnwrap(workspace.terraformVariables.first { $0.key == terraformKey })
+        XCTAssertEqual(try restored.terraformJSONValue() as? String, "from-file")
+        XCTAssertEqual(restored.discoveredSource, "terraform.tfvars")
     }
 
     @MainActor

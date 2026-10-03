@@ -21,7 +21,7 @@ extension FocusedValues {
 
 struct ContentView: View {
     enum NavigationItem: String {
-        case workspace, runs, resources, outputs, variables, envVariables, settings
+        case workspace, configuration, runs, resources, outputs, variables, envVariables, settings
 
         var hasDetailList: Bool {
             self == .runs || self == .resources || self == .outputs
@@ -30,6 +30,7 @@ struct ContentView: View {
 
     @StateObject var workspace = Workspace()
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
+    @StateObject private var configurationModel = ConfigurationModel()
     @State private var selection: NavigationItem? = .workspace
     @State private var selectedRun: UUID?
     @State private var selectedResource: String?
@@ -55,7 +56,7 @@ struct ContentView: View {
                                 .frame(minWidth: 240, idealWidth: selection == .resources ? 460 : 280,
                                        maxWidth: selection == .resources ? .infinity : 340,
                                        maxHeight: .infinity)
-                            detail.frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                            detail.frame(minWidth: selection == .resources ? 400 : 360, maxWidth: .infinity, maxHeight: .infinity)
                         }
                     } else {
                         page.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -127,6 +128,7 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $selection) {
             Label("Workspace", systemImage: "folder").tag(NavigationItem.workspace)
+            Label("Configuration", systemImage: "doc.text").tag(NavigationItem.configuration)
             Label("Runs (\(max(workspace.historyTotalCount, workspace.runs.count)))", systemImage: "list.bullet.rectangle").tag(NavigationItem.runs)
             Label("Resources (\(workspace.state?.resources.count ?? 0))", systemImage: "globe").tag(NavigationItem.resources)
             Label("Outputs (\(workspace.state?.outputs.count ?? 0))", systemImage: "chevron.right.square").tag(NavigationItem.outputs)
@@ -140,6 +142,12 @@ struct ContentView: View {
                 if workspace.locked {
                     ProgressView().controlSize(.small)
                     Text("Running Terraform").lineLimit(1)
+                } else if workspace.isInspectingInputs {
+                    Label("Reading inputs", systemImage: "ellipsis.circle")
+                } else if workspace.terraformVariables.contains(where: {
+                    $0.declaration?.required == true && !$0.isUserInput && $0.discoveredSource == nil && !$0.hasUnresolvedDiscoveredValue
+                }) {
+                    Label("Inputs needed", systemImage: "exclamationmark.circle")
                 } else if workspace.isInitialized && workspace.isValid {
                     Label("Ready to plan", systemImage: "checkmark.circle")
                 } else {
@@ -173,7 +181,9 @@ struct ContentView: View {
             }
         case .resources:
             if let address = selectedResource, let resource = workspace.state?.resources.first(where: { ($0.address ?? $0.id.uuidString) == address }) {
-                ShowResourceView(resource: resource)
+                ShowResourceView(resource: resource, workspaceDirectory: workspace.workingDirectory,
+                                 terraformExecutableURL: workspace.runner.executableURL,
+                                 workspaceInitialized: workspace.isInitialized)
             } else {
                 placeholder("Select a resource", message: "Choose a resource to inspect its details.")
             }
@@ -189,13 +199,15 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
+        case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel)
         case .variables: VariableListPage()
         case .envVariables: EnvVarListPage()
         case .settings: SettingsListPage()
         default: WorkspacePage(onReviewRun: { id in
             selectedRun = id
             selection = .runs
-        })
+        }, onOpenConfiguration: { selection = .configuration },
+           onOpenInputs: { selection = .variables })
         }
     }
 
