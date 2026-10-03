@@ -142,6 +142,8 @@ private final class BoundedFormatOutput: @unchecked Sendable {
     }
 }
 
+enum ConfigurationValidationActivity { case idle, scheduled, running }
+
 @MainActor
 final class ConfigurationModel: ObservableObject {
     @Published private(set) var files: [ConfigurationFile] = []
@@ -159,6 +161,7 @@ final class ConfigurationModel: ObservableObject {
     @Published private(set) var diskChanged = false
     @Published private(set) var diagnostics: [ConfigurationDiagnostic] = []
     @Published var message: String?
+    @Published private(set) var validationActivity: ConfigurationValidationActivity = .idle
     @Published private(set) var isFormatting = false
     @Published private(set) var isWatching = false
     @Published private(set) var isWorkspaceSwitchPending = false
@@ -234,9 +237,7 @@ final class ConfigurationModel: ObservableObject {
         guard isVisible != visible else { return }
         isVisible = visible
         if !visible {
-            let wasScheduled = autoValidationTask != nil
             cancelAutoValidation()
-            if wasScheduled { message = "Automatic validation stopped because Configuration is no longer visible." }
         }
     }
 
@@ -310,7 +311,7 @@ final class ConfigurationModel: ObservableObject {
     func save() {
         guard let workspace, let selectedFile, hasUnsavedChanges else { return }
         _ = saveSource(draft, to: selectedFile, expectedText: savedText, workspace: workspace,
-                       status: "Saved. Previous plans were invalidated.")
+                       status: "Saved.")
     }
 
     func formatAndSave() {
@@ -362,8 +363,8 @@ final class ConfigurationModel: ObservableObject {
                     }
                     if self.saveSource(formatted, to: file, expectedText: baseline, workspace: workspace,
                                        status: warnings.isEmpty
-                                        ? "Formatted and saved. Previous plans were invalidated."
-                                        : "Formatted and saved. Previous plans were invalidated. Terraform reported: \(warnings)") {
+                                        ? "Formatted and saved."
+                                        : "Formatted and saved. Terraform reported: \(warnings)") {
                         self.editorSelection = NSRange(location: (formatted as NSString).length, length: 0)
                     }
                 }
@@ -449,6 +450,7 @@ final class ConfigurationModel: ObservableObject {
         guard isVisible, !externalInvalidationPending,
               let directory = attachedDirectory,
               canonicalPath(workspace.workingDirectory ?? URL(fileURLWithPath: "/")) == canonicalPath(directory) else { return }
+        validationActivity = .scheduled
         let requestID = autoValidationID
         let savedSource = savedText
         autoValidationTask = Task { [weak self, weak workspace] in
@@ -462,9 +464,8 @@ final class ConfigurationModel: ObservableObject {
             }
             guard self.isCurrentValidation(requestID, file: file, workspace: workspace,
                 directory: directory, savedSource: savedSource) else { return }
-            self.message = self.hasUnsavedChanges
-                ? "Validating the saved on-disk configuration. The unsaved editor draft is excluded."
-                : "Validating the saved on-disk configuration."
+            self.validationActivity = .running
+            self.message = nil
             self.autoValidationCommandRunning = true
             workspace.validate()
             while workspace.locked {
@@ -475,9 +476,8 @@ final class ConfigurationModel: ObservableObject {
             self.autoValidationCommandRunning = false
             guard self.isCurrentValidation(requestID, file: file, workspace: workspace,
                 directory: directory, savedSource: savedSource) else { return }
-            self.message = workspace.isValid
-                ? "The saved on-disk configuration is valid. Unsaved editor text was not included."
-                : "Validation finished for the saved on-disk configuration. Review its workspace diagnostics; unsaved editor text was not included."
+            self.validationActivity = .idle
+            self.autoValidationTask = nil
         }
     }
 
@@ -495,6 +495,7 @@ final class ConfigurationModel: ObservableObject {
         autoValidationTask = nil
         if autoValidationCommandRunning, let workspace, workspace.locked { workspace.cancelCommand() }
         autoValidationCommandRunning = false
+        validationActivity = .idle
     }
 
     private func cancelValidationWork(clearExternalInvalidation: Bool) {

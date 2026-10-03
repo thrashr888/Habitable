@@ -69,7 +69,7 @@ struct WorkspacePage: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                GroupBox("Readiness") {
+                WorkspaceCard("Readiness") {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(readiness.title, systemImage: readiness.action == "Plan" || readiness.action == "Plan and apply automatically" ? "checkmark.circle.fill" : "exclamationmark.circle")
                             .font(.headline)
@@ -108,7 +108,7 @@ struct WorkspacePage: View {
                 }
                 .font(.callout).foregroundStyle(.secondary)
 
-                GroupBox("Latest run") {
+                WorkspaceCard("Latest run") {
                     if let run = latestRun {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
@@ -136,7 +136,7 @@ struct WorkspacePage: View {
                     }
                 }
 
-                GroupBox("Terraform context") {
+                WorkspaceCard("Terraform context") {
                     Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 10) {
                         GridRow { Text("Version").foregroundStyle(.secondary); Text(workspace.terraformVersion) }
                         GridRow { Text("State backend").foregroundStyle(.secondary); Text(workspace.backendIdentity) }
@@ -180,7 +180,7 @@ struct WorkspacePage: View {
                     .padding(.top, 12)
                 }
 
-                GroupBox("Checks") {
+                WorkspaceCard("Checks") {
                     VStack(alignment: .leading, spacing: 8) {
                         CheckView(label: "Initialized", check: workspace.isInitialized)
                         CheckView(label: "Configuration is valid", check: workspace.isValid)
@@ -233,6 +233,23 @@ struct WorkspacePage: View {
                 .help("Validate Terraform configuration")
                 .disabled(workspace.locked || workspace.workingDirectory == nil)
             }
+        }
+    }
+}
+
+/// Room for the content inside each native card, independent of page gutters.
+private struct WorkspaceCard<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+    }
+
+    var body: some View {
+        GroupBox(title) {
+            content().padding(12).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

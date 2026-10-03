@@ -210,8 +210,6 @@ struct ConfigurationPage: View {
                     .buttonStyle(.borderless).font(.callout)
             }
             Spacer(minLength: 0)
-            Text("Only Terraform configuration files appear here. Variable value files stay out of the editor list.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .frame(minWidth: 210, idealWidth: 240, maxWidth: 280, maxHeight: .infinity, alignment: .topLeading)
@@ -357,28 +355,33 @@ struct ConfigurationPage: View {
             HStack {
                 Text("Validation")
                     .font(.subheadline.weight(.semibold))
-                if workspace.locked {
+                if model.validationActivity == .running {
                     ProgressView().controlSize(.small)
+                    Text("Validating…").font(.caption).foregroundStyle(.secondary)
+                } else if model.validationActivity == .scheduled {
+                    Text("Validation queued").font(.caption).foregroundStyle(.secondary)
+                } else if workspace.locked {
+                    ProgressView().controlSize(.small)
+                    Text("Terraform is running…").font(.caption).foregroundStyle(.secondary)
                 } else if workspace.isValid {
-                    Label("Saved configuration is valid", systemImage: "checkmark.circle")
+                    Label("Saved configuration valid", systemImage: "checkmark.circle")
                         .font(.caption).foregroundStyle(.secondary)
+                } else if workspace.errorMessage != nil || !model.diagnostics.isEmpty {
+                    Label("Needs attention", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Not validated").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Button { workspace.validate() } label: { Label("Validate", systemImage: "checkmark.seal") }
                     .disabled(workspace.locked)
                     .help("Validate the saved workspace configuration")
             }
+            if model.hasUnsavedChanges {
+                Text("Save to validate your changes.").font(.callout).foregroundStyle(.secondary)
+            }
             if let message = model.message {
                 Text(message).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-            } else if workspace.locked {
-                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Terraform is running…") }
-                    .font(.callout).foregroundStyle(.secondary)
-            } else if model.hasUnsavedChanges {
-                Text("Save your changes to validate them.").font(.callout).foregroundStyle(.secondary)
-            } else if model.diagnostics.isEmpty {
-                Label(workspace.isValid ? "Configuration is valid" : "Saved changes are validated automatically while this page is open.",
-                      systemImage: workspace.isValid ? "checkmark.circle" : "checkmark.seal")
-                    .font(.callout).foregroundStyle(.secondary)
             }
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 10) {
