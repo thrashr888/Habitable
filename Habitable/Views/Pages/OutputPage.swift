@@ -10,15 +10,7 @@ struct OutputPageView: View {
     var output: Output
 
     private var displayedValue: String {
-        guard !output.sensitive else { return "(sensitive value)" }
-        guard let value = output.value else { return "Value unavailable" }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.first == "{" || trimmed.first == "[",
-              let data = trimmed.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
-              let formatted = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-              let text = String(data: formatted, encoding: .utf8) else { return value }
-        return text
+        output.displayValue
     }
 
     var body: some View {

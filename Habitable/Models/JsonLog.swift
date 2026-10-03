@@ -129,8 +129,25 @@ class Output: Identifiable {
     var id = UUID()
     var key: String
     var type: String?
-    var value: String?
-    var sensitive = false
+    var value: String? { didSet { cachedDisplayValue = nil } }
+    var sensitive = false { didSet { cachedDisplayValue = nil } }
+    private var cachedDisplayValue: String?
+    var displayValue: String {
+        guard !sensitive else { return "(sensitive value)" }
+        if let cachedDisplayValue { return cachedDisplayValue }
+        guard let value else { return "Value unavailable" }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result: String
+        if (trimmed.first == "{" || trimmed.first == "["),
+           let data = trimmed.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+           let formatted = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+           let text = String(data: formatted, encoding: .utf8) {
+            result = text
+        } else { result = value }
+        cachedDisplayValue = result
+        return result
+    }
     init(key: String, type: String?, value: String?, sensitive: Bool) {
         self.key = key
         self.type = type
@@ -408,8 +425,15 @@ class ShowResource: ObservableObject, Identifiable {
     var name: String?
     var provider_name: String?
     var schema_version: Int?
-    var values: [String: JSON]?
-    var sensitiveValues: JSON = .null
+    var values: [String: JSON]? { didSet { cachedAttributes = nil } }
+    var sensitiveValues: JSON = .null { didSet { cachedAttributes = nil } }
+    private var cachedAttributes: [ResourceAttribute]?
+    var displayAttributes: [ResourceAttribute] {
+        if let cachedAttributes { return cachedAttributes }
+        let result = resourceAttributes(values: values, sensitiveValues: sensitiveValues)
+        cachedAttributes = result
+        return result
+    }
     
     init(address: String?, mode: String?, type: String?, name: String?, provider_name: String?, schema_version: Int?, values: Dictionary<String, JSON>?, sensitiveValues: JSON = .null) {
         self.address = address

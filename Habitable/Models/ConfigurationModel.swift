@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 import Darwin
 
-struct ConfigurationFile: Identifiable, Hashable {
+struct ConfigurationFile: Identifiable, Hashable, Sendable {
     let url: URL
     var id: String { url.path }
     var name: String { url.lastPathComponent }
@@ -173,6 +173,7 @@ final class ConfigurationModel: ObservableObject {
     private var externalInvalidationTask: Task<Void, Never>?
     private var externalInvalidationPending = false
     private var autoValidationID = UUID()
+    private var fileRefreshID = UUID()
 
     var hasUnsavedChanges: Bool { savedText.map { $0 != draft } ?? false }
     var hasConflict: Bool { diskChanged && hasUnsavedChanges }
@@ -184,6 +185,10 @@ final class ConfigurationModel: ObservableObject {
 
     func attach(to workspace: Workspace) {
         let newDirectory = workspace.workingDirectory
+        if self.workspace === workspace, attachedDirectory == newDirectory, !isWorkspaceSwitchPending {
+            refreshFilesInBackground()
+            return
+        }
         if let attachedDirectory, canonicalPath(attachedDirectory) != newDirectory.map(canonicalPath),
            hasUnsavedChanges {
             cancelValidationWork(clearExternalInvalidation: true)
@@ -237,6 +242,23 @@ final class ConfigurationModel: ObservableObject {
 
     func refreshFiles() {
         guard let directory = workspace?.workingDirectory else { files = []; selectedFile = nil; return }
+        fileRefreshID = UUID()
+        applyFiles(Self.scanFiles(in: directory))
+    }
+
+    private func refreshFilesInBackground() {
+        guard let directory = workspace?.workingDirectory else { return }
+        let id = UUID()
+        fileRefreshID = id
+        Task { [weak self] in
+            let found = await Task.detached(priority: .utility) { Self.scanFiles(in: directory) }.value
+            guard let self, self.fileRefreshID == id, self.attachedDirectory == directory,
+                  self.workspace?.workingDirectory == directory else { return }
+            self.applyFiles(found)
+        }
+    }
+
+    nonisolated private static func scanFiles(in directory: URL) -> [ConfigurationFile] {
         let found = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])) ?? [])
             .filter { url in
                 guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
@@ -244,8 +266,12 @@ final class ConfigurationModel: ObservableObject {
                 return url.lastPathComponent.hasSuffix(".tf") || url.lastPathComponent.hasSuffix(".tf.json")
             }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        files = found.map(ConfigurationFile.init(url:))
-        if let selectedFile, !found.contains(selectedFile.url) {
+        return found.map(ConfigurationFile.init(url:))
+    }
+
+    private func applyFiles(_ found: [ConfigurationFile]) {
+        if files != found { files = found }
+        if let selectedFile, !found.contains(selectedFile) {
             if hasUnsavedChanges {
                 diskChanged = true
                 message = "The open file was removed or renamed outside Habitable. Copy your edits before closing this file."

@@ -10,6 +10,7 @@ import AppKit
 
 struct SettingsListPage: View {
     @EnvironmentObject var workspace: Workspace
+    @ObservedObject var catalog: TerraformReleaseCatalog
 
     var body: some View {
         ScrollView {
@@ -86,7 +87,7 @@ struct SettingsListPage: View {
                     }
                 }
 
-                TerraformVersionSettings(workspace: workspace)
+                TerraformVersionSettings(workspace: workspace, catalog: catalog)
 
                 SettingsSection("Execution", footer: "When enabled, a successful plan applies immediately without a review step.") {
                     Toggle("Apply automatically after planning", isOn: $workspace.autoApply)
@@ -105,7 +106,7 @@ struct SettingsListPage: View {
 
 struct SettingsListPage_Previews: PreviewProvider {
     static var previews: some View {
-        SettingsListPage()
+        SettingsListPage(catalog: TerraformReleaseCatalog())
             .environmentObject(Workspace(dir: URL(fileURLWithPath: "/Users/thrashr888/workspace/Habitable")))
     }
 }
@@ -113,7 +114,7 @@ struct SettingsListPage_Previews: PreviewProvider {
 
 struct TerraformVersionSettings: View {
     @ObservedObject var workspace: Workspace
-    @StateObject private var catalog = TerraformReleaseCatalog()
+    @ObservedObject var catalog: TerraformReleaseCatalog
     @State private var selection = ""
 
     var body: some View {
@@ -180,7 +181,7 @@ struct TerraformVersionSettings: View {
             }
         }
         .task {
-            await catalog.refresh()
+            await catalog.refreshIfNeeded()
             chooseDefault()
         }
     }

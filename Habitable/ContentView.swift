@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 
 struct WorkspaceWindowActions {
     let recentFolders: [URL]
@@ -31,6 +32,9 @@ struct ContentView: View {
     @StateObject var workspace = Workspace()
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
+    @StateObject private var releaseCatalog = TerraformReleaseCatalog()
+    @StateObject private var readme = WorkspaceReadmePresentation()
+    @StateObject private var navigationTrace = NavigationTrace()
     @State private var selection: NavigationItem? = .workspace
     @State private var selectedRun: UUID?
     @State private var selectedResource: String?
@@ -74,6 +78,9 @@ struct ContentView: View {
             }
         }
         .environmentObject(workspace)
+        .animation(nil, value: selection)
+        .background(NavigationLayoutProbe(trace: navigationTrace, page: selection?.rawValue ?? "workspace")
+            .allowsHitTesting(false))
         .disclosureGroupStyle(FullHeaderDisclosureStyle())
         .focusedSceneValue(\.workspaceWindowActions, WorkspaceWindowActions(
             recentFolders: recentWorkspaces.folders,
@@ -127,7 +134,7 @@ struct ContentView: View {
     }
 
     private var sidebar: some View {
-        List(selection: $selection) {
+        List(selection: navigationSelection) {
             Label("Workspace", systemImage: "folder").tag(NavigationItem.workspace)
             Label("Configuration", systemImage: "doc.text").tag(NavigationItem.configuration)
             Label("Runs (\(max(workspace.historyTotalCount, workspace.runs.count)))", systemImage: "list.bullet.rectangle").tag(NavigationItem.runs)
@@ -203,13 +210,23 @@ struct ContentView: View {
         case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel)
         case .variables: VariableListPage()
         case .envVariables: EnvVarListPage()
-        case .settings: SettingsListPage()
-        default: WorkspacePage(onReviewRun: { id in
+        case .settings: SettingsListPage(catalog: releaseCatalog)
+        default: WorkspacePage(readme: readme, onReviewRun: { id in
             selectedRun = id
-            selection = .runs
-        }, onOpenConfiguration: { selection = .configuration },
-           onOpenInputs: { selection = .variables })
+            navigationSelection.wrappedValue = .runs
+        }, onOpenConfiguration: { navigationSelection.wrappedValue = .configuration },
+           onOpenInputs: { navigationSelection.wrappedValue = .variables })
         }
+    }
+
+    private var navigationSelection: Binding<NavigationItem?> {
+        Binding(get: { selection }, set: { page in
+            guard page != selection else { return }
+            navigationTrace.begin(page: page?.rawValue ?? "workspace")
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { selection = page }
+        })
     }
 
     private func placeholder(_ title: String, message: String) -> some View {
@@ -251,6 +268,46 @@ struct ContentView: View {
     private func isAvailableDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+}
+
+/// Signposts measure selection to the next AppKit layout, not network completion
+/// or actual pixel presentation. Instruments can correlate this interval with UI hangs.
+@MainActor
+private final class NavigationTrace: ObservableObject {
+    private let log = OSLog(subsystem: "dev.thrasher.paul.Habitable", category: .pointsOfInterest)
+    private var pending: (page: String, id: OSSignpostID)?
+
+    func begin(page: String) {
+        if let pending { os_signpost(.end, log: log, name: "Page navigation", signpostID: pending.id, "Superseded") }
+        let id = OSSignpostID(log: log)
+        pending = (page, id)
+        os_signpost(.begin, log: log, name: "Page navigation", signpostID: id, "%{public}@", page)
+    }
+
+    func laidOut(page: String) {
+        guard let pending, pending.page == page else { return }
+        os_signpost(.end, log: log, name: "Page navigation", signpostID: pending.id)
+        self.pending = nil
+    }
+}
+
+private struct NavigationLayoutProbe: NSViewRepresentable {
+    let trace: NavigationTrace
+    let page: String
+
+    func makeNSView(context: Context) -> ProbeView { ProbeView() }
+    func updateNSView(_ view: ProbeView, context: Context) {
+        view.didLayout = { trace.laidOut(page: page) }
+        view.needsLayout = true
+    }
+
+    final class ProbeView: NSView {
+        var didLayout: (() -> Void)?
+        override func layout() {
+            super.layout()
+            didLayout?()
+        }
     }
 }
 
