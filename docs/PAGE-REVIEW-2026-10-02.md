@@ -134,3 +134,41 @@ Tracking: Habitable-3le.4; final live separator interaction remains within rt3.2
 The repaired candidate was reopened after the user confirmed all editor changes were saved. Its running process was verified against the candidate executable. Native inspection still could not reconnect; the divider interaction was explicitly handed to the user for review. Seven focused editor tests pass, including direct formatting with stderr excluded, saved-file auto-validation, rapid-save coalescing, navigation cancellation, external-edit conflicts and draft retention. `.tf.json` remains editable and validated, but Format is disabled because Terraform’s stdin formatter accepts HCL.
 
 Final post-feedback regression: **150 tests, zero failures, one optional online-download test skipped**. The seven Configuration tests passed separately. The final universal Debug build succeeded, both app architectures were verified, and project/shell/whitespace validation passed. Automated implementation checks are complete; the documented live review matrix remains open.
+
+## Agent access, Git context and copy actions — October 3 proposal
+
+The user proposed Alchemy-style agent connections, official Terraform MCP/skills installation, richer Git context, commit-triggered plan-only runs and convenient copying. This section records researched direction, not implemented features. Existing branch/commit run snapshots and safe output/resource-attribute copying were verified in the current source. The new work is tracked in Beads.
+
+| Proposed work | Tracking | Scope |
+| --- | --- | --- |
+| Built-in Habitable MCP | Habitable-3le.5 | Opt-in local app control and redacted inspection through existing models. |
+| Agent connection and skills settings | Habitable-3le.6 | Client-aware connection, Habitable skill, optional official Terraform server/skills. |
+| Workspace Git and richer run source | Habitable-rt3.37 | Live repository context and truthful immutable run metadata. |
+| Plan-only after new commits | Habitable-rt3.38 | Explicit per-workspace setting, deduplicated background planning with no auto-apply. |
+| Consistent copy actions | Habitable-rt3.39 | Paths, identifiers, source references and safe values with native feedback. |
+
+### Swift MCP and native Agents settings
+
+The [official Swift MCP SDK](https://github.com/modelcontextprotocol/swift-sdk) provides server/client APIs, tools, resources, prompts, stdio and Streamable HTTP server transports. The current [published release is 0.12.1](https://github.com/modelcontextprotocol/swift-sdk/releases/tag/0.12.1); its package requires Swift 6.1 and macOS 13, compatible with Habitable’s current toolchain/deployment target. Pin a release for implementation, not main. The HTTP transport still needs an HTTP listener/framework adapter: its [transport source](https://github.com/modelcontextprotocol/swift-sdk/blob/0.12.1/Sources/MCP/Base/Transports/HTTPServer/StatelessHTTPServerTransport.swift) accepts requests from that adapter rather than opening a socket itself. Prototype compatibility before adding a networking dependency.
+
+Use a native Agents settings section with server toggle/status, endpoint Copy, recent activity, and client rows with Connect, Disconnect and Copy configuration. Match Alchemy’s useful information structure with Habitable’s system controls and typography. Prefer authenticated loopback Streamable HTTP in the app; supply a bundled stdio bridge for clients requiring subprocess servers. Alchemy’s current source demonstrates a runtime endpoint/token bridge and an MCPB installation path; it is architectural evidence, not proof of another client’s current installation contract.
+
+The first Habitable tool surface should expose workspace readiness, declarations and provenance, redacted run/resource/output summaries, file/line diagnostics, navigation, validation and explicit plan-only requests. Use the same workspace identity, command coordinator, saved-plan invalidation and redaction guards as the UI. Plan requests return a job/run identifier and support cancellation/status polling rather than blocking indefinitely. Defer apply/destroy tools until an explicit in-app review/approval workflow exists. Server access must be scoped to user-selected workspaces; do not expose raw state, credential files or arbitrary shell execution. App controls should show what the agent did.
+
+Keep Habitable MCP separate from [HashiCorp’s Terraform MCP server](https://github.com/hashicorp/terraform-mcp-server), which integrates Registry and HCP/TFE APIs. Offer its Registry tools without automatically granting account operations; deeper HCP integration remains deferred. Offer selected [official Terraform skills](https://github.com/hashicorp/agent-skills/tree/main/plugins/terraform/skills), initially style guide, tests and module refactoring, alongside a Habitable workflow skill. HashiCorp documents individual-skill and Claude/Codex product-plugin installation in its [README](https://github.com/hashicorp/agent-skills). Pin provenance/version and make each optional installation explicit.
+
+Client adapters must respect their current JSON/TOML/native-extension formats, preserve unrelated entries, detect malformed config, and provide backups, atomic changes and rollback. Do not blindly rewrite private extension installation registries. Distinguish Installed/Configured/Connected: a config entry alone does not prove a live connection. Keep credentials out of copied config and skills; use a local runtime bridge where appropriate. No agent configurations or permissions were changed during this research.
+
+### Git context and commit-triggered plans
+
+RunGitContext already captures branch and full commit at plan start, persists them in RunRecord, and displays a short SHA in the run view. Workspace should show repository, current branch or detached HEAD, commit subject/SHA, dirty status and Open repository/Copy actions. Enrich run snapshots with dirty status and trigger source so an uncommitted configuration is never represented as being exactly the commit. Do not persist raw diffs or sensitive file contents merely to capture provenance. Git reads should be asynchronous and bounded and handle subdirectories, linked worktrees, packed refs and absent repositories. Normalize repository URLs without embedded credentials.
+
+A per-workspace “Plan after new commits” setting should default off and work while Habitable is running. Establish a baseline without triggering a run on activation/relaunch. Resolve commit events versus checkout/reset/rebase changes explicitly; watching HEAD alone cannot distinguish them. Coalesce bursts, deduplicate commit IDs, wait for active commands, and show why a plan was blocked by missing inputs or initialization. Capture the exact source at actual plan start.
+
+Crucially, Workspace.didPlan currently checks global autoApply. Automated and agent-requested plan-only runs require a per-run execution policy that prevents this callback from applying them, even when auto-apply is enabled for manual runs. Verify that boundary with regression tests before exposing the setting. Do not install hooks or perform Git writes for this feature.
+
+### Copy actions and delivery order
+
+Add small native doc.on.doc buttons beside workspace/config paths, full commit SHA, resource addresses/IDs, input keys or var references, documentation links and diagnostic file:line locations. Offer context-menu equivalents and clear accessible labels, with short Copied feedback. Existing non-sensitive output and resource-attribute copy behavior should share a reusable control; masked fields must not copy hidden underlying secrets. Keep primary toolbars focused on workflow actions.
+
+Recommended implementation order: copy controls and Git overview; richer run provenance and plan-only policy; a bounded read/validate/plan Habitable MCP prototype; client/skill installation settings; commit-triggered plans after the execution-policy tests pass. Public documentation access remains useful independently of any deeper AI or HCP account features.
