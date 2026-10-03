@@ -74,6 +74,7 @@ struct ContentView: View {
             }
         }
         .environmentObject(workspace)
+        .disclosureGroupStyle(FullHeaderDisclosureStyle())
         .focusedSceneValue(\.workspaceWindowActions, WorkspaceWindowActions(
             recentFolders: recentWorkspaces.folders,
             openFolder: openFolder,

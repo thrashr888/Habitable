@@ -172,3 +172,63 @@ Crucially, Workspace.didPlan currently checks global autoApply. Automated and ag
 Add small native doc.on.doc buttons beside workspace/config paths, full commit SHA, resource addresses/IDs, input keys or var references, documentation links and diagnostic file:line locations. Offer context-menu equivalents and clear accessible labels, with short Copied feedback. Existing non-sensitive output and resource-attribute copy behavior should share a reusable control; masked fields must not copy hidden underlying secrets. Keep primary toolbars focused on workflow actions.
 
 Recommended implementation order: copy controls and Git overview; richer run provenance and plan-only policy; a bounded read/validate/plan Habitable MCP prototype; client/skill installation settings; commit-triggered plans after the execution-policy tests pass. Public documentation access remains useful independently of any deeper AI or HCP account features.
+
+## Scrolling, disclosure targets and following live runs — October 3
+
+User feedback: page scrolling should work over the surrounding container, disclosure titles should be clickable rather than requiring an arrow hit, and run details should reveal the phase currently receiving events.
+
+Habitable-rt3.40 replaces the constrained Settings form with a full-pane ScrollView. System GroupBox sections retain a readable 760-point content limit inside the viewport, so margins belong to the scroll surface. Workspace and output pages already put their readable content inside full-pane scroll views. Run metadata, plan review, apply events and errors now share one native List instead of fixed headers around separate vertical scroll containers. Raw console output remains a dedicated text viewport with its own horizontal scrolling.
+
+A shared [DisclosureGroupStyle](https://developer.apple.com/documentation/swiftui/disclosuregroupstyle) makes each arrow, title and trailing header area one native Button. It exposes Expanded/Collapsed accessibility state and keyboard activation. Module documentation links moved into expanded content to avoid nesting a link inside the disclosure button. This applies to settings, onboarding, provider/module help, resource schema help and run changes/events.
+
+Habitable-rt3.41 follows meaningful Plan/Apply/Errors transitions, including confirmed Apply before its first event, automatic apply, completion and failure. Incoming live version/activity/summary/output sections reveal once; subsequent events respect manual collapse. Final outputs arriving in the same UI update as completion still reveal. Historical runs retain compact disclosures and manual phase selection between transitions. Phase changes do not force scrolling or focus jumps.
+
+Verification: three new presentation tests pass; full regression **153 tests, zero failures, one optional online-download skip**. Universal Debug build and architecture/whitespace checks pass. Native inspection temporarily reconnected to the registered /tmp candidate path and verified no unsaved edits before restart. After reopening the final candidate it again reported cgWindowNotFound/native pipe failures, so final gutter-scroll, full-header click, keyboard and active-phase visual checks remain open under rt3.21 and these interaction issues. The review candidate was reopened; this is not a signed release.
+
+Landing history: two initial Git signing attempts through the configured 1Password signer failed (buffer/agent errors). Signing subsequently succeeded after the user approved the request; the interaction repair is committed together with the follow-on workspace navigation and README changes. Existing unrelated CLI deletion remains unstaged. Native acceptance remains open.
+
+## Independent Astra UX assessment — October 3
+
+The user requested an independent **gpt-6-astra** assessment of newcomer usability, power-user workflows and native quality. Astra reviewed current source, including the staged interaction repair, and this document. Native inspection failed with the existing native-pipe error; no live visual conclusions, app restarts, infrastructure operations or implementation changes were made for this assessment. Review tracking: Habitable-rt3.42.
+
+**Assessment:** Habitable has a strong foundation in explicit saving, external-edit protection, declared-input provenance, version-aware help, structured changes and exact saved-plan application. The highest return now is making those features one predictable edit → supply inputs → validate → review → apply workflow. Finish interaction acceptance before adding agent configuration or commit-triggered planning. Repeated explanations and status panels compete with the next action; more capability alone will not resolve that hierarchy.
+
+### Ranked next batch
+
+| Rank | Improvement and observed source behavior | Tracking | Acceptance |
+| --- | --- | --- | --- |
+| 1 | Make automatic apply unmistakable. Planning controls still say Plan/Queue plan while `Workspace.didPlan` can immediately apply (`SettingsListPage.swift`, `WorkspaceModel.swift`, `RunListPage.swift`). | Habitable-rt3.43 | Persistent mode indicator and an initiating label explaining automatic application at every entry point. Preserve the efficient expert mode. |
+| 2 | Put readiness and the next action immediately below workspace identity. It follows Latest run, Terraform context and Getting started; its icon only checks initialization/validity, potentially contradicting missing inputs (`WorkspacePage.swift`). | Habitable-rt3.44 | One clear next action in every readiness state, with matching icon/text. Active progress and Cancel remain in the same place; secondary detail is below. |
+| 3 | Make missing inputs directly actionable. Required only includes already supplied required declarations (`VariablesListPage.swift`). | Habitable-rt3.45 | Separate Show missing and Required only filters, name/description search, workspace navigation to the missing subset, and declaration description/type in editing context. |
+| 4 | Put consequences beside Apply. The action precedes planned counts; replacement consequences are buried in disclosures (`RunPage.swift`). | Habitable-rt3.46 | Compact create/update/replace/destroy summary beside Apply; replacement/destruction visible at resource-header level; consistent Destroy terminology. |
+| 5 | Follow active phases while retaining inspection. The picker disappears during commands and rendering forces live output (`RunPage.swift`). | Habitable-rt3.47 | During Apply, users can inspect Plan and return to live activity. Follow the transition once, then respect deliberate selection without focus/scroll jumps. |
+| 6 | Present validation once, truthfully. Saved-valid and valid messages can repeat alongside unsaved guidance; command locks create generic running states (`ConfigurationPage.swift`). | Habitable-rt3.48 | One state line distinguishes unsaved draft/last saved result, waiting for another command, validating and diagnostic counts. |
+| 7 | Standardize terms and native commands. Plan/Queue plan and Variables/inputs/Env Vars vary; principal workflow commands lack a coherent menu/shortcut surface (`ContentView.swift`, `RunListPage.swift`, `HabitableApp.swift`). | Habitable-rt3.49; copy actions remain Habitable-rt3.39 | Consistent planning vocabulary, visible primary labels where space allows, discoverable menu commands/shortcuts, and shared safe-copy feedback. |
+
+### Later bounded improvements
+
+| Rank | Improvement | Tracking | Acceptance |
+| --- | --- | --- | --- |
+| 8 | Use known declaration types for boolean/numeric/string entry; retain raw JSON for complex/expert values. Put This session/Remember for this workspace near Save. | Habitable-rt3.50 | Ordinary values do not require learning JSON representation first; explicit null/empty/default and sensitive rules remain intact; Terraform is the final authority. |
+| 9 | Connect resource and planned-change views to configuration with Open declaration. Extend existing diagnostic navigation rather than building a full visual Terraform builder. | Habitable-rt3.51 | Navigate to a confidently resolved file/line; unknown/generated sources remain honest. |
+| 10 | Add status/date/text filtering across saved run history, with clear current-versus-captured configuration context. | Habitable-rt3.52; provenance Habitable-rt3.37 | Large histories stay responsive and navigable. Dirty/trigger metadata prevents a SHA from implying unsaved configuration exactly matched that commit. |
+
+### Cleanup and delivery gate
+
+Use small shared components for page gutters, section spacing, metadata, errors and safe-copy behavior. Reduce repeated Workspace status/context and Configuration success messages. Clarify workspace-scoped Settings. Keep novice guidance contextual and collapsible so experienced users retain a compact working surface.
+
+The resource table needs a deliberate adaptive-width policy: its own collection pane requires 560 points alongside a 400-point inspector and 180-point sidebar, roughly 1,140 points before dividers (`ContentView.swift`, `ResourceListPage.swift`). This is source evidence of a breakpoint to test, not proof of clipping in the running app. Adaptive/accessibility verification remains in Habitable-rt3.10–.14/.21; do not create a second competing acceptance checklist.
+
+The live delivery gate covers 900×560, typical laptop and wide windows; empty/unset/invalid/ready/planning/planned/applying/failed states; gutter scrolling; all disclosure header hit areas and keyboard announcements; manual phase inspection during Apply; save/format/rapid saves/external edits/navigation; keyboard and VoiceOver; light/dark and long paths; create/update/replace/destroy/output-only/no-change plans; safe masked copying; and large state/history responsiveness. Native inspection remains unavailable, so these checks stay open.
+
+The assessment is recorded and follow-ups are filed; recommendations are **not implemented by this review**. Its initial landing was blocked by the configured 1Password Git signer, subsequently resolved during the follow-on workspace changes. No new release or tap update occurred.
+
+## Workspace plan navigation and repository README — October 3
+
+User feedback: the Workspace Plan button should open the run it starts, and the overview should render the repository README. Tracking: Habitable-rt3.53.
+
+The Plan action now passes the existing new-run callback to overview navigation. It selects the exact run only after successful validation and history creation, before Terraform starts planning. Failed validation does not navigate. Review run continues to use the same navigation path.
+
+The overview includes native formatted Markdown with headings, lists, links, code and tables, using pinned [MarkdownUI 2.4.1](https://github.com/gonzalezreal/swift-markdown-ui/releases/tag/2.4.1). Repository-root documentation is preferred when the selected Terraform directory is a subfolder; otherwise the selected directory is used, with a subfolder fallback if the repository has no README. Case-insensitive README.md/README.markdown and plain README/README.txt are recognized. Loading runs off the main actor with a 512 KB limit and rejects symlinks outside the repository. The section shares the page scroll surface and offers Refresh/Open README. Images are explicit links rather than background downloads; unsupported URL schemes and local links outside the repository are rejected. Missing documentation shows an explanatory empty state.
+
+Verification: four focused tests pass, covering exact created-run callback after successful validation, no callback on invalid configuration, repository/subfolder lookup, Markdown/plaintext recognition, missing/oversized files, path boundaries and outside symlinks. The universal Debug build succeeds with both app architectures; native visual acceptance remains open. This is candidate implementation, not a signed release. The configured Git signing succeeded after the user approved the 1Password request; the earlier signing blocker is resolved.

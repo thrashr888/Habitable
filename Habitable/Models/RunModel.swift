@@ -148,6 +148,34 @@ enum RunStatus: String, Codable, Sendable {
     case expired = "EXPIRED", interrupted = "INTERRUPTED"
 }
 
+enum RunDisplayPhase: Int {
+    case plan = 1, apply = 2, errors = 3
+
+    static func current(status: RunStatus, hasApply: Bool, hasError: Bool) -> Self {
+        if hasError { return .errors }
+        if hasApply || status == .confirmed || status == .applying || status == .applied { return .apply }
+        return .plan
+    }
+}
+
+enum RunLogSection: Hashable { case version, summary, outputs, activity }
+
+/// Reveal a live section once, without undoing a user's later collapse on each event.
+struct LiveRunDisclosureState {
+    private(set) var expanded: Set<RunLogSection> = []
+    private var revealed: Set<RunLogSection> = []
+
+    mutating func receive(_ available: Set<RunLogSection>, isLive: Bool) {
+        guard isLive else { return }
+        expanded.formUnion(available.subtracting(revealed))
+        revealed.formUnion(available)
+    }
+
+    mutating func setExpanded(_ section: RunLogSection, _ value: Bool) {
+        if value { expanded.insert(section) } else { expanded.remove(section) }
+    }
+}
+
 @MainActor
 class TerraformRun: ObservableObject, Identifiable {
     nonisolated let id: UUID

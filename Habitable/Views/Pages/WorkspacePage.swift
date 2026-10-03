@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import MarkdownUI
 
 struct CheckView: View {
     let label: String
@@ -24,7 +25,7 @@ struct CheckView: View {
 
 struct WorkspacePage: View {
     @EnvironmentObject var workspace: Workspace
-    var onReviewRun: (UUID) -> Void = { _ in }
+    var onReviewRun: @MainActor @Sendable (UUID) -> Void = { _ in }
     var onOpenConfiguration: () -> Void = {}
     var onOpenInputs: () -> Void = {}
 
@@ -157,7 +158,7 @@ struct WorkspacePage: View {
                                 case "Inputs": onOpenInputs()
                                 case "Initialize": workspace.initialize()
                                 case "Validate": workspace.validate()
-                                default: workspace.validateAndQueueRun()
+                                default: workspace.validateAndQueueRun(onCreated: onReviewRun)
                                 }
                             }
                             .buttonStyle(.borderedProminent)
@@ -186,6 +187,8 @@ struct WorkspacePage: View {
                 if let error = workspace.workspaceOpenError { ErrorView(message: error) }
                 if let error = workspace.rememberedInputsError { ErrorView(message: error) }
                 if let error = workspace.errorMessage { ErrorView(message: error) }
+
+                WorkspaceReadmeView(directory: workspace.workingDirectory)
 
                 if workspace.canCancelCommand {
                     HStack(spacing: 10) {
@@ -229,6 +232,79 @@ struct WorkspacePage: View {
                 }
                 .help("Validate Terraform configuration")
                 .disabled(workspace.locked || workspace.workingDirectory == nil)
+            }
+        }
+    }
+}
+
+private struct WorkspaceReadmeView: View {
+    let directory: URL?
+    @State private var document: WorkspaceReadme?
+    @State private var loadError: String?
+    @State private var loading = true
+    @State private var refreshID = UUID()
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                if loading {
+                    ProgressView("Reading README…")
+                } else if let document {
+                    Text(document.file.path)
+                        .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    if document.isMarkdown {
+                        Markdown(document.content, baseURL: document.file.deletingLastPathComponent())
+                            .markdownImageProvider(ReadmeImageLinks())
+                            .markdownTextStyle { FontSize(14) }
+                            .textSelection(.enabled)
+                            .environment(\.openURL, OpenURLAction { url in
+                                guard WorkspaceReadme.canOpen(url, relativeTo: document.root) else { return .discarded }
+                                return .systemAction
+                            })
+                    } else {
+                        Text(document.content).textSelection(.enabled)
+                    }
+                    Button("Open README") { NSWorkspace.shared.open(document.file) }
+                } else {
+                    Text(loadError ?? "Add a README.md to your repository to describe this workspace and how to use it.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            HStack {
+                Text("README").font(.headline)
+                Spacer()
+                Button { refreshID = UUID() } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.plain)
+                    .help("Refresh README")
+                    .accessibilityLabel("Refresh README")
+            }
+        }
+        .task(id: "\(directory?.path ?? "")-\(refreshID)") {
+            document = nil
+            loadError = nil
+            loading = true
+            let result = await Task.detached(priority: .utility) { () -> Result<WorkspaceReadme?, Error> in
+                Result { try directory.flatMap { try WorkspaceReadme.load(directory: $0) } }
+            }.value
+            guard !Task.isCancelled else { return }
+            switch result {
+            case .success(let value): document = value
+            case .failure(let error): loadError = error.localizedDescription
+            }
+            loading = false
+        }
+    }
+}
+
+/// Documentation images remain explicit links instead of making background network requests.
+private struct ReadmeImageLinks: ImageProvider {
+    func makeImage(url: URL?) -> some View {
+        if let url {
+            Link(destination: url) {
+                Label("Open image", systemImage: "photo")
             }
         }
     }

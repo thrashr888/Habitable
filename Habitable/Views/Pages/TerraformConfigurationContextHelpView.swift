@@ -97,6 +97,10 @@ private struct TerraformModuleHelpRow: View {
     let module: TerraformModuleContextHelp
     var body: some View {
         DisclosureGroup {
+            if let url = module.documentationURL, let version = module.installedVersion {
+                Link("Documentation · \(version)", destination: url)
+                    .accessibilityLabel("Module documentation for \(module.source) version \(version)")
+            }
             if let metadata = module.metadata {
                 TerraformDeclarationHelpSection(title: module.key, inputs: metadata.inputs, outputs: metadata.outputs)
                 if !metadata.providers.isEmpty {
@@ -109,11 +113,9 @@ private struct TerraformModuleHelpRow: View {
             }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
-                if let url = module.documentationURL, let version = module.installedVersion {
-                    Link("\(module.key) · \(version)", destination: url)
-                        .accessibilityLabel("Module documentation for \(module.source) version \(version)")
-                } else { Text(module.key).font(.callout.weight(.medium)) }
-                Text(module.source).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(module.key + (module.installedVersion.map { " · \($0)" } ?? ""))
+                    .font(.callout.weight(.medium))
+                Text(module.source).font(.caption.monospaced()).foregroundStyle(.secondary)
                 if module.installedVersion == nil {
                     Text(module.declaredVersion.map { "Declared version: \($0); module is not installed." }
                         ?? "Module is not installed; documentation link omitted.")

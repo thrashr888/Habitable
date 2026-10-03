@@ -34,7 +34,7 @@ struct RunPageView: View {
     var planView: some View {
         Group {
             if let plan = run.plan {
-                PlanReviewView(plan: plan, diff: run.planDiff)
+                PlanReviewSections(plan: plan, diff: run.planDiff)
             } else {
                 Text(run.isFinished ? "No plan output was captured for this run." : "Planning…")
             }
@@ -44,9 +44,9 @@ struct RunPageView: View {
     var applyView: some View {
         Group {
             if let apply = run.apply {
-                StructuredLogView(logs: apply)
+                StructuredLogSections(logs: apply)
             } else {
-                Text("Applying...")
+                Text(run.isFinished ? "No apply output was captured for this run." : "Applying…")
             }
         }
     }
@@ -56,13 +56,11 @@ struct RunPageView: View {
             if let errorMessage = run.errorMessage {
                 let diagnostics = handleNDJsonSuccess(errorMessage).diagnostics
                 if diagnostics.isEmpty {
-                    ScrollView {
-                        ErrorView(message: errorMessage)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    ErrorView(message: errorMessage)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    List(diagnostics, id: \.id) { diagnostic in
+                    ForEach(diagnostics, id: \.id) { diagnostic in
                         DiagnosticView(diagnostic: diagnostic.diagnostic,
                                        workingDirectory: workspace.workingDirectory)
                     }
@@ -72,107 +70,110 @@ struct RunPageView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Run #\(run.number)").font(.title2.weight(.semibold))
-                    if let message = run.message {
-                        Text(message).lineLimit(2)
+        List {
+            Section {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Run #\(run.number)").font(.title2.weight(.semibold))
+                        if let message = run.message {
+                            Text(message).lineLimit(2)
+                        }
+                        Text("\(run.createdAt, formatter: Self.taskDateFormat)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let duration = run.planDuration {
+                            Text("Plan duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let duration = run.applyDuration {
+                            Text("Apply duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let commit = run.gitCommit {
+                            Text("\(run.gitBranch ?? "Detached HEAD") · \(commit.prefix(8))")
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .help(commit)
+                        }
+                        Text(run.executionContextDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Text("\(run.createdAt, formatter: Self.taskDateFormat)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let duration = run.planDuration {
-                        Text("Plan duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let duration = run.applyDuration {
-                        Text("Apply duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let commit = run.gitCommit {
-                        Text("\(run.gitBranch ?? "Detached HEAD") · \(commit.prefix(8))")
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .help(commit)
-                    }
-                    Text(run.executionContextDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Label(run.status.rawValue.localizedCapitalized, systemImage: statusSymbol)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let notice = run.historyNotice {
-                Text(notice)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if run.canCancel {
-                HStack(spacing: 10) {
-                    ProgressView().controlSize(.small)
-                    Text(run.isCanceling ? "Stopping Terraform…" : "Terraform is running…")
-                        .foregroundStyle(.secondary)
                     Spacer()
-                    Button(run.usesHCPBackend ? "Stop streaming" : "Cancel", action: run.cancel)
-                        .disabled(run.isCanceling)
-                }
-                if run.usesHCPBackend {
-                    Text("Stopping the local command may leave the run active in HCP Terraform.")
+                    Label(run.status.rawValue.localizedCapitalized, systemImage: statusSymbol)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-            } else if run.status == .canceled && run.usesHCPBackend {
-                Text("The local command stopped. The remote run may still be active in HCP Terraform.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
 
-            if run.canDiscard || run.canConfirm {
-                HStack {
-                    Spacer()
-                    if run.canDiscard {
-                        Button("Discard plan", action: run.doDiscard)
+                if let notice = run.historyNotice {
+                    Text(notice)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if run.canCancel {
+                    HStack(spacing: 10) {
+                        ProgressView().controlSize(.small)
+                        Text(run.isCanceling ? "Stopping Terraform…" : "Terraform is running…")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(run.usesHCPBackend ? "Stop streaming" : "Cancel", action: run.cancel)
+                            .disabled(run.isCanceling)
                     }
-                    if run.canConfirm {
-                        Button("Confirm and apply") {
-                            run.doApply { _, error in
-                                selection = error == nil ? 2 : 3
-                            }
+                    if run.usesHCPBackend {
+                        Text("Stopping the local command may leave the run active in HCP Terraform.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if run.status == .canceled && run.usesHCPBackend {
+                    Text("The local command stopped. The remote run may still be active in HCP Terraform.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                if run.canDiscard || run.canConfirm {
+                    HStack {
+                        Spacer()
+                        if run.canDiscard {
+                            Button("Discard plan", action: run.doDiscard)
                         }
-                        .buttonStyle(.borderedProminent)
+                        if run.canConfirm {
+                            Button("Confirm and apply") {
+                                run.doApply { _, error in
+                                    selection = error == nil ? 2 : 3
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
                     }
+                    .controlSize(.regular)
                 }
-                .controlSize(.regular)
-            }
-            if run.status == .planned && run.isUnchangedHCPPlan {
-                Text("This workspace is up to date. No apply is needed.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !run.canCancel && (run.apply != nil || run.errorMessage != nil) {
-                Picker("Run phase", selection: $selection) {
-                    Text("Plan").tag(1)
-                    if run.apply != nil { Text("Apply").tag(2) }
-                    if run.errorMessage != nil { Text("Errors").tag(3) }
+                if run.status == .planned && run.isUnchangedHCPPlan {
+                    Text("This workspace is up to date. No apply is needed.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
 
+                if !run.canCancel && (run.apply != nil || run.errorMessage != nil) {
+                    Picker("Run phase", selection: $selection) {
+                        Text("Plan").tag(1)
+                        if run.apply != nil { Text("Apply").tag(2) }
+                        if run.errorMessage != nil { Text("Errors").tag(3) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+            }
             Group {
                 if run.canCancel {
-                    if run.status == .applying, let apply = run.apply {
-                        StructuredLogView(logs: apply)
+                    if run.status == .confirmed || run.status == .applying {
+                        applyView
                     } else if let plan = run.plan {
-                        StructuredLogView(logs: plan)
+                        StructuredLogSections(logs: plan)
                     } else {
                         TextLogView(text: run.textOutput ?? "Waiting for Terraform output…")
+                            .frame(minHeight: 240)
                     }
                 } else {
                     switch selection {
@@ -182,11 +183,19 @@ struct RunPageView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(20)
+        .listStyle(.inset)
         .navigationTitle("Runs")
-        .onAppear { selection = run.errorMessage != nil ? 3 : (run.apply != nil ? 2 : 1) }
+        .onAppear { followCurrentPhase() }
+        .onChange(of: run.id) { _ in followCurrentPhase() }
+        .onChange(of: run.status) { _ in followCurrentPhase() }
+        .onChange(of: run.apply != nil) { _ in followCurrentPhase() }
+        .onChange(of: run.errorMessage) { _ in followCurrentPhase() }
+    }
+
+    private func followCurrentPhase() {
+        selection = RunDisplayPhase.current(status: run.status, hasApply: run.apply != nil,
+                                            hasError: run.errorMessage != nil).rawValue
     }
 }
 
@@ -198,7 +207,7 @@ private struct ScopedPlanAttribute: Identifiable {
     var id: String { "\(owner)\u{0}\(attribute.path)" }
 }
 
-private struct PlanReviewView: View {
+private struct PlanReviewSections: View {
     let plan: StructuredLog
     let diff: TerraformPlan?
     @State private var addressFilter = ""
@@ -228,7 +237,7 @@ private struct PlanReviewView: View {
     }
 
     var body: some View {
-        List {
+        Group {
             if diff != nil {
                 Section {
                     HStack(spacing: 18) {
