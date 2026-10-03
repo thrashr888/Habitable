@@ -10,6 +10,7 @@ BUILD_DIR="${BUILD_DIR:-$(mktemp -d /tmp/habitable-release.XXXXXX)}"
 mkdir -p "$BUILD_DIR/artifacts"
 APP="$BUILD_DIR/Build/Products/Release/Habitable.app"
 ARCHIVE="$BUILD_DIR/artifacts/Habitable-$VERSION-macos-universal.zip"
+swift test --package-path . --scratch-path "$BUILD_DIR/swiftpm"
 xcodebuild -project Habitable.xcodeproj -scheme Habitable \
   -configuration Release -destination 'generic/platform=macOS' \
   -derivedDataPath "$BUILD_DIR" ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
@@ -18,14 +19,7 @@ xcodebuild -project Habitable.xcodeproj -scheme Habitable \
 # Explicit distribution signing prevents local-build entitlements from leaking in.
 codesign --force --options runtime --timestamp --entitlements Habitable/Habitable.entitlements \
   --sign "$SIGNING_IDENTITY" "$APP"
-codesign --verify --deep --strict "$APP"
-ARCHITECTURES="$(lipo -archs "$APP/Contents/MacOS/Habitable")"
-for ARCH in arm64 x86_64; do
-  case " $ARCHITECTURES " in
-    *" $ARCH "*) ;;
-    *) echo "Missing release architecture: $ARCH" >&2; exit 1 ;;
-  esac
-done
+scripts/verify-universal-app.sh "$APP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
 xcrun notarytool submit "$ARCHIVE" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$APP"
@@ -35,4 +29,5 @@ spctl --assess --type execute --verbose=4 "$APP"
 rm -f "$ARCHIVE"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
 (cd "$BUILD_DIR/artifacts" && shasum -a 256 "$(basename "$ARCHIVE")" > SHA256SUMS)
+scripts/verify-universal-app.sh --checksum-file "$BUILD_DIR/artifacts/SHA256SUMS" "$ARCHIVE"
 echo "Release artifacts: $BUILD_DIR/artifacts"

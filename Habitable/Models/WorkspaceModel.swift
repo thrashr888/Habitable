@@ -300,7 +300,7 @@ class Workspace: ObservableObject {
     }
 
     private func appendCommandOutput(_ text: String, redactor: SensitiveInputRedactor) {
-        let safe = redactor.redact(text)
+        let safe = stripTerraformTerminalEscapes(redactor.redact(text))
         textOutput = String(((textOutput ?? "") + safe).suffix(262_144))
     }
 
@@ -709,7 +709,7 @@ class Workspace: ObservableObject {
     }
 
     private func cleanANSI(_ input: String) -> String {
-        return input.replacingOccurrences(of: #"\[([0-9])+m"#, with: "", options: .regularExpression, range: nil)
+        stripTerraformTerminalEscapes(input)
     }
 
     func initialize() {
@@ -741,10 +741,24 @@ class Workspace: ObservableObject {
     }
     
     func validate() {
-        guard !locked, let workingDirectory = self.workingDirectory else { return }
+        validateConfiguration { valid in
+            if valid { self.refreshResources() }
+        }
+    }
+
+    /// Recovery always validates again; it cannot bypass configuration readiness
+    /// or reuse the failed run's artifact.
+    func validateAndQueueRun(onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
+        validateConfiguration { valid in
+            if valid { self.queueRun(onCreated: onCreated) }
+        }
+    }
+
+    private func validateConfiguration(completion: @escaping (Bool) -> Void) {
+        guard !locked, let workingDirectory = self.workingDirectory else { completion(false); return }
         let lease: WorkspaceCommandCoordinator.Lease
         do { lease = try acquireCommandLease() }
-        catch { errorMessage = error.localizedDescription; return }
+        catch { errorMessage = error.localizedDescription; completion(false); return }
         reset()
         locked = true
         let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
@@ -763,9 +777,9 @@ class Workspace: ObservableObject {
                 // when Terraform has no downloaded providers and creates no .terraform folder.
                 self.isInitialized = true
                 self.isValid = true
-                self.refreshResources()
             }
             self.objectWillChange.send()
+            completion(error == nil && res != nil)
         })
     }
     

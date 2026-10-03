@@ -155,6 +155,13 @@ class TerraformRun: ObservableObject, Identifiable {
     private var workspaceDirectory: URL?
     private var planOutput: String?
     private var applyOutput: String?
+    private var planHistoryOutput: String?
+    private var planHistoryOutputTruncated = false
+    private var planHistoryVersionEvent: String?
+    private var applyHistoryOutput: String?
+    private var applyHistoryOutputTruncated = false
+    private var applyHistoryVersionEvent: String?
+    private static let historyTailLimit = 256 * 1024
     private var updatedAt = Date()
     private var planGeneration: Int64?
     private var planExecutionContext: String?
@@ -176,17 +183,68 @@ class TerraformRun: ObservableObject, Identifiable {
         activeCommand?.cancel()
     }
 
+    private func appendHistoryEvent(_ event: JSON, phase: RunStatus) {
+        guard let line = event.rawString(options: [.sortedKeys]) else { return }
+        if event["type"].string == "version" {
+            if phase == .planning {
+                planHistoryVersionEvent = line
+                let (tail, didTrim) = trimmedHistoryTail(planHistoryOutput ?? "", version: line)
+                planHistoryOutput = tail
+                planHistoryOutputTruncated = planHistoryOutputTruncated || didTrim
+            } else {
+                applyHistoryVersionEvent = line
+                let (tail, didTrim) = trimmedHistoryTail(applyHistoryOutput ?? "", version: line)
+                applyHistoryOutput = tail
+                applyHistoryOutputTruncated = applyHistoryOutputTruncated || didTrim
+            }
+            return
+        }
+        var output = phase == .planning ? (planHistoryOutput ?? "") : (applyHistoryOutput ?? "")
+        var truncated = phase == .planning ? planHistoryOutputTruncated : applyHistoryOutputTruncated
+        output.append(line); output.append("\n")
+        let versionEvent = phase == .planning ? planHistoryVersionEvent : applyHistoryVersionEvent
+        let (tail, didTrim) = trimmedHistoryTail(output, version: versionEvent)
+        output = tail
+        truncated = truncated || didTrim
+        if phase == .planning {
+            planHistoryOutput = output
+            planHistoryOutputTruncated = truncated
+        } else {
+            applyHistoryOutput = output
+            applyHistoryOutputTruncated = truncated
+        }
+    }
+
+    private func trimmedHistoryTail(_ output: String, version: String?) -> (String, Bool) {
+        let versionPrefix = version.map { $0 + "\n" } ?? ""
+        let tailLimit = max(0, Self.historyTailLimit - versionPrefix.utf8.count)
+        guard output.utf8.count > tailLimit else { return (output, false) }
+        let excess = output.utf8.count - tailLimit
+        let bytes = Array(output.utf8.dropFirst(excess))
+        guard let newline = bytes.firstIndex(of: 0x0A) else { return ("", true) }
+        return (String(decoding: bytes[(newline + 1)...], as: UTF8.self), true)
+    }
+
+    private func persistedHistoryOutput(tail: String?, version: String?) -> String? {
+        guard let tail, !tail.isEmpty else { return nil }
+        let prefix = version.map { $0 + "\n" } ?? ""
+        return prefix + tail
+    }
+
     private func appendOutput(_ text: String, stream: TerraformOutputStream,
-                              decoder: NDJSONStreamDecoder, log: StructuredLog) {
+                              decoder: NDJSONStreamDecoder, log: StructuredLog, phase: RunStatus) {
         let safe = sensitiveInputRedactor.redact(stripTerraformTerminalEscapes(text))
         guard stream == .stdout else {
             let current = textOutput ?? ""
             let stderr = "[stderr] " + safe
             textOutput = String((current + stderr).suffix(262_144))
-            consumeTerraformEvent(JSON(["type": "log", "@message": stderr.trimmingCharacters(in: .whitespacesAndNewlines)]), into: log)
+            let event = JSON(["type": "log", "@message": stderr.trimmingCharacters(in: .whitespacesAndNewlines)])
+            appendHistoryEvent(event, phase: phase)
+            consumeTerraformEvent(event, into: log)
             return
         }
         decoder.append(safe).forEach { event in
+            appendHistoryEvent(event, phase: phase)
             appendLiveText(event)
             consumeTerraformEvent(event, into: log)
             updateChangeCounts(from: log)
@@ -200,8 +258,9 @@ class TerraformRun: ObservableObject, Identifiable {
         textOutput = String((current + visible + "\n").suffix(262_144))
     }
 
-    private func finishLiveOutput(decoder: NDJSONStreamDecoder, log: StructuredLog) {
+    private func finishLiveOutput(decoder: NDJSONStreamDecoder, log: StructuredLog, phase: RunStatus) {
         decoder.finish().forEach { event in
+            appendHistoryEvent(event, phase: phase)
             appendLiveText(event)
             consumeTerraformEvent(event, into: log)
             updateChangeCounts(from: log)
@@ -234,7 +293,10 @@ class TerraformRun: ObservableObject, Identifiable {
         switch status {
         case .expired: return "This plan is from an earlier session. Queue a new plan before applying."
         case .interrupted: return "This run was recorded before its command finished. Its outcome is unknown; refresh state and review a new plan. It may still be running in another session."
-        default: return isRestored ? "Saved run history · Terraform \(terraformVersion)" : nil
+        default:
+            guard isRestored else { return nil }
+            let truncated = planHistoryOutputTruncated || applyHistoryOutputTruncated
+            return "Saved run history · Terraform \(terraformVersion)" + (truncated ? " · Earlier streamed events omitted" : "")
         }
     }
 
@@ -284,8 +346,12 @@ class TerraformRun: ObservableObject, Identifiable {
         workspaceDirectory = URL(fileURLWithPath: record.workspacePath)
         status = record.status; errorMessage = record.errorMessage
         planOutput = record.planOutput; applyOutput = record.applyOutput
-        plan = record.planOutput.map(handleNDJsonSuccess)
-        apply = record.applyOutput.map(handleNDJsonSuccess)
+        planHistoryOutput = record.planHistoryOutput
+        planHistoryOutputTruncated = record.planHistoryOutputTruncated ?? false
+        applyHistoryOutput = record.applyHistoryOutput
+        applyHistoryOutputTruncated = record.applyHistoryOutputTruncated ?? false
+        plan = record.planHistoryOutput.map(handleNDJsonSuccess) ?? record.planOutput.map(handleNDJsonSuccess)
+        apply = record.applyHistoryOutput.map(handleNDJsonSuccess) ?? record.applyOutput.map(handleNDJsonSuccess)
         added = record.added; changed = record.changed; destroyed = record.destroyed
         isRestored = restored; stored = true
         if restored {
@@ -305,7 +371,12 @@ class TerraformRun: ObservableObject, Identifiable {
                                terraformVersion: terraformVersion,
                                selectedTerraformWorkspace: selectedTerraformWorkspace,
                                backendIdentity: backendIdentity, message: message,
-                               planOutput: planOutput, applyOutput: applyOutput, errorMessage: errorMessage,
+                               planOutput: planOutput, applyOutput: applyOutput,
+                               planHistoryOutput: persistedHistoryOutput(tail: planHistoryOutput, version: planHistoryVersionEvent),
+                               planHistoryOutputTruncated: planHistoryOutputTruncated,
+                               applyHistoryOutput: persistedHistoryOutput(tail: applyHistoryOutput, version: applyHistoryVersionEvent),
+                               applyHistoryOutputTruncated: applyHistoryOutputTruncated,
+                               errorMessage: errorMessage,
                                added: added, changed: changed, destroyed: destroyed)
         return workspace.persistRun(record, directory: directory)
     }
@@ -351,17 +422,25 @@ class TerraformRun: ObservableObject, Identifiable {
         workspace.lock(self)
         let runner = workspace.runner
         textOutput = ""
+        planHistoryOutput = nil
+        planHistoryOutputTruncated = false
+        planHistoryVersionEvent = nil
         let liveLog = StructuredLog()
         let decoder = NDJSONStreamDecoder()
         plan = liveLog
         activeCommand = runner.plan(workingDirectory: directory, runId: id.uuidString,
                     variables: variables,
                     environmentVariables: environmentVariables,
-                    onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog) }) { [self, workspace] output, error in
-            finishLiveOutput(decoder: decoder, log: liveLog)
+                    onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog, phase: .planning) }) { [self, workspace] output, error in
+            finishLiveOutput(decoder: decoder, log: liveLog, phase: .planning)
             planOutput = redactOutput(output ?? error?.output)
             plan = error?.outputTruncated == true || error?.cancelled == true
                 ? liveLog : planOutput.map(handleNDJsonSuccess)
+            if error?.outputTruncated != true && error?.cancelled != true {
+                planHistoryOutput = nil
+                planHistoryOutputTruncated = false
+                planHistoryVersionEvent = nil
+            }
             guard error == nil else {
                 workspace.unlock()
                 lease.release()
@@ -369,6 +448,18 @@ class TerraformRun: ObservableObject, Identifiable {
                 finishCommand()
                 status = error?.cancelled == true ? .canceled : .errored
                 if error?.cancelled != true { workspace.isValid = false }
+                runner.discardPlan(runId: id.uuidString)
+                persist()
+                completion(plan, errorMessage)
+                return
+            }
+            if let schemaError = liveLog.schemaError {
+                workspace.unlock()
+                lease.release()
+                errorMessage = sensitiveInputRedactor.redact(schemaError)
+                finishCommand()
+                status = .errored
+                workspace.isValid = false
                 runner.discardPlan(runId: id.uuidString)
                 persist()
                 completion(plan, errorMessage)
@@ -387,8 +478,17 @@ class TerraformRun: ObservableObject, Identifiable {
                     status = .planned
                     workspace.isValid = true
                 } else {
-                    errorMessage = redactOutput(showError?.message)
-                        ?? "Terraform could not inspect the saved plan."
+                    let formatVersion = showOutput.flatMap { text -> String? in
+                        guard let data = text.data(using: .utf8), let json = try? JSON(data: data) else { return nil }
+                        return json["format_version"].string
+                    }
+                    if showError == nil, let formatVersion,
+                       !supportsTerraformJSONMajor(formatVersion, supported: [1]) {
+                        errorMessage = redactOutput("This saved plan uses unsupported Terraform JSON format version \(formatVersion). Habitable supports format version 1.x.")
+                    } else {
+                        errorMessage = redactOutput(showError?.message)
+                            ?? "Terraform could not inspect the saved plan."
+                    }
                     status = showError?.cancelled == true ? .canceled : .errored
                     if showError?.cancelled != true { workspace.isValid = false }
                     runner.discardPlan(runId: id.uuidString)
@@ -434,12 +534,15 @@ class TerraformRun: ObservableObject, Identifiable {
         workspace.lock(self)
         let runner = workspace.runner
         textOutput = ""
+        applyHistoryOutput = nil
+        applyHistoryOutputTruncated = false
+        applyHistoryVersionEvent = nil
         let liveLog = StructuredLog()
         let decoder = NDJSONStreamDecoder()
         apply = liveLog
         activeCommand = runner.apply(workingDirectory: directory, runId: id.uuidString,
-                                    onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog) }) { [self, workspace] output, error in
-            finishLiveOutput(decoder: decoder, log: liveLog)
+                                    onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog, phase: .applying) }) { [self, workspace] output, error in
+            finishLiveOutput(decoder: decoder, log: liveLog, phase: .applying)
             finishCommand()
             workspace.unlock()
             let coordinationError: String?
@@ -453,6 +556,11 @@ class TerraformRun: ObservableObject, Identifiable {
             applyOutput = redactOutput(output ?? error?.output)
             apply = error?.outputTruncated == true || error?.cancelled == true
                 ? liveLog : applyOutput.map(handleNDJsonSuccess)
+            if error?.outputTruncated != true && error?.cancelled != true {
+                applyHistoryOutput = nil
+                applyHistoryOutputTruncated = false
+                applyHistoryVersionEvent = nil
+            }
             errorMessage = redactOutput(coordinationError ?? error?.message)
             status = coordinationError != nil ? .errored : (error?.cancelled == true ? .canceled : (error == nil ? .applied : .errored))
             workspace.isValid = coordinationError == nil && error == nil

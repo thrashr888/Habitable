@@ -16,6 +16,11 @@ struct RunRecord: Codable, Sendable {
     var message: String?
     var planOutput: String?
     var applyOutput: String?
+    /// Redacted streamed event tails retained when bounded command capture is incomplete.
+    var planHistoryOutput: String? = nil
+    var planHistoryOutputTruncated: Bool? = nil
+    var applyHistoryOutput: String? = nil
+    var applyHistoryOutputTruncated: Bool? = nil
     var errorMessage: String?
     var added: Int?
     var changed: Int?
@@ -58,6 +63,7 @@ struct RunHistoryStore {
     }
 
     private static let pageLimit = 100
+    private static let historyOutputLimit = 256 * 1024
 
     init(directory: URL = Self.defaultDirectory) { self.directory = directory }
 
@@ -148,6 +154,14 @@ struct RunHistoryStore {
         var record = try readPersistedRecord(id: id, workspace: workspace)
         record.planOutput = Self.redactSensitiveOutputs(record.planOutput)
         record.applyOutput = Self.redactSensitiveOutputs(record.applyOutput)
+        record.planHistoryOutput = Self.redactSensitiveOutputs(record.planHistoryOutput)
+        record.applyHistoryOutput = Self.redactSensitiveOutputs(record.applyHistoryOutput)
+        let (planHistory, planWasTrimmed) = Self.boundedHistoryOutput(record.planHistoryOutput)
+        let (applyHistory, applyWasTrimmed) = Self.boundedHistoryOutput(record.applyHistoryOutput)
+        record.planHistoryOutput = planHistory
+        record.applyHistoryOutput = applyHistory
+        record.planHistoryOutputTruncated = record.planHistoryOutputTruncated == true || planWasTrimmed
+        record.applyHistoryOutputTruncated = record.applyHistoryOutputTruncated == true || applyWasTrimmed
         record.errorMessage = Self.redactSensitiveOutputs(record.errorMessage)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -358,6 +372,14 @@ struct RunHistoryStore {
         var safeRecord = record
         safeRecord.planOutput = Self.redactSensitiveOutputs(record.planOutput)
         safeRecord.applyOutput = Self.redactSensitiveOutputs(record.applyOutput)
+        safeRecord.planHistoryOutput = Self.redactSensitiveOutputs(record.planHistoryOutput)
+        safeRecord.applyHistoryOutput = Self.redactSensitiveOutputs(record.applyHistoryOutput)
+        let (planHistory, planWasTrimmed) = Self.boundedHistoryOutput(safeRecord.planHistoryOutput)
+        let (applyHistory, applyWasTrimmed) = Self.boundedHistoryOutput(safeRecord.applyHistoryOutput)
+        safeRecord.planHistoryOutput = planHistory
+        safeRecord.applyHistoryOutput = applyHistory
+        safeRecord.planHistoryOutputTruncated = safeRecord.planHistoryOutputTruncated == true || planWasTrimmed
+        safeRecord.applyHistoryOutputTruncated = safeRecord.applyHistoryOutputTruncated == true || applyWasTrimmed
         safeRecord.errorMessage = Self.redactSensitiveOutputs(record.errorMessage)
         let data = try JSONEncoder().encode(safeRecord)
         let target = recordURL(id: record.id, workspace: workspace)
@@ -404,5 +426,28 @@ struct RunHistoryStore {
                 return sanitized
             }.joined(separator: "\n")
         }
+    }
+
+    private static func boundedHistoryOutput(_ text: String?) -> (String?, Bool) {
+        guard let text else { return (nil, false) }
+        let lines = text.split(separator: "\n").map(String.init)
+        guard !lines.isEmpty else { return (nil, false) }
+        let version = lines.first { line in
+            guard let data = line.data(using: .utf8),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+            return object["type"] as? String == "version"
+        }
+        var keptReversed: [String] = []
+        var usedBytes = (version?.utf8.count ?? 0) + (version == nil ? 0 : 1)
+        for line in lines.reversed() where line != version {
+            let lineBytes = line.utf8.count + 1
+            guard usedBytes + lineBytes <= historyOutputLimit else { continue }
+            keptReversed.append(line)
+            usedBytes += lineBytes
+        }
+        let kept = (version.map { [$0] } ?? []) + Array(keptReversed.reversed())
+        let wasTrimmed = kept.count != lines.count
+        guard !kept.isEmpty else { return (nil, wasTrimmed) }
+        return (kept.joined(separator: "\n") + "\n", wasTrimmed)
     }
 }

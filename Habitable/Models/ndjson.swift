@@ -72,6 +72,15 @@ func handleNDJsonSuccess(_ output: String) -> StructuredLog {
 
 @MainActor
 func consumeTerraformEvent(_ line: JSON, into log: StructuredLog) {
+    guard log.schemaError == nil else { return }
+    if line["type"].string == MessageTypes.Version.rawValue, line["ui"].exists(),
+       !supportsTerraformJSONMajor(line["ui"].string ?? "", supported: [0, 1]) {
+        let uiVersion = line["ui"].string ?? "(invalid)"
+        let message = "Unsupported Terraform machine-readable UI schema version \(uiVersion). Update Habitable before reviewing this run."
+        log.schemaError = message
+        log.appendLog(LogMessage(message: message))
+        return
+    }
     guard let mType = line["type"].string, let type = MessageTypes(rawValue: mType) else {
         log.appendLog(transformLog(line))
         return

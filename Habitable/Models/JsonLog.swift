@@ -88,12 +88,14 @@ struct VersionMessage: tfMessage, Sendable {
     var type: MessageTypes = .Version
     var message: String?
     var version: String?
+    var uiVersion: String?
 }
 
 func transformVersion(_ log: JSON) -> VersionMessage {
     return VersionMessage(
         message: log["@message"].string,
-        version: log["terraform"].string
+        version: log["terraform"].string,
+        uiVersion: log["ui"].string
     )
 }
 

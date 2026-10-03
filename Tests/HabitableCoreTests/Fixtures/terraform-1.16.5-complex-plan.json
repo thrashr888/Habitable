@@ -1,0 +1,316 @@
+{
+  "format_version": "1.2",
+  "output_changes": {
+    "nested": {
+      "actions": [
+        "create"
+      ],
+      "after": {
+        "known": "hello",
+        "secret": "synthetic-qa-secret"
+      },
+      "after_sensitive": true,
+      "after_unknown": {
+        "unknown": true
+      },
+      "before": null,
+      "before_sensitive": true
+    },
+    "removed": {
+      "actions": [
+        "delete"
+      ],
+      "after": null,
+      "after_sensitive": false,
+      "after_unknown": false,
+      "before": "old output",
+      "before_sensitive": false
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "terraform_data.imported",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "after": {
+          "id": "batch-three-import",
+          "input": null,
+          "output": null,
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_sensitive": {},
+        "after_unknown": {},
+        "before": {
+          "id": "fixture-existing-id",
+          "input": null,
+          "output": null,
+          "store": null,
+          "triggers_replace": null
+        },
+        "before_sensitive": {},
+        "importing": {
+          "id": "batch-three-import"
+        }
+      },
+      "mode": "managed",
+      "name": "imported",
+      "provider_name": "terraform.io/builtin/terraform",
+      "type": "terraform_data"
+    },
+    {
+      "address": "terraform_data.renamed",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "after": {
+          "id": "fixture-existing-id",
+          "input": "seed",
+          "output": "seed",
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_sensitive": {},
+        "after_unknown": {},
+        "before": {
+          "id": "fixture-existing-id",
+          "input": "seed",
+          "output": "seed",
+          "store": null,
+          "triggers_replace": null
+        },
+        "before_sensitive": {}
+      },
+      "mode": "managed",
+      "name": "renamed",
+      "previous_address": "terraform_data.legacy",
+      "provider_name": "terraform.io/builtin/terraform",
+      "type": "terraform_data"
+    },
+    {
+      "action_reason": "replace_because_cannot_update",
+      "address": "terraform_data.replacement",
+      "change": {
+        "actions": [
+          "create",
+          "delete"
+        ],
+        "after": {
+          "input": "after",
+          "store": null,
+          "triggers_replace": "after"
+        },
+        "after_sensitive": {},
+        "after_unknown": {
+          "id": true,
+          "output": true
+        },
+        "before": {
+          "id": "fixture-existing-id",
+          "input": "before",
+          "output": "before",
+          "store": null,
+          "triggers_replace": "before"
+        },
+        "before_sensitive": {},
+        "replace_paths": [
+          [
+            "triggers_replace"
+          ]
+        ]
+      },
+      "mode": "managed",
+      "name": "replacement",
+      "provider_name": "terraform.io/builtin/terraform",
+      "type": "terraform_data"
+    },
+    {
+      "address": "module.child[\"east\"].terraform_data.items[0]",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "input": {
+            "label": "east",
+            "nested": [
+              "known",
+              "0"
+            ]
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_sensitive": {
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": {}
+        },
+        "after_unknown": {
+          "id": true,
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": true
+        },
+        "before": null,
+        "before_sensitive": false
+      },
+      "index": 0,
+      "mode": "managed",
+      "module_address": "module.child[\"east\"]",
+      "name": "items",
+      "provider_name": "terraform.io/builtin/terraform",
+      "type": "terraform_data"
+    },
+    {
+      "address": "module.child[\"east\"].terraform_data.items[1]",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "input": {
+            "label": "east",
+            "nested": [
+              "known",
+              "1"
+            ]
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_sensitive": {
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": {}
+        },
+        "after_unknown": {
+          "id": true,
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": true
+        },
+        "before": null,
+        "before_sensitive": false
+      },
+      "index": 1,
+      "mode": "managed",
+      "module_address": "module.child[\"east\"]",
+      "name": "items",
+      "provider_name": "terraform.io/builtin/terraform",
+      "type": "terraform_data"
+    },
+    {
+      "address": "module.child[\"west\"].terraform_data.items[0]",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "input": {
+            "label": "west",
+            "nested": [
+              "known",
+              "0"
+            ]
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_sensitive": {
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": {}
+        },
+        "after_unknown": {
+          "id": true,
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": true
+        },
+        "before": null,
+        "before_sensitive": false
+      },
+      "index": 0,
+      "mode": "managed",
+      "module_address": "module.child[\"west\"]",
+      "name": "items",
+      "provider_name": "terraform.io/builtin/terraform",
+      "type": "terraform_data"
+    },
+    {
+      "address": "module.child[\"west\"].terraform_data.items[1]",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "input": {
+            "label": "west",
+            "nested": [
+              "known",
+              "1"
+            ]
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_sensitive": {
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": {}
+        },
+        "after_unknown": {
+          "id": true,
+          "input": {
+            "nested": [
+              false,
+              false
+            ]
+          },
+          "output": true
+        },
+        "before": null,
+        "before_sensitive": false
+      },
+      "index": 1,
+      "mode": "managed",
+      "module_address": "module.child[\"west\"]",
+      "name": "items",
+      "provider_name": "terraform.io/builtin/terraform",
+      "type": "terraform_data"
+    }
+  ],
+  "terraform_version": "1.16.5"
+}

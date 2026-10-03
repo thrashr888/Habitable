@@ -517,6 +517,44 @@ final class WorkspaceModelTests: XCTestCase {
     }
 
     @MainActor
+    func testValidateAndPlanRecoveryDoesNotStartPlanUntilValidationSucceeds() async throws {
+        let executable = try fakeTerraform("""
+        case "$1" in
+          version) echo '{"terraform_version":"fixture"}' ;;
+          validate)
+            if [ ! -f ready ]; then echo 'Fix configuration before retrying' >&2; exit 1; fi
+            echo 'Valid configuration'
+            ;;
+          plan)
+            touch plan-started
+            echo '{"type":"version","ui":"1.2","terraform":"fixture"}'
+            echo '{"type":"change_summary","changes":{"add":0,"change":0,"remove":0}}'
+            ;;
+          show) echo '{"format_version":"1.0","resource_changes":[]}' ;;
+        esac
+        """)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+            historyStore: RunHistoryStore(directory: root.appendingPathComponent("history")),
+            commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.runner = Runner(executableURL: executable)
+        workspace.workingDirectory = directory
+        workspace.validateAndQueueRun()
+        try await waitUntil { !workspace.locked }
+        XCTAssertFalse(workspace.isValid)
+        XCTAssertTrue(workspace.errorMessage?.contains("Fix configuration") == true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("plan-started").path))
+        XCTAssertTrue(workspace.runs.isEmpty)
+
+        try Data().write(to: directory.appendingPathComponent("ready"))
+        workspace.validateAndQueueRun()
+        try await waitUntil { workspace.runs.first?.status == .planned && !workspace.locked }
+        XCTAssertTrue(workspace.isValid)
+        XCTAssertNil(workspace.errorMessage)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("plan-started").path))
+        XCTAssertEqual(workspace.runs.count, 1)
+    }
+
+    @MainActor
     private func waitUntil(_ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(5)
         while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
