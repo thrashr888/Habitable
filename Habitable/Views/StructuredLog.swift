@@ -67,6 +67,8 @@ struct StructuredLogView: View {
 /// Sections can be embedded beside plan changes so review and events share one scroll area.
 struct StructuredLogSections: View {
     @ObservedObject var logs: StructuredLog
+    var workspaceDirectory: URL? = nil
+    var onOpenDeclaration: ((String, Int) -> Void)? = nil
     @State private var resourceQuery = ""
     @State private var resourceOperation = "All"
     @State private var disclosureState = LiveRunDisclosureState()
@@ -105,7 +107,23 @@ struct StructuredLogSections: View {
             if !logs.diagnostics.isEmpty {
                 Section("Diagnostics") {
                     ForEach(logs.diagnostics, id: \.id) { log in
-                        DiagnosticView(diagnostic: log.diagnostic)
+                        VStack(alignment: .leading, spacing: 8) {
+                            DiagnosticView(diagnostic: log.diagnostic)
+                            if let sourceFile = TerraformDiagnosticSource.currentWorkspaceFile(
+                                filename: log.diagnostic.range?.filename,
+                                workspaceDirectory: workspaceDirectory) {
+                                let line = log.diagnostic.range?.start?.line ?? 0
+                                HStack {
+                                    SafeCopyButton(value: line > 0 ? "\(sourceFile):\(line)" : sourceFile,
+                                                   label: "Copy diagnostic source location", showsTitle: true)
+                                    if let onOpenDeclaration, line > 0 {
+                                        OpenCurrentTerraformSourceButton(filename: sourceFile, line: line,
+                                                                         workspaceDirectory: workspaceDirectory,
+                                                                         onOpen: onOpenDeclaration)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

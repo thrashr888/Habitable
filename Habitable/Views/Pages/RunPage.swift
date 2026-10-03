@@ -48,7 +48,9 @@ struct RunPageView: View {
     var applyView: some View {
         Group {
             if let apply = run.apply {
-                StructuredLogSections(logs: apply)
+                StructuredLogSections(logs: apply,
+                                      workspaceDirectory: workspace.workingDirectory,
+                                      onOpenDeclaration: onOpenDeclaration)
             } else {
                 Text(run.isFinished ? "No apply output was captured for this run." : "Applying…")
             }
@@ -67,10 +69,18 @@ struct RunPageView: View {
                     ForEach(diagnostics, id: \.id) { diagnostic in
                         VStack(alignment: .leading, spacing: 8) {
                             DiagnosticView(diagnostic: diagnostic.diagnostic,
-                                           workingDirectory: workspace.workingDirectory)
+                                           workingDirectory: nil)
                             if let filename = diagnostic.diagnostic.range?.filename {
-                                let location = "\(filename)\(diagnostic.diagnostic.range?.start.map { ":\($0.line)" } ?? "")"
+                                let line = diagnostic.diagnostic.range?.start?.line ?? 0
+                                let location = line > 0 ? "\(filename):\(line)" : filename
                                 SafeCopyButton(value: location, label: "Copy diagnostic source location", showsTitle: true)
+                                if let sourceFile = TerraformDiagnosticSource.currentWorkspaceFile(
+                                    filename: filename, workspaceDirectory: workspace.workingDirectory),
+                                   let onOpenDeclaration, line > 0 {
+                                   OpenCurrentTerraformSourceButton(filename: sourceFile, line: line,
+                                                                     workspaceDirectory: workspace.workingDirectory,
+                                                                     onOpen: onOpenDeclaration)
+                                }
                             }
                         }
                     }
@@ -219,7 +229,9 @@ struct RunPageView: View {
             Group {
                 if run.canCancel && selection == 1 && run.status != .confirmed && run.status != .applying {
                     if let plan = run.plan {
-                        StructuredLogSections(logs: plan)
+                        StructuredLogSections(logs: plan,
+                                              workspaceDirectory: workspace.workingDirectory,
+                                              onOpenDeclaration: onOpenDeclaration)
                     } else {
                         TextLogView(text: run.textOutput ?? "Waiting for Terraform output…")
                             .frame(minHeight: 240)
@@ -248,6 +260,31 @@ struct RunPageView: View {
 
     private func followCurrentPhase() {
         phaseSelection.receive(currentPhase)
+    }
+}
+
+struct OpenCurrentTerraformSourceButton: View {
+    let filename: String
+    let line: Int
+    let workspaceDirectory: URL?
+    let onOpen: (String, Int) -> Void
+    @State private var sourceUnavailable = false
+
+    var body: some View {
+        Button("Open current source") {
+            guard let boundedLine = TerraformDiagnosticSource.boundedLine(
+                line, in: filename, workspaceDirectory: workspaceDirectory) else {
+                sourceUnavailable = true
+                return
+            }
+            onOpen(filename, boundedLine)
+        }
+        .buttonStyle(.borderless)
+        .alert("Source unavailable", isPresented: $sourceUnavailable) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("The current configuration file changed or is no longer available.")
+        }
     }
 }
 
@@ -440,7 +477,9 @@ private struct PlanReviewSections: View {
                     }
                 }
             }
-            StructuredLogSections(logs: plan)
+            StructuredLogSections(logs: plan,
+                                  workspaceDirectory: workspaceDirectory,
+                                  onOpenDeclaration: onOpenDeclaration)
             if diff == nil && plan.diagnostics.isEmpty && plan.versions.isEmpty && plan.resources.isEmpty &&
                 plan.changeSummaries.isEmpty && plan.outputs.isEmpty && plan.logs.isEmpty {
                 Text(plan.isComplete

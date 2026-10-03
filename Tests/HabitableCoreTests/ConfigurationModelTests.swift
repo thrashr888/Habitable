@@ -5,6 +5,17 @@ import Darwin
 
 @MainActor
 final class ConfigurationModelTests: XCTestCase {
+    func testSourceLineRangesUseUTF16OffsetsAcrossUnicodeAndEmptyFinalLine() {
+        let source = "emoji = \"🧪🙂\"\nname = \"café\"\n"
+        let nsSource = source as NSString
+
+        XCTAssertEqual(ConfigurationModel.sourceRange(forLine: 1, in: source), nsSource.range(of: "emoji = \"🧪🙂\""))
+        XCTAssertEqual(ConfigurationModel.sourceRange(forLine: 2, in: source), nsSource.range(of: "name = \"café\""))
+        XCTAssertEqual(ConfigurationModel.sourceRange(forLine: 3, in: source), NSRange(location: nsSource.length, length: 0))
+        XCTAssertNil(ConfigurationModel.sourceRange(forLine: 0, in: source))
+        XCTAssertNil(ConfigurationModel.sourceRange(forLine: 4, in: source))
+    }
+
     func testResourceDeclarationResolutionIsLimitedToKnownRootDeclarations() {
         var metadata = TerraformConfigurationMetadata()
         metadata.resources = [

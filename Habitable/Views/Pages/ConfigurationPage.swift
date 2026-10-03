@@ -7,10 +7,112 @@ private struct EditorLineJump: Equatable {
     let line: Int
 }
 
+private final class TerraformEditorTextView: NSTextView {
+    var saveAction: (() -> Void)?
+
+    private func handleEditorShortcut(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
+              let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        switch key {
+        case "s": saveAction?(); return true
+        case "f":
+            usesFindBar = true
+            let sender = NSMenuItem()
+            sender.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+            performFindPanelAction(sender)
+            return true
+        default: return false
+        }
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        handleEditorShortcut(event) || super.performKeyEquivalent(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if handleEditorShortcut(event) { return }
+        super.keyDown(with: event)
+    }
+}
+
+private final class TerraformLineNumberRulerView: NSRulerView {
+    private weak var textView: NSTextView?
+    private var cachedSource: String?
+    private var lineStarts = [0]
+
+    init(scrollView: NSScrollView, textView: NSTextView) {
+        self.textView = textView
+        super.init(scrollView: scrollView, orientation: .verticalRuler)
+        ruleThickness = 42
+        clientView = textView
+    }
+
+    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        guard let textView, let layout = textView.layoutManager, let container = textView.textContainer else { return }
+        let visible = scrollView?.documentVisibleRect ?? rect
+        let glyphRange = layout.glyphRange(forBoundingRect: visible, in: container)
+        let origin = textView.textContainerOrigin
+        let source = textView.string
+        if cachedSource != source {
+            cachedSource = source
+            let nsSource = source as NSString
+            lineStarts = [0]
+            var searchStart = 0
+            while searchStart < nsSource.length {
+                let found = nsSource.range(of: "\n", options: [],
+                                           range: NSRange(location: searchStart, length: nsSource.length - searchStart))
+                guard found.location != NSNotFound else { break }
+                searchStart = NSMaxRange(found)
+                lineStarts.append(searchStart)
+            }
+        }
+        let nsSource = source as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor.tertiaryLabelColor
+        ]
+        let lineStarts = self.lineStarts
+        var previousLine: Int?
+        layout.enumerateLineFragments(forGlyphRange: glyphRange) { _, usedRect, _, glyphLineRange, _ in
+            let chars = layout.characterRange(forGlyphRange: glyphLineRange, actualGlyphRange: nil)
+            let offset = min(chars.location, nsSource.length)
+            var low = 0, high = lineStarts.count
+            while low < high {
+                let middle = (low + high) / 2
+                if lineStarts[middle] <= offset { low = middle + 1 } else { high = middle }
+            }
+            let line = max(1, low)
+            guard line != previousLine else { return }
+            previousLine = line
+            let label = "\(line)" as NSString
+            let size = label.size(withAttributes: attrs)
+            let textRect = usedRect.offsetBy(dx: origin.x, dy: origin.y)
+            let rulerRect = textView.convert(textRect, to: self)
+            label.draw(at: NSPoint(x: self.ruleThickness - size.width - 8,
+                                   y: rulerRect.minY + max(0, (rulerRect.height - size.height) / 2)),
+                       withAttributes: attrs)
+        }
+        if source.isEmpty || source.hasSuffix("\n") {
+            let extra = layout.extraLineFragmentRect.offsetBy(dx: origin.x, dy: origin.y)
+            if extra.height > 0 {
+                let rulerRect = textView.convert(extra, to: self)
+                let label = "\(lineStarts.count)" as NSString
+                let size = label.size(withAttributes: attrs)
+                label.draw(at: NSPoint(x: ruleThickness - size.width - 8,
+                                       y: rulerRect.minY + max(0, (rulerRect.height - size.height) / 2)),
+                           withAttributes: attrs)
+            }
+        }
+    }
+}
+
 private struct TerraformSourceEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var selection: NSRange
     let jump: EditorLineJump?
+    let onSave: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -20,8 +122,10 @@ private struct TerraformSourceEditor: NSViewRepresentable {
         scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
-        let editor = NSTextView()
+        let editor = TerraformEditorTextView()
+        editor.saveAction = onSave
         editor.delegate = context.coordinator
+        editor.usesFindBar = true
         editor.isRichText = false
         editor.importsGraphics = false
         editor.allowsUndo = true
@@ -42,6 +146,9 @@ private struct TerraformSourceEditor: NSViewRepresentable {
         editor.autoresizingMask = [.width]
         editor.textContainer?.widthTracksTextView = true
         scroll.documentView = editor
+        scroll.hasVerticalRuler = true
+        scroll.rulersVisible = true
+        scroll.verticalRulerView = TerraformLineNumberRulerView(scrollView: scroll, textView: editor)
         context.coordinator.apply(text, to: editor)
         editor.setSelectedRange(selection)
         return scroll
@@ -50,19 +157,17 @@ private struct TerraformSourceEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let editor = scroll.documentView as? NSTextView else { return }
+        (editor as? TerraformEditorTextView)?.saveAction = onSave
         if editor.string != text {
             context.coordinator.apply(text, to: editor)
             editor.setSelectedRange(NSRange(location: min(selection.location, (text as NSString).length), length: 0))
         }
         if let jump, context.coordinator.lastJumpID != jump.id {
             context.coordinator.lastJumpID = jump.id
-            let lines = editor.string.components(separatedBy: "\n")
-            let line = min(max(1, jump.line), max(1, lines.count))
-            let precedingLength = lines.prefix(line - 1).reduce(0) { $0 + $1.utf16.count + 1 }
-            let range = NSRange(location: min(precedingLength, (editor.string as NSString).length),
-                                length: line <= lines.count ? lines[line - 1].utf16.count : 0)
-            editor.setSelectedRange(range)
-            editor.scrollRangeToVisible(range)
+            if let range = ConfigurationModel.sourceRange(forLine: jump.line, in: editor.string) {
+                editor.setSelectedRange(range)
+                editor.scrollRangeToVisible(range)
+            }
         }
     }
 
@@ -113,6 +218,7 @@ private struct TerraformSourceEditor: NSViewRepresentable {
                 }
             }
             storage.endEditing()
+            editor.enclosingScrollView?.verticalRulerView?.needsDisplay = true
             let location = min(selection.location, storage.length)
             let length = min(selection.length, storage.length - location)
             editor.setSelectedRange(NSRange(location: location, length: length))
@@ -131,6 +237,7 @@ struct ConfigurationPage: View {
     @State private var jump: EditorLineJump?
     @State private var showUnsavedDecision = false
     @State private var showWorkspaceDecision = false
+    @State private var goToLineText = ""
 
     init(workspace: Workspace, model: ConfigurationModel,
          declarationRequest: Binding<ConfigurationDeclarationRequest?> = .constant(nil)) {
@@ -282,7 +389,6 @@ struct ConfigurationPage: View {
                             .buttonStyle(.borderedProminent)
                             .accessibilityLabel("Save configuration")
                             .disabled(!model.hasUnsavedChanges || model.hasConflict || workspace.locked || !model.canSaveInCurrentWorkspace)
-                            .keyboardShortcut("s", modifiers: .command)
                         Menu { editorActions } label: { Image(systemName: "ellipsis.circle") }
                             .accessibilityLabel("Configuration actions")
                     }
@@ -312,6 +418,19 @@ struct ConfigurationPage: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
 
+                HStack(spacing: 8) {
+                    Spacer()
+                    TextField("Line", text: $goToLineText)
+                        .frame(width: 72)
+                        .accessibilityLabel("Go to line number")
+                        .onSubmit(goToLine)
+                    Button("Go to Line", action: goToLine)
+                        .disabled(Int(goToLineText) == nil || (Int(goToLineText) ?? 0) < 1)
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+
                 if model.hasConflict {
                     HStack(spacing: 10) {
                         Label("This file changed outside Habitable.", systemImage: "exclamationmark.triangle.fill")
@@ -324,7 +443,7 @@ struct ConfigurationPage: View {
                 }
 
                 VSplitView {
-                    TerraformSourceEditor(text: $model.draft, selection: $model.editorSelection, jump: jump)
+                    TerraformSourceEditor(text: $model.draft, selection: $model.editorSelection, jump: jump, onSave: saveFromEditor)
                         .accessibilityLabel("Terraform source editor")
                         .background(Color(nsColor: .textBackgroundColor))
                         .frame(minHeight: 160, idealHeight: 480, maxHeight: .infinity)
@@ -374,7 +493,6 @@ struct ConfigurationPage: View {
         Button { model.save() } label: { Label("Save", systemImage: "square.and.arrow.down") }
             .buttonStyle(.borderedProminent)
             .disabled(!model.hasUnsavedChanges || model.hasConflict || workspace.locked || !model.canSaveInCurrentWorkspace)
-            .keyboardShortcut("s", modifiers: .command)
     }
     private var resultsPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -503,6 +621,21 @@ struct ConfigurationPage: View {
             model.selectedFile = file
             if let line { jump = EditorLineJump(line: line) }
         }
+    }
+
+    private func goToLine() {
+        guard let line = Int(goToLineText), line > 0,
+              ConfigurationModel.sourceRange(forLine: line, in: model.draft) != nil else {
+            let lineCount = model.draft.reduce(into: 1) { if $1 == "\n" { $0 += 1 } }
+            model.message = "Enter a line from 1 to \(lineCount)."
+            return
+        }
+        jump = EditorLineJump(line: line)
+    }
+
+    private func saveFromEditor() {
+        guard !workspace.locked, !model.hasConflict, model.canSaveInCurrentWorkspace else { return }
+        model.save()
     }
 
     private func consumeDeclarationRequest() {
