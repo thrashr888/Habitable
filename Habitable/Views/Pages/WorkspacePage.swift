@@ -57,6 +57,7 @@ struct WorkspacePage: View {
                                 .textSelection(.enabled)
                             SafeCopyButton(value: directory.path, label: "workspace path")
                         }
+                        ExternalEditorPicker(file: directory, targetLabel: "workspace folder")
                     }
                     Text(workspace.executionContextDisplay)
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -304,7 +305,6 @@ struct WorkspaceReadmePage: View {
                         } else {
                             Text(document.content).textSelection(.enabled)
                         }
-                        ExternalEditorPicker(file: document.file)
                     } else {
                         Text(presentation.loadError ?? "Add a README.md to your repository to describe this workspace and how to use it.")
                             .foregroundStyle(.secondary)
@@ -315,6 +315,9 @@ struct WorkspaceReadmePage: View {
                 HStack {
                     Text("README").font(.headline)
                     Spacer()
+                    if presentation.matches(directory: directory), let document = presentation.prepared?.document {
+                        ExternalEditorPicker(file: document.file, targetLabel: "README")
+                    }
                     Button { refreshID = UUID() } label: { Image(systemName: "arrow.clockwise") }
                         .buttonStyle(.plain)
                         .help("Refresh README")
