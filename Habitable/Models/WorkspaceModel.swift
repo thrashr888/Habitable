@@ -270,6 +270,8 @@ final class WorkspaceCommandCoordinator: Sendable {
 class Workspace: ObservableObject {
     var id = UUID()
 
+    deinit { gitHeadMonitorTask?.cancel() }
+
     @Published var runner: Runner
     @Published var managedTerraformVersion: String?
     private let preferences: UserDefaults
@@ -295,6 +297,10 @@ class Workspace: ObservableObject {
     private var historyRequestID = UUID()
     private var historyActionRequestID = UUID()
     private var gitContextRequestID = UUID()
+    private var gitHeadMonitorTask: Task<Void, Never>?
+    private var gitHeadMonitor = GitHeadMonitor()
+    private var gitHeadMonitorGeneration = UUID()
+    private var gitMonitorSuspended = false
 
     // state
     @Published var locked = false
@@ -327,7 +333,19 @@ class Workspace: ObservableObject {
     @Published var hasVariables = false
 
     // settings
-    @Published var workingDirectory: URL?
+    @Published var workingDirectory: URL? {
+        didSet {
+            let oldPath = oldValue.map(RunHistoryStore.workspacePath)
+            let newPath = workingDirectory.map(RunHistoryStore.workspacePath)
+            guard oldPath != newPath else { return }
+            if let workingDirectory {
+                gitPlanOnCommitEnabled = preferences.bool(forKey: gitPlanPreferenceKey(for: workingDirectory))
+            } else {
+                gitPlanOnCommitEnabled = false
+            }
+            if !gitMonitorSuspended { restartGitHeadMonitor() }
+        }
+    }
 //    @AppStorage("workingDirectory") var workingDirectory: URL?
     @AppStorage("lastWorkingDirectory") var lastWorkingDirectory: URL?
     @Published var description = "" {
@@ -339,6 +357,13 @@ class Workspace: ObservableObject {
     private var descriptionWorkspace: URL?
     private var isLoadingWorkspaceDescription = false
     @Published var autoApply = false
+    @Published var gitPlanOnCommitEnabled = false {
+        didSet {
+            persistGitPlanOnCommitSetting()
+            if !gitMonitorSuspended { restartGitHeadMonitor() }
+        }
+    }
+    @Published private(set) var gitPlanTriggerOutcome: String?
     @Published var terraformVersion = "Checking…"
     @Published var selectedTerraformWorkspace = "default"
     @Published var backendIdentity = "unknown backend"
@@ -446,6 +471,159 @@ class Workspace: ObservableObject {
 
     func updateWorkingDirectory(dir: URL) { _ = openWorkspaceDirectory(dir) }
 
+    private func gitPlanPreferenceKey(for directory: URL) -> String {
+        let path = RunHistoryStore.workspacePath(directory)
+        let digest = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "gitPlanOnCommit.\(digest)"
+    }
+
+    private func persistGitPlanOnCommitSetting() {
+        guard let directory = workingDirectory else { return }
+        preferences.set(gitPlanOnCommitEnabled, forKey: gitPlanPreferenceKey(for: directory))
+    }
+
+    /// Integration hook for the live monitor to surface the latest trigger result in Settings.
+    func reportGitPlanTriggerOutcome(_ outcome: String) {
+        let bounded = String(outcome.prefix(240))
+        guard gitPlanTriggerOutcome != bounded else { return }
+        gitPlanTriggerOutcome = bounded
+    }
+
+    private func restartGitHeadMonitor() {
+        gitHeadMonitorTask?.cancel()
+        gitHeadMonitorTask = nil
+        gitHeadMonitorGeneration = UUID()
+        gitHeadMonitor.reset()
+        guard !gitMonitorSuspended, gitPlanOnCommitEnabled, let directory = workingDirectory else { return }
+        let generation = gitHeadMonitorGeneration
+        let canonicalDirectory = RunHistoryStore.workspacePath(directory)
+        gitHeadMonitorTask = Task { @MainActor [weak self] in
+            let initial = await Self.readGitHeadState(at: directory)
+            guard self?.monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) == true else { return }
+            if let initial {
+                // The first observation is only a baseline. Restarting or enabling never catches up.
+                _ = self?.gitHeadMonitor.observe(head: initial.commit, isDirty: initial.isDirty,
+                                                 isBusy: false, isReady: false)
+            } else {
+                self?.reportGitPlanTriggerOutcome(GitHeadMonitor.Block.unavailable.rawValue)
+            }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                guard self != nil else { return }
+                await self?.pollGitHead(directory: directory, canonicalDirectory: canonicalDirectory,
+                                        generation: generation)
+            }
+        }
+    }
+
+    private static func readGitHeadState(at directory: URL) async -> RunGitContext.HeadState? {
+        await Task.detached(priority: .utility) { RunGitContext.captureHeadState(directory: directory) }.value
+    }
+
+    private func monitorIsCurrent(generation: UUID, canonicalDirectory: String) -> Bool {
+        gitHeadMonitorGeneration == generation && gitPlanOnCommitEnabled
+            && workingDirectory.map(RunHistoryStore.workspacePath) == canonicalDirectory
+    }
+
+    private var gitPlanInputsReady: Bool {
+        isInitialized && !isInspectingInputs && !rememberedInputLoadFailed && historyError == nil
+            && !terraformVariables.contains(where: {
+                $0.isMissingRequiredInput || $0.hasUnresolvedDiscoveredValue
+            })
+    }
+
+    private func pollGitHead(directory: URL, canonicalDirectory: String, generation: UUID) async {
+        guard monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) else { return }
+        guard let state = await Self.readGitHeadState(at: directory) else {
+            if monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) {
+                reportGitPlanTriggerOutcome(GitHeadMonitor.Block.unavailable.rawValue)
+            }
+            return
+        }
+        guard monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) else { return }
+        guard gitHeadMonitor.baseline != nil else {
+            _ = gitHeadMonitor.observe(head: state.commit, isDirty: state.isDirty, isBusy: false, isReady: false)
+            return
+        }
+        let decision = gitHeadMonitor.observe(head: state.commit, isDirty: state.isDirty,
+                                             isBusy: locked || historyLoading,
+                                             isReady: gitPlanInputsReady)
+        switch decision {
+        case .baseline, .unchanged:
+            break
+        case .skipped(_, let reason):
+            reportGitPlanTriggerOutcome(reason.rawValue)
+        case .plan(let commit):
+            await queuePlanForGitHead(commit, directory: directory,
+                                      canonicalDirectory: canonicalDirectory, generation: generation)
+        }
+    }
+
+    private func queuePlanForGitHead(_ initialCommit: String, directory: URL,
+                                     canonicalDirectory: String, generation: UUID) async {
+        var candidate = initialCommit
+        // Keep replacing the candidate while commits arrive. A plan is queued only after
+        // HEAD has stayed clean and stable through the debounce and validation steps.
+        for _ in 0..<6 {
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+            guard monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory),
+                  let state = await Self.readGitHeadState(at: directory),
+                  monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) else { return }
+            guard !state.isDirty else {
+                _ = gitHeadMonitor.observe(head: state.commit, isDirty: true, isBusy: false, isReady: false)
+                reportGitPlanTriggerOutcome(GitHeadMonitor.Block.dirty.rawValue)
+                return
+            }
+            if state.commit != candidate {
+                candidate = state.commit
+                _ = gitHeadMonitor.observe(head: candidate, isDirty: false, isBusy: false, isReady: false)
+                continue
+            }
+            guard !locked, !historyLoading else {
+                reportGitPlanTriggerOutcome(GitHeadMonitor.Block.busy.rawValue)
+                return
+            }
+            guard gitPlanInputsReady else {
+                reportGitPlanTriggerOutcome(GitHeadMonitor.Block.notReady.rawValue)
+                return
+            }
+
+            let isValid = await withCheckedContinuation { continuation in
+                validateConfiguration { continuation.resume(returning: $0) }
+            }
+            guard monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) else { return }
+            guard isValid, gitPlanInputsReady else {
+                reportGitPlanTriggerOutcome(GitHeadMonitor.Block.notReady.rawValue)
+                return
+            }
+            guard !locked, !historyLoading else {
+                reportGitPlanTriggerOutcome(GitHeadMonitor.Block.busy.rawValue)
+                return
+            }
+            guard let verified = await Self.readGitHeadState(at: directory),
+                  monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) else { return }
+            guard !verified.isDirty else {
+                _ = gitHeadMonitor.observe(head: verified.commit, isDirty: true, isBusy: false, isReady: false)
+                reportGitPlanTriggerOutcome(GitHeadMonitor.Block.dirty.rawValue)
+                return
+            }
+            if verified.commit != candidate {
+                candidate = verified.commit
+                _ = gitHeadMonitor.observe(head: candidate, isDirty: false, isBusy: false, isReady: false)
+                continue
+            }
+            reportGitPlanTriggerOutcome("Starting a plan for Git commit \(String(candidate.prefix(12)))…")
+            let queuedCommit = candidate
+            queueRun("Git HEAD changed to \(String(candidate.prefix(12)))", triggerSource: "git-commit", planOnly: true,
+                     onCreated: { [weak self] _ in
+                guard let self, self.monitorIsCurrent(generation: generation, canonicalDirectory: canonicalDirectory) else { return }
+                self.reportGitPlanTriggerOutcome("Planning Git commit \(String(queuedCommit.prefix(12))).")
+            })
+            return
+        }
+        reportGitPlanTriggerOutcome("Skipped: Git HEAD kept changing during the trigger window.")
+    }
+
     @discardableResult
     func openWorkspaceDirectory(_ dir: URL) -> Bool {
         workspaceOpenError = nil
@@ -466,6 +644,11 @@ class Workspace: ObservableObject {
         catch { workspaceOpenError = "Remembered workspace inputs could not be loaded. \(error.localizedDescription)"; return false }
         coordinationRecoveryNotice = nil
         guard retryUnsavedRuns() else { workspaceOpenError = historyError ?? "Unsaved run history could not be saved."; return false }
+        gitMonitorSuspended = true
+        defer {
+            gitMonitorSuspended = false
+            restartGitHeadMonitor()
+        }
         for run in runs { run.doDiscard() }
         guard retryUnsavedRuns() else { workspaceOpenError = historyError ?? "Unsaved run history could not be saved."; return false }
         runs = []
@@ -497,6 +680,8 @@ class Workspace: ObservableObject {
         historyBeforeFilter = nil
         historyTextFilter = ""
         workingDirectory = dir
+        gitPlanOnCommitEnabled = preferences.bool(forKey: gitPlanPreferenceKey(for: dir))
+        gitPlanTriggerOutcome = nil
         latestOverviewRun = nil
         currentGitContext = nil
         refreshExecutionContext()
@@ -906,7 +1091,7 @@ class Workspace: ObservableObject {
 //    }
     
     func didPlan(run: TerraformRun, plan: StructuredLog) {
-        if self.autoApply && !rememberedInputLoadFailed {
+        if self.autoApply && !run.planOnly && !rememberedInputLoadFailed {
             run.doApply({ apply, error in
                 
             })
@@ -1114,7 +1299,7 @@ class Workspace: ObservableObject {
         return true
     }
 
-    func queueRun(_ message: String? = nil, triggerSource: String = "interactive",
+    func queueRun(_ message: String? = nil, triggerSource: String = "interactive", planOnly: Bool = false,
                   onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
         guard !locked, !historyLoading, !isInspectingInputs, isValid, historyError == nil,
               !rememberedInputLoadFailed, let directory = workingDirectory else { return }
@@ -1139,7 +1324,7 @@ class Workspace: ObservableObject {
             let result: Result<(RunRecord, RunHistoryStore.Page), Error> = Result {
                 let record = try store.create(workspace: directory, terraformVersion: terraformVersion, message: message,
                                               selectedTerraformWorkspace: selectedTerraformWorkspace, backendIdentity: backendIdentity,
-                                              triggerSource: triggerSource)
+                                              triggerSource: triggerSource, planOnly: planOnly)
                 do {
                     let page = try store.loadFilteredPage(workspace: directory, offset: 0, limit: pageLimit,
                                                           status: status, after: after, before: before, text: text)

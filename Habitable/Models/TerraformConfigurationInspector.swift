@@ -150,11 +150,142 @@ enum TerraformConfigurationInspector {
     private struct MetadataModuleCall: Decodable { var name: String; var source: String; var version: String?; var pos: Position? }
     private struct MetadataResource: Decodable { var address: String; var pos: Position? }
 
-    /// Resolves only root-module declarations represented by config-inspect metadata.
-    /// Child-module, generated, and otherwise unindexed addresses intentionally have no result.
+    /// Resolves declarations represented by config-inspect metadata for the current module.
     static func declaration(for address: String, in metadata: TerraformConfigurationMetadata) -> TerraformResourceDeclaration? {
-        guard !address.hasPrefix("module."), let declarationKey = rootDeclarationKey(for: address) else { return nil }
+        guard let declarationKey = rootDeclarationKey(for: address) else { return nil }
         return metadata.resources.first { $0.address == declarationKey && $0.sourceLine != nil }
+    }
+
+    /// Resolves addresses through config-inspect metadata at each module boundary. The
+    /// helper sees configuration only; no variable values or environment are read.
+    static func declarations(for addresses: [String], directory: URL,
+                             helper: URL? = nil) -> [String: TerraformResourceDeclaration] {
+        let maximumAddressLength = 16_384
+        let maximumModuleDepth = 7
+        let maximumInspectedDirectories = 12
+        let resolutionDeadline = ProcessInfo.processInfo.systemUptime + 20
+        let isCanceledOrExpired: @Sendable () -> Bool = {
+            Task.isCancelled || ProcessInfo.processInfo.systemUptime >= resolutionDeadline
+        }
+        let root = directory.standardizedFileURL.resolvingSymlinksInPath()
+        var metadataByDirectory: [String: TerraformConfigurationMetadata] = [:]
+        func metadata(at directory: URL) -> TerraformConfigurationMetadata {
+            let key = directory.path
+            if let cached = metadataByDirectory[key] { return cached }
+            guard metadataByDirectory.count < maximumInspectedDirectories, !isCanceledOrExpired() else { return TerraformConfigurationMetadata() }
+            let value = inspectMetadata(directory: directory, helper: helper, shouldCancel: isCanceledOrExpired)
+            metadataByDirectory[key] = value
+            return value
+        }
+
+        var resolved: [String: TerraformResourceDeclaration] = [:]
+        for address in Set(addresses) {
+            guard !isCanceledOrExpired() else { break }
+            guard address.utf8.count <= maximumAddressLength else { continue }
+            guard let segments = addressSegments(address) else { continue }
+            var currentDirectory = root
+            var moduleIndex = 0
+            var pathIsSafe = true
+            var moduleDepth = 0
+            while moduleIndex < segments.count, segments[moduleIndex].name == "module" {
+                guard moduleIndex + 1 < segments.count else { pathIsSafe = false; break }
+                moduleDepth += 1
+                guard moduleDepth <= maximumModuleDepth else { pathIsSafe = false; break }
+                let call = segments[moduleIndex + 1]
+                let currentMetadata = metadata(at: currentDirectory)
+                guard let source = currentMetadata.modules.first(where: { $0.name == call.name })?.source,
+                      let child = localModuleDirectory(source: source, relativeTo: currentDirectory, workspace: root) else {
+                    pathIsSafe = false
+                    break
+                }
+                currentDirectory = child
+                moduleIndex += 2
+            }
+            guard pathIsSafe, moduleIndex < segments.count else { continue }
+            let resourceAddress = segments[moduleIndex...].map(\.raw).joined(separator: ".")
+            guard let key = rootDeclarationKey(for: resourceAddress),
+                  let declaration = metadata(at: currentDirectory).resources.first(where: { $0.address == key }),
+                  let line = declaration.sourceLine,
+                  let relativeFile = safeRelativeSourceFile(declaration.sourceFile, moduleDirectory: currentDirectory, workspace: root) else { continue }
+            resolved[address] = TerraformResourceDeclaration(address: declaration.address,
+                sourceFile: relativeFile, sourceLine: line)
+        }
+        return resolved
+    }
+
+    private struct AddressSegment { let raw: String; let name: String }
+
+    /// Splits Terraform addresses only at dots outside quoted instance keys. This
+    /// preserves dotted and Unicode keys while avoiding assumptions about key text.
+    private static func addressSegments(_ address: String) -> [AddressSegment]? {
+        var rawSegments: [String] = [], current = ""
+        var depth = 0, quoted = false, escaped = false
+        for character in address {
+            if quoted {
+                current.append(character)
+                if escaped { escaped = false }
+                else if character == "\\" { escaped = true }
+                else if character == "\"" { quoted = false }
+            } else if character == "\"" { quoted = true; current.append(character) }
+            else if character == "[" { depth += 1; current.append(character) }
+            else if character == "]" { depth -= 1; guard depth >= 0 else { return nil }; current.append(character) }
+            else if character == "." && depth == 0 { rawSegments.append(current); current = "" }
+            else { current.append(character) }
+        }
+        guard depth == 0, !quoted else { return nil }
+        rawSegments.append(current)
+        guard rawSegments.allSatisfy({ !$0.isEmpty }) else { return nil }
+        return rawSegments.map { raw in AddressSegment(raw: raw, name: String(raw.prefix { $0 != "[" })) }
+    }
+
+    private static func localModuleDirectory(source: String, relativeTo parent: URL, workspace: URL) -> URL? {
+        guard source.hasPrefix("./") || source.hasPrefix("../"),
+              !source.contains("\\"), !source.contains(":") else { return nil }
+        let parts = source.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard !parts.isEmpty, !parts.contains(where: { $0.hasPrefix(".") && $0 != "." && $0 != ".." }) else { return nil }
+        let candidate = parent.appendingPathComponent(source).standardizedFileURL
+        let canonical = candidate.resolvingSymlinksInPath()
+        guard isInside(canonical, root: workspace), canonical != workspace,
+              !containsSymlink(from: workspace, to: candidate),
+              (try? candidate.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+        return canonical
+    }
+
+    private static func safeRelativeSourceFile(_ filename: String, moduleDirectory: URL, workspace: URL) -> String? {
+        let candidate = filename.hasPrefix("/")
+            ? URL(fileURLWithPath: filename)
+            : moduleDirectory.appendingPathComponent(filename)
+        let canonical = candidate.standardizedFileURL.resolvingSymlinksInPath()
+        guard isInside(canonical, root: workspace), !containsSymlink(from: workspace, to: candidate),
+              (canonical.pathExtension == "tf" || canonical.lastPathComponent.hasSuffix(".tf.json")),
+              FileManager.default.fileExists(atPath: canonical.path),
+              !canonical.lastPathComponent.hasPrefix("."),
+              let relative = relativePath(canonical, from: workspace),
+              relative.split(separator: "/").count <= 8,
+              !relative.split(separator: "/").contains(where: { $0.hasPrefix(".") || $0 == "vendor" }),
+              let values = try? canonical.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true, let size = values.fileSize, size <= 1_048_576 else { return nil }
+        return relative
+    }
+
+    private static func isInside(_ path: URL, root: URL) -> Bool {
+        path.path == root.path || path.path.hasPrefix(root.path.hasSuffix("/") ? root.path : root.path + "/")
+    }
+
+    private static func relativePath(_ path: URL, from root: URL) -> String? {
+        guard isInside(path, root: root), path.path != root.path else { return nil }
+        return String(path.path.dropFirst(root.path.count + (root.path.hasSuffix("/") ? 0 : 1)))
+    }
+
+    private static func containsSymlink(from root: URL, to target: URL) -> Bool {
+        guard isInside(target.standardizedFileURL, root: root) else { return true }
+        let relative = relativePath(target.standardizedFileURL, from: root) ?? ""
+        var cursor = root
+        for component in relative.split(separator: "/") {
+            cursor.appendPathComponent(String(component))
+            if (try? cursor.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { return true }
+        }
+        return false
     }
 
     private static func rootDeclarationKey(for address: String) -> String? {
@@ -303,14 +434,15 @@ enum TerraformConfigurationInspector {
 
     /// Reads declaration-only module context. Call from a detached task; the same
     /// bounded helper runner is used, and this operation never reads tfvars or env values.
-    static func inspectMetadata(directory: URL, helper overrideHelper: URL? = nil) -> TerraformConfigurationMetadata {
+    static func inspectMetadata(directory: URL, helper overrideHelper: URL? = nil,
+                                shouldCancel: @Sendable () -> Bool = { false }) -> TerraformConfigurationMetadata {
         var result = TerraformConfigurationMetadata()
         guard let helper = overrideHelper ?? helperURL else {
             result.diagnostics.append("Terraform configuration inspection helper is unavailable.")
             return result
         }
         do {
-            let data = try run(helper, arguments: ["metadata", directory.path])
+            let data = try run(helper, arguments: ["metadata", directory.path], shouldCancel: shouldCancel)
             let metadata = try JSONDecoder().decode(MetadataResponse.self, from: data)
             result.inputs = (metadata.variables ?? [:]).values.map { item in
                 let path = item.pos?.filename ?? "(unknown source)"

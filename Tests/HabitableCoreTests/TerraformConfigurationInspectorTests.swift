@@ -100,4 +100,51 @@ final class TerraformConfigurationInspectorTests: XCTestCase {
         XCTAssertFalse(TerraformConfigurationInspector.inspect(directory: directory, environment: [:], helper: helper)
             .declarations.contains { $0.name == "temporary" })
     }
+
+    func testDeclarationResolutionTraversesLocalNestedModulesAndInstanceKeys() throws {
+        let helper = try helper()
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/Playground", isDirectory: true)
+        let addresses = [
+            "terraform_data.worker[0]",
+            "module.region[\"east.zone\"].terraform_data.zone[\"東京\"]",
+            "module.region[\"東京.研究\"].module.metrics.terraform_data.collector"
+        ]
+
+        let declarations = TerraformConfigurationInspector.declarations(
+            for: addresses, directory: fixture, helper: helper)
+
+        XCTAssertEqual(declarations[addresses[0]]?.sourceFile, "main.tf")
+        XCTAssertEqual(declarations[addresses[1]]?.sourceFile, "modules/region/main.tf")
+        XCTAssertEqual(declarations[addresses[2]]?.sourceFile, "modules/metrics/main.tf")
+        XCTAssertNotNil(declarations[addresses[0]]?.sourceLine)
+        XCTAssertNotNil(declarations[addresses[1]]?.sourceLine)
+        XCTAssertNotNil(declarations[addresses[2]]?.sourceLine)
+    }
+
+    func testModuleDeclarationResolutionRejectsExternalAndHiddenSources() throws {
+        let helper = try helper()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable modules \(UUID())", isDirectory: true)
+        let child = root.appendingPathComponent("child", isDirectory: true)
+        let hidden = root.appendingPathComponent(".hidden", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: hidden, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try #"module "child" { source = "./child" }"#.write(to: root.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try #"resource "terraform_data" "inside" {}"#.write(to: child.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try #"resource "terraform_data" "inside" {}"#.write(to: hidden.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+
+        let inside = TerraformConfigurationInspector.declarations(
+            for: ["module.child.terraform_data.inside"], directory: root, helper: helper)
+        XCTAssertNotNil(inside["module.child.terraform_data.inside"])
+
+        try #"module "child" { source = "../outside" }"#.write(to: root.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        XCTAssertNil(TerraformConfigurationInspector.declarations(
+            for: ["module.child.terraform_data.inside"], directory: root, helper: helper)["module.child.terraform_data.inside"])
+
+        try #"module "child" { source = "./.hidden" }"#.write(to: root.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        XCTAssertNil(TerraformConfigurationInspector.declarations(
+            for: ["module.child.terraform_data.inside"], directory: root, helper: helper)["module.child.terraform_data.inside"])
+    }
 }

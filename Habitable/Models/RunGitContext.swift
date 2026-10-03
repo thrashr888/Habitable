@@ -1,9 +1,49 @@
 import Foundation
 import Darwin
 
+/// Stateful decision core for a live HEAD watcher. The caller owns polling and lifecycle;
+/// this value records a baseline once and never treats the initial/restart HEAD as a change.
+struct GitHeadMonitor: Sendable {
+    enum Block: String, Equatable, Sendable {
+        case dirty = "Skipped: working tree has uncommitted changes."
+        case busy = "Skipped: another Terraform command is active."
+        case notReady = "Skipped: initialize and resolve required inputs before planning."
+        case unavailable = "Skipped: Git HEAD could not be read."
+    }
+    enum Decision: Equatable, Sendable {
+        case baseline(String)
+        case unchanged
+        case plan(String)
+        case skipped(String, Block)
+    }
+
+    private(set) var baseline: String?
+
+    mutating func observe(head: String?, isDirty: Bool, isBusy: Bool, isReady: Bool) -> Decision {
+        guard let head, !head.isEmpty else { return .skipped("", .unavailable) }
+        guard let baseline else {
+            self.baseline = head
+            return .baseline(head)
+        }
+        guard head != baseline else { return .unchanged }
+        // Advance even when blocked so this exact HEAD is not replayed on every poll.
+        self.baseline = head
+        if isDirty { return .skipped(head, .dirty) }
+        if isBusy { return .skipped(head, .busy) }
+        if !isReady { return .skipped(head, .notReady) }
+        return .plan(head)
+    }
+
+    mutating func reset() { baseline = nil }
+}
+
 /// A bounded, best-effort repository snapshot. Git is invoked without a shell and with
 /// prompts/network access disabled; missing or slow metadata never blocks Terraform runs.
 struct RunGitContext: Equatable, Sendable {
+    struct HeadState: Equatable, Sendable {
+        let commit: String
+        let isDirty: Bool
+    }
     let branch: String?
     let commit: String
     var subject: String? = nil
@@ -27,6 +67,18 @@ struct RunGitContext: Equatable, Sendable {
             .flatMap(safeRemoteURL)
         return Self(branch: branch, commit: commit.lowercased(), subject: subject,
                     dirty: dirty, remoteURL: remote)
+    }
+
+    /// Lightweight watcher snapshot: no `git show`, remote lookup, or branch metadata.
+    static func captureHeadState(directory: URL) -> HeadState? {
+        guard let rawCommit = runGit(["rev-parse", "--verify", "HEAD"], at: directory, timeout: 0.6)?.first,
+              isCommit(rawCommit),
+              let status = runGit(["status", "--porcelain=v1", "--untracked-files=normal"], at: directory, timeout: 0.8) else {
+            return nil
+        }
+        guard let verifiedCommit = runGit(["rev-parse", "--verify", "HEAD"], at: directory, timeout: 0.6)?.first,
+              verifiedCommit.caseInsensitiveCompare(rawCommit) == .orderedSame else { return nil }
+        return HeadState(commit: rawCommit.lowercased(), isDirty: !status.isEmpty)
     }
 
     private static func readGitMetadata(directory: URL) -> Self? {

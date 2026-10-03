@@ -4,7 +4,7 @@ resource "terraform_data" "endpoint" {
   input = { region = var.name, generation = var.generation, enabled = true }
 }
 resource "terraform_data" "zone" {
-  for_each = toset(["zone.a", "zone.b"])
+  for_each = toset(["zone.a", "東京"])
   input    = { region = var.name, zone = each.key, generation = var.generation }
 }
 module "metrics" {

@@ -167,6 +167,7 @@ private struct TerraformSourceEditor: NSViewRepresentable {
             if let range = ConfigurationModel.sourceRange(forLine: jump.line, in: editor.string) {
                 editor.setSelectedRange(range)
                 editor.scrollRangeToVisible(range)
+                editor.window?.makeFirstResponder(editor)
             }
         }
     }
@@ -326,11 +327,11 @@ struct ConfigurationPage: View {
             })) {
                 ForEach(model.files) { file in
                     HStack {
-                        Label(file.name, systemImage: "doc.text")
+                        Label(file.displayPath, systemImage: "doc.text")
                             .tag(file.id)
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        SafeCopyButton(value: file.url.path, label: "Copy configuration path for \(file.name)")
+                        SafeCopyButton(value: file.url.path, label: "Copy configuration path for \(file.displayPath)")
                     }
                 }
             }
@@ -356,7 +357,7 @@ struct ConfigurationPage: View {
                 Picker("Configuration file", selection: Binding(get: { model.selectedFile?.id ?? "" }, set: { id in
                     if let file = model.files.first(where: { $0.id == id }) { requestSelection(file) }
                 })) {
-                    ForEach(model.files) { file in Text(file.name).tag(file.id) }
+                    ForEach(model.files) { file in Text(file.displayPath).tag(file.id) }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
@@ -378,7 +379,7 @@ struct ConfigurationPage: View {
                 if compact {
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(file.name).font(.headline).lineLimit(1)
+                            Text(file.displayPath).font(.headline).lineLimit(1)
                             if model.hasUnsavedChanges {
                                 Label("Unsaved changes", systemImage: "pencil.circle").font(.caption).foregroundStyle(.orange)
                             }
@@ -396,7 +397,7 @@ struct ConfigurationPage: View {
                 } else {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(file.name).font(.headline)
+                        Text(file.displayPath).font(.headline)
                         Text(file.url.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     SafeCopyButton(value: file.url.path, label: "Copy configuration path")
@@ -543,7 +544,13 @@ struct ConfigurationPage: View {
                                 if let file = diagnostic.file {
                                     HStack {
                                         Button {
-                                            if let match = model.file(matching: file) { requestSelection(match, line: diagnostic.line) }
+                                            if let match = model.file(matching: file) {
+                                                requestSelection(match, line: diagnostic.line)
+                                            } else {
+                                                model.message = file.contains(".terraform") || file.contains(".git") || file.contains("vendor")
+                                                    ? "This diagnostic points to downloaded module or provider files. Those cache files are unavailable for editing."
+                                                    : "This diagnostic source is outside the browsable local workspace files."
+                                            }
                                         } label: {
                                             Label("\(file)\(diagnostic.line.map { ":\($0)" } ?? "")", systemImage: "arrow.up.left")
                                                 .font(.caption.monospaced())
@@ -626,7 +633,7 @@ struct ConfigurationPage: View {
     private func goToLine() {
         guard let line = Int(goToLineText), line > 0,
               ConfigurationModel.sourceRange(forLine: line, in: model.draft) != nil else {
-            let lineCount = model.draft.reduce(into: 1) { if $1 == "\n" { $0 += 1 } }
+            let lineCount = model.draft.utf8.reduce(into: 1) { if $1 == 0x0A { $0 += 1 } }
             model.message = "Enter a line from 1 to \(lineCount)."
             return
         }

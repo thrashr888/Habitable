@@ -14,7 +14,36 @@ final class TerraformDiagnosticSourceTests: XCTestCase {
         XCTAssertNil(TerraformDiagnosticSource.boundedLine(0, in: "main.tf", workspaceDirectory: directory))
     }
 
-    func testRejectsURLTraversalNestedFilesAndNonConfigurationFiles() throws {
+    func testResolvesLocalChildModuleByRelativePathAndRejectsDownloadedCaches() throws {
+        let directory = try makeDirectory()
+        let module = directory.appendingPathComponent("modules/network", isDirectory: true)
+        let downloaded = directory.appendingPathComponent(".terraform/modules/downloaded", isDirectory: true)
+        try FileManager.default.createDirectory(at: module, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: downloaded, withIntermediateDirectories: true)
+        try "resource {}\noutput {}\n".write(to: module.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try "resource {}".write(to: downloaded.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(TerraformDiagnosticSource.currentWorkspaceFile(filename: "modules/network/main.tf", workspaceDirectory: directory),
+                       "modules/network/main.tf")
+        XCTAssertEqual(TerraformDiagnosticSource.boundedLine(2, in: "modules/network/main.tf", workspaceDirectory: directory), 2)
+        XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: ".terraform/modules/downloaded/main.tf", workspaceDirectory: directory))
+        XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: "modules/network/../../main.tf", workspaceDirectory: directory))
+    }
+
+    func testRejectsDeepAndSymlinkedChildSources() throws {
+        let directory = try makeDirectory()
+        let outside = try makeDirectory()
+        try "resource {}".write(to: outside.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        let linkedDir = directory.appendingPathComponent("modules/linked", isDirectory: true)
+        try FileManager.default.createDirectory(at: linkedDir.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linkedDir, withDestinationURL: outside)
+        let tooDeep = "a/b/c/d/e/f/g/h/i/main.tf"
+
+        XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: "modules/linked/main.tf", workspaceDirectory: directory))
+        XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: tooDeep, workspaceDirectory: directory))
+    }
+
+    func testRejectsURLTraversalAndNonConfigurationFilesButAllowsLocalChildSources() throws {
         let directory = try makeDirectory()
         let nested = directory.appendingPathComponent("child", isDirectory: true)
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
@@ -24,7 +53,7 @@ final class TerraformDiagnosticSourceTests: XCTestCase {
 
         XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: "https://example.test/main.tf", workspaceDirectory: directory))
         XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: "../outside.tf", workspaceDirectory: directory))
-        XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: "child/main.tf", workspaceDirectory: directory))
+        XCTAssertEqual(TerraformDiagnosticSource.currentWorkspaceFile(filename: "child/main.tf", workspaceDirectory: directory), "child/main.tf")
         XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: "terraform.tfstate", workspaceDirectory: directory))
         XCTAssertNil(TerraformDiagnosticSource.currentWorkspaceFile(filename: "main.TF", workspaceDirectory: directory))
     }

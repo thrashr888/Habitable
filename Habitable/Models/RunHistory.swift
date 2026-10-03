@@ -36,6 +36,8 @@ struct RunRecord: Codable, Sendable {
     var gitDirty: Bool? = nil
     var gitRemoteURL: String? = nil
     var triggerSource: String? = nil
+    /// A persisted run-specific safety policy. Nil in older records means ordinary behavior.
+    var planOnly: Bool? = nil
 }
 
 struct RunHistoryError: LocalizedError {
@@ -240,7 +242,7 @@ struct RunHistoryStore {
 
     func create(workspace: URL, terraformVersion: String, message: String?,
                 selectedTerraformWorkspace: String? = nil, backendIdentity: String? = nil,
-                triggerSource: String? = "interactive") throws -> RunRecord {
+                triggerSource: String? = "interactive", planOnly: Bool = false) throws -> RunRecord {
         try withLock(folder: workspaceDirectory(workspace)) {
             var index = try readOrBuildIndex(workspace: workspace)
             let now = Date()
@@ -249,7 +251,7 @@ struct RunHistoryStore {
                                    updatedAt: now, status: .pending, terraformVersion: terraformVersion,
                                    selectedTerraformWorkspace: selectedTerraformWorkspace,
                                    backendIdentity: backendIdentity, message: message,
-                                   triggerSource: triggerSource)
+                                   triggerSource: triggerSource, planOnly: planOnly ? true : nil)
             try markDirty(nextNumber: index.nextNumber, workspace: workspace)
             try write(record, workspace: workspace)
             index.nextNumber = record.number + 1

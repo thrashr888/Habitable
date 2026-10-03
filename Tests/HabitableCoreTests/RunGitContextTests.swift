@@ -2,6 +2,26 @@ import XCTest
 @testable import HabitableCore
 
 final class RunGitContextTests: XCTestCase {
+    func testHeadMonitorBaselinesAndDeduplicatesChanges() {
+        var monitor = GitHeadMonitor()
+        XCTAssertEqual(monitor.observe(head: "a", isDirty: false, isBusy: false, isReady: true), .baseline("a"))
+        XCTAssertEqual(monitor.observe(head: "a", isDirty: false, isBusy: false, isReady: true), .unchanged)
+        XCTAssertEqual(monitor.observe(head: "b", isDirty: false, isBusy: false, isReady: true), .plan("b"))
+        XCTAssertEqual(monitor.observe(head: "b", isDirty: false, isBusy: false, isReady: true), .unchanged)
+        monitor.reset()
+        XCTAssertEqual(monitor.observe(head: "b", isDirty: false, isBusy: false, isReady: true), .baseline("b"))
+    }
+
+    func testHeadMonitorReportsBlockedChangesWithoutReplayingThem() {
+        var monitor = GitHeadMonitor()
+        _ = monitor.observe(head: "a", isDirty: false, isBusy: false, isReady: true)
+        XCTAssertEqual(monitor.observe(head: "b", isDirty: true, isBusy: false, isReady: true), .skipped("b", .dirty))
+        XCTAssertEqual(monitor.observe(head: "b", isDirty: false, isBusy: false, isReady: true), .unchanged)
+        XCTAssertEqual(monitor.observe(head: "c", isDirty: false, isBusy: true, isReady: true), .skipped("c", .busy))
+        XCTAssertEqual(monitor.observe(head: "d", isDirty: false, isBusy: false, isReady: false), .skipped("d", .notReady))
+        XCTAssertEqual(monitor.observe(head: nil, isDirty: false, isBusy: false, isReady: true), .skipped("", .unavailable))
+    }
+
     func testNonRepositoryTerminatesAtFilesystemRoot() throws {
         XCTAssertNil(RunGitContext.capture(directory: URL(fileURLWithPath: "/")))
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -65,12 +85,14 @@ final class RunGitContextTests: XCTestCase {
         XCTAssertEqual(clean.dirty, false)
         XCTAssertEqual(clean.remoteURL, "https://github.com/example/repo")
         XCTAssertFalse(clean.remoteURL?.contains("secret") == true)
+        XCTAssertEqual(RunGitContext.captureHeadState(directory: root), .init(commit: clean.commit, isDirty: false))
 
         try git(["remote", "set-url", "origin", "git@github.com:example/repo.git"], at: root)
         XCTAssertEqual(RunGitContext.capture(directory: root)?.remoteURL, "https://github.com/example/repo")
 
         try "resource \"x\" {}\n".write(to: root.appendingPathComponent("new.tf"), atomically: true, encoding: .utf8)
         XCTAssertEqual(RunGitContext.capture(directory: root)?.dirty, true)
+        XCTAssertEqual(RunGitContext.captureHeadState(directory: root), .init(commit: clean.commit, isDirty: true))
         try git(["checkout", "--detach"], at: root)
         XCTAssertEqual(RunGitContext.capture(directory: root)?.isDetached, true)
     }

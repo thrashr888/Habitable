@@ -7,6 +7,13 @@ struct ConfigurationFile: Identifiable, Hashable, Sendable {
     let url: URL
     var id: String { url.path }
     var name: String { url.lastPathComponent }
+    var displayPath: String { relativePath }
+    let relativePath: String
+
+    init(url: URL, relativeTo root: URL) {
+        self.url = url
+        self.relativePath = String(url.standardizedFileURL.path.dropFirst(root.standardizedFileURL.path.count + 1))
+    }
 }
 
 struct ConfigurationDiagnostic: Identifiable, Hashable {
@@ -263,7 +270,8 @@ final class ConfigurationModel: ObservableObject {
     func refreshFiles() {
         guard let directory = workspace?.workingDirectory else { files = []; selectedFile = nil; return }
         fileRefreshID = UUID()
-        applyFiles(Self.scanFiles(in: directory))
+        applyFiles(Self.scanFiles(in: directory, includeChildren: false))
+        refreshFilesInBackground()
     }
 
     private func refreshFilesInBackground() {
@@ -278,15 +286,38 @@ final class ConfigurationModel: ObservableObject {
         }
     }
 
-    nonisolated private static func scanFiles(in directory: URL) -> [ConfigurationFile] {
-        let found = ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])) ?? [])
-            .filter { url in
-                guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-                      values.isDirectory != true, values.isSymbolicLink != true else { return false }
-                return url.lastPathComponent.hasSuffix(".tf") || url.lastPathComponent.hasSuffix(".tf.json")
+    nonisolated static func scanFiles(in directory: URL, includeChildren: Bool = true) -> [ConfigurationFile] {
+        let root = directory.standardizedFileURL.resolvingSymlinksInPath()
+        guard root.isFileURL else { return [] }
+        let excluded = Set([".terraform", ".git", "vendor", ".terraform.d"])
+        guard let enumerator = FileManager.default.enumerator(at: root,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]) else { return [] }
+        var found: [ConfigurationFile] = []
+        var visited = 0
+        while let url = enumerator.nextObject() as? URL {
+            visited += 1
+            if visited > 2_048 || found.count >= 256 { break }
+            let relative = String(url.standardizedFileURL.path.dropFirst(root.path.count + 1))
+            let components = relative.split(separator: "/").map(String.init)
+            if !includeChildren && components.count > 1 { enumerator.skipDescendants(); continue }
+            guard !components.isEmpty, components.count <= 8,
+                  !components.contains(where: { $0.hasPrefix(".") || excluded.contains($0) }),
+                  let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]),
+                  values.isSymbolicLink != true,
+                  url.resolvingSymlinksInPath().path.hasPrefix(root.path + "/") else {
+                enumerator.skipDescendants()
+                continue
             }
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        return found.map(ConfigurationFile.init(url:))
+            if values.isDirectory == true {
+                if !includeChildren { enumerator.skipDescendants() }
+                continue
+            }
+            guard (url.lastPathComponent.hasSuffix(".tf") || url.lastPathComponent.hasSuffix(".tf.json")),
+                  values.fileSize.map({ $0 <= 1_048_576 }) == true else { continue }
+            found.append(ConfigurationFile(url: url, relativeTo: root))
+        }
+        return found.sorted { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
     }
 
     private func applyFiles(_ found: [ConfigurationFile]) {
@@ -303,13 +334,24 @@ final class ConfigurationModel: ObservableObject {
 
     func file(matching sourcePath: String) -> ConfigurationFile? {
         let cleaned = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.contains("/") {
-            if let directory = attachedDirectory {
-                let relative = URL(fileURLWithPath: cleaned, relativeTo: directory).standardizedFileURL.path
-                return files.first { $0.url.standardizedFileURL.path == relative || $0.url.path.hasSuffix("/" + cleaned) }
+        let isQualifiedPath = cleaned.contains("/") || cleaned.hasPrefix("/")
+        if let directory = attachedDirectory {
+            let root = directory.standardizedFileURL.resolvingSymlinksInPath()
+            let target = URL(fileURLWithPath: cleaned, relativeTo: root).standardizedFileURL
+            if isQualifiedPath, target.path.hasPrefix(root.path + "/"),
+               let relative = TerraformDiagnosticSource.currentWorkspaceFile(filename: cleaned, workspaceDirectory: root) {
+                if let indexed = files.first(where: { $0.relativePath == relative }) { return indexed }
+                let discovered = ConfigurationFile(url: root.appendingPathComponent(relative), relativeTo: root)
+                files.append(discovered)
+                files.sort { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+                return discovered
+            }
+            if !isQualifiedPath, files.contains(where: { $0.relativePath == cleaned }) {
+                return files.first { $0.relativePath == cleaned }
             }
         }
-        return files.first { $0.name == cleaned }
+        let matches = files.filter { $0.name == cleaned }
+        return matches.count == 1 ? matches.first : nil
     }
 
     func insertVariableReference(_ name: String) {
@@ -670,13 +712,7 @@ final class ConfigurationModel: ObservableObject {
 
     private func isSafeWorkspaceFile(_ file: URL, in directory: URL?) -> Bool {
         guard let directory else { return false }
-        let folder = canonicalPath(directory)
-        let candidate = file.standardizedFileURL
-        guard canonicalPath(candidate.deletingLastPathComponent()) == folder,
-              candidate.path.hasSuffix(".tf") || candidate.path.hasSuffix(".tf.json"),
-              let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
-              values.isDirectory != true, values.isSymbolicLink != true else { return false }
-        return true
+        return TerraformDiagnosticSource.currentWorkspaceFile(filename: file.path, workspaceDirectory: directory) != nil
     }
 
     private func canonicalPath(_ url: URL) -> String {

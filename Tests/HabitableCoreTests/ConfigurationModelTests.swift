@@ -86,7 +86,56 @@ final class ConfigurationModelTests: XCTestCase {
         XCTAssertEqual(model.selectedFile?.url.deletingLastPathComponent().resolvingSymlinksInPath(), second.resolvingSymlinksInPath())
     }
 
-    func testOversizedConfigurationRemainsAvailableExternallyWithoutAnEditableDraft() throws {
+    func testChildModuleDiscoveryKeepsUnsavedRootDraftAndDistinguishesDuplicateNames() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let child = root.appendingPathComponent("modules/network", isDirectory: true)
+        let cache = root.appendingPathComponent(".terraform/modules/cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try "terraform {}\n".write(to: root.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try "resource {}\n".write(to: child.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try "resource {}\n".write(to: cache.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+
+        let workspace = Workspace(restoreLastDirectory: false)
+        workspace.workingDirectory = root
+        let model = ConfigurationModel()
+        model.attach(to: workspace)
+        model.draft = "terraform { # unsaved\n}\n"
+        model.refreshFiles()
+        for _ in 0..<100 where !model.files.contains(where: { $0.relativePath == "modules/network/main.tf" }) {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertTrue(model.hasUnsavedChanges)
+        XCTAssertEqual(model.draft, "terraform { # unsaved\n}\n")
+        XCTAssertTrue(model.files.contains(where: { $0.displayPath == "main.tf" }))
+        XCTAssertTrue(model.files.contains(where: { $0.displayPath == "modules/network/main.tf" }))
+        XCTAssertFalse(model.files.contains(where: { $0.relativePath.contains(".terraform") }))
+        XCTAssertEqual(model.file(matching: "main.tf")?.relativePath, "main.tf", "A Terraform root-relative diagnostic path resolves to the root file.")
+        XCTAssertEqual(model.file(matching: "modules/network/main.tf")?.relativePath, "modules/network/main.tf")
+    }
+
+    func testQualifiedChildModuleDeclarationResolvesBeforeBackgroundDiscoveryFinishes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let child = root.appendingPathComponent("modules/network", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try "terraform {}\n".write(to: root.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        try "resource {}\n".write(to: child.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+
+        let workspace = Workspace(restoreLastDirectory: false)
+        workspace.workingDirectory = root
+        let model = ConfigurationModel()
+        model.attach(to: workspace)
+        XCTAssertFalse(model.files.contains(where: { $0.relativePath == "modules/network/main.tf" }))
+
+        let declaration = model.file(matching: "modules/network/main.tf")
+        XCTAssertEqual(declaration?.relativePath, "modules/network/main.tf")
+        XCTAssertTrue(model.files.contains(where: { $0.relativePath == "modules/network/main.tf" }))
+    }
+
+    func testOversizedConfigurationIsExcludedFromTheBrowsableFileList() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -95,10 +144,8 @@ final class ConfigurationModelTests: XCTestCase {
         workspace.workingDirectory = root
         let model = ConfigurationModel()
         model.attach(to: workspace)
-        XCTAssertEqual(model.selectedFile?.name, "large.tf")
-        XCTAssertNil(model.savedText)
-        XCTAssertFalse(model.hasUnsavedChanges)
-        XCTAssertTrue(model.message?.contains("external editor") == true)
+        XCTAssertTrue(model.files.isEmpty)
+        XCTAssertNil(model.selectedFile)
     }
 
     func testOfficialTerraformFormattingReturnsCompleteOutput() throws {
