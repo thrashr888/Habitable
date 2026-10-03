@@ -25,6 +25,12 @@ struct TerraformVariableSummaryView: View {
             }
             Text(variable.rememberedSecretUnavailable ? "(remembered value unavailable)" : variable.sensitive ? "(sensitive value)" : variable.value)
                 .foregroundColor(.secondary)
+            if !variable.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(variable.description)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(variable.isUserInput ? "App override · \(variable.isRemembered ? "Remembered for this workspace" : "This session") · Overrides workspace tfvars" : "From workspace tfvars · Read-only")
                 .font(.caption).foregroundColor(.secondary)
         }
