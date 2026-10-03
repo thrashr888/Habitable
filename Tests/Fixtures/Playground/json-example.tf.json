@@ -1,0 +1,23 @@
+{
+  "resource": {
+    "terraform_data": {
+      "json_example": {
+        "input": {
+          "label": "JSON configuration example",
+          "numbers": [
+            1,
+            2,
+            3
+          ],
+          "enabled": true
+        }
+      }
+    }
+  },
+  "output": {
+    "json_example": {
+      "description": "An output declared in a .tf.json file.",
+      "value": "${terraform_data.json_example.output}"
+    }
+  }
+}
