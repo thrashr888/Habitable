@@ -58,40 +58,41 @@ struct EnvVarListPage: View {
             if let error = workspace.rememberedInputsError {
                 Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
             }
-            if workspace.environmentVariables.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "text.badge.plus").font(.largeTitle).foregroundColor(.secondary)
-                    Text("No environment variable inputs").font(.headline)
-                    Text("Environment variables declared by the process appear here as read-only values. Add an app override to supply or replace a value for plans started from Habitable.")
-                        .font(.callout).foregroundColor(.secondary).multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 420).frame(maxWidth: .infinity)
-                    Button("Add environment variable") { openEditor(for: nil) }
-                        .disabled(workspace.locked)
-                        .accessibilityHint("Create an app override for an environment variable")
-                }
-                .padding(.horizontal)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityElement(children: .contain)
-            } else {
-                List {
-                    ForEach(workspace.environmentVariables, id: \.id) { variable in
-                        HStack {
-                            EnvironmentVariableSummaryView(variable: variable)
-                            Spacer()
-                            if variable.isUserInput {
-                                Button("Edit") { openEditor(for: variable) }
-                                    .buttonStyle(.borderless).disabled(workspace.locked)
-                                Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
-                                    .buttonStyle(.borderless).disabled(workspace.locked)
-                                    .accessibilityLabel("Remove app input \(variable.key)")
-                                    .help("Remove app input")
-                            }
+            List {
+                ForEach(workspace.environmentVariables, id: \.id) { variable in
+                    HStack {
+                        EnvironmentVariableSummaryView(variable: variable)
+                        Spacer()
+                        if variable.isUserInput {
+                            Button("Edit") { openEditor(for: variable) }
+                                .buttonStyle(.borderless).disabled(workspace.locked)
+                            Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless).disabled(workspace.locked)
+                                .accessibilityLabel("Remove app input \(variable.key)")
+                                .help("Remove app input")
                         }
-                        .accessibilityElement(children: .contain)
                     }
+                    .accessibilityElement(children: .contain)
                 }
             }
+            .overlay {
+                if workspace.environmentVariables.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "text.badge.plus")
+                            .font(.largeTitle).foregroundStyle(.secondary)
+                        Text("No environment variable inputs").font(.headline)
+                        Text("Add an environment variable override for Terraform commands started from Habitable.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Add environment variable") { openEditor(for: nil) }
+                            .disabled(workspace.locked)
+                    }
+                    .frame(maxWidth: 420)
+                    .padding(20)
+                }
+            }
+
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Environment Variables")
