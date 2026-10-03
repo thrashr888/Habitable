@@ -7,108 +7,63 @@ import SwiftUI
 
 private struct ResourceBrowserRow: Identifiable {
     let resource: ShowResource
-    let address: String
-    let provider: String
-    let type: String
-    let module: String
-    let mode: String
-
-    var id: String { address }
+    let record: ResourceBrowserRecord
+    var id: String { record.id }
+    var address: String { record.address }
+    var provider: String { record.provider }
+    var type: String { record.type }
+    var module: String { record.module }
 
     @MainActor
     init(_ resource: ShowResource) {
         self.resource = resource
-        address = resource.address ?? resource.id.uuidString
-        provider = resource.provider_name ?? "—"
-        type = resource.type ?? "—"
-        mode = resource.mode ?? "managed"
-        module = Self.modulePath(in: address)
-    }
-
-    private static func modulePath(in address: String) -> String {
-        // Consume only repeated Terraform module prefixes. Resource addresses may
-        // contain dots inside quoted keys, so splitting the full address is unsafe.
-        var cursor = address.startIndex
-        var moduleEnd: String.Index?
-        while address[cursor...].hasPrefix("module.") {
-            cursor = address.index(cursor, offsetBy: "module.".count)
-            guard cursor < address.endIndex else { break }
-
-            while cursor < address.endIndex, address[cursor] != ".", address[cursor] != "[" {
-                cursor = address.index(after: cursor)
-            }
-            guard cursor > address.startIndex else { break }
-
-            if cursor < address.endIndex, address[cursor] == "[" {
-                var depth = 0
-                var inString = false
-                var escaped = false
-                repeat {
-                    let character = address[cursor]
-                    if inString {
-                        if escaped { escaped = false }
-                        else if character == "\\" { escaped = true }
-                        else if character == "\"" { inString = false }
-                    } else if character == "\"" {
-                        inString = true
-                    } else if character == "[" {
-                        depth += 1
-                    } else if character == "]" {
-                        depth -= 1
-                    }
-                    cursor = address.index(after: cursor)
-                } while cursor < address.endIndex && depth > 0
-                guard depth == 0 else { break }
-            }
-
-            guard cursor < address.endIndex, address[cursor] == "." else { break }
-            moduleEnd = cursor
-            cursor = address.index(after: cursor)
-        }
-        guard let moduleEnd else { return "root" }
-        return String(address[..<moduleEnd])
+        let address = resource.address ?? resource.id.uuidString
+        record = ResourceBrowserRecord(id: address, address: address, type: resource.type,
+                                       provider: resource.provider_name, mode: resource.mode)
     }
 }
 
 struct ResourceListPage: View {
     @EnvironmentObject var workspace: Workspace
     @Binding var selection: String?
-    @State private var searchText = ""
-    @State private var modeFilter = "All types"
-    @State private var providerFilter = "All providers"
-    @State private var moduleFilter = "All modules"
+    @State private var query = ResourceBrowserQuery()
+    @State private var index = ResourceBrowserIndex(records: [])
     @State private var resourceRows: [ResourceBrowserRow] = []
+    @State private var visibleRows: [ResourceBrowserRow] = []
     @State private var sortOrder: [KeyPathComparator<ResourceBrowserRow>] = [
         KeyPathComparator(\.address, order: .forward)
     ]
 
-    private var resources: [ResourceBrowserRow] {
-        resourceRows
-    }
+    private var hasActiveFilters: Bool { query.hasFilters }
 
-    private func rebuildResourceRows() {
+    private func rebuildResourceRows(resetFilters: Bool = false) {
         resourceRows = (workspace.state?.root_module.resources ?? []).map(ResourceBrowserRow.init)
+        index = ResourceBrowserIndex(records: resourceRows.map(\.record))
+        if resetFilters { query = ResourceBrowserQuery() }
+        normalizeFilterOptions()
+        rebuildVisibleRows()
     }
 
-    private var providers: [String] { Array(Set(resources.map(\.provider))).filter { $0 != "—" }.sorted() }
-    private var modules: [String] { Array(Set(resources.map(\.module))).sorted() }
-
-    private var filteredResources: [ResourceBrowserRow] {
-        resources.filter { row in
-            (searchText.isEmpty || row.address.localizedCaseInsensitiveContains(searchText)) &&
-            (modeFilter == "All types" || row.mode == modeFilter) &&
-            (providerFilter == "All providers" || row.provider == providerFilter) &&
-            (moduleFilter == "All modules" || row.module == moduleFilter)
-        }.sorted(using: sortOrder)
+    private func normalizeFilterOptions() {
+        if query.type != "All resource types" && !index.types.contains(query.type) { query.type = "All resource types" }
+        if query.provider != "All providers" && !index.providers.contains(query.provider) { query.provider = "All providers" }
+        if query.module != "All modules" && !index.modules.contains(query.module) { query.module = "All modules" }
+        if query.mode != "All categories" && !["managed", "data"].contains(query.mode) { query.mode = "All categories" }
     }
 
-    private var hasActiveFilters: Bool {
-        !searchText.isEmpty || modeFilter != "All types" || providerFilter != "All providers" || moduleFilter != "All modules"
+    private func rebuildVisibleRows() {
+        let ids = index.matchingIDs(for: query)
+        let rowsByID = Dictionary(resourceRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let matches = ids.compactMap { rowsByID[$0] }
+        visibleRows = matches.sorted(using: sortOrder)
+    }
+
+    private func resetFilters() {
+        query = ResourceBrowserQuery()
     }
 
     func refresh() {
         workspace.refreshResources()
-        if selection == nil { selection = filteredResources.first?.id }
     }
 
     var body: some View {
@@ -118,7 +73,7 @@ struct ResourceListPage: View {
             GeometryReader { geometry in
                 if workspace.state == nil {
                     statusView.frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if filteredResources.isEmpty {
+                } else if visibleRows.isEmpty {
                     emptyMessage(hasActiveFilters ? "No matching resources" : "No resources",
                                  detail: hasActiveFilters ? "Adjust the filters or search text." : "This state has no resources.",
                                  symbol: hasActiveFilters ? "magnifyingglass" : "globe")
@@ -130,37 +85,54 @@ struct ResourceListPage: View {
                 }
             }
         }
-
         .toolbar {
             QuietToolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: refresh) {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                            .help("Refresh state")
+                        Label("Refresh", systemImage: "arrow.clockwise").help("Refresh state")
                     }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(workspace.locked)
                 }
             }
         }
-        .onChange(of: filteredResources.map(\.id)) { addresses in
-            if let selection, !addresses.contains(selection) { self.selection = nil }
+        .onChange(of: query) { _ in rebuildVisibleRows() }
+        .onChange(of: sortOrder) { _ in rebuildVisibleRows() }
+        .onChange(of: visibleRows.map(\.id)) { addresses in
+            selection = ResourceBrowserIndex.safeSelection(selection, visibleIDs: addresses)
         }
-        .onAppear(perform: rebuildResourceRows)
+        .onAppear { rebuildResourceRows() }
         .onChange(of: workspace.state?.id) { _ in
             rebuildResourceRows()
-            if let selection, !resources.contains(where: { $0.id == selection }) { self.selection = nil }
+            selection = ResourceBrowserIndex.safeSelection(selection, visibleIDs: resourceRows.map(\.id))
+        }
+        .onChange(of: workspace.workingDirectory) { _ in
+            rebuildResourceRows(resetFilters: true)
+            selection = ResourceBrowserIndex.safeSelection(selection, visibleIDs: resourceRows.map(\.id))
         }
     }
 
     private var filterBar: some View {
-        VStack(spacing: 8) {
-            SearchField(search: $searchText, accessibilityLabel: "Search resource addresses")
-                .frame(maxWidth: .infinity)
-            HStack(spacing: 6) {
-                filterPicker("All types", selection: $modeFilter, options: ["managed", "data"])
-                filterPicker("All providers", selection: $providerFilter, options: providers)
-                filterPicker("All modules", selection: $moduleFilter, options: modules)
+        VStack(spacing: 7) {
+            HStack(spacing: 8) {
+                SearchField(search: $query.search, accessibilityLabel: "Search resources")
+                    .frame(maxWidth: .infinity)
+                Text("\(visibleRows.count) of \(resourceRows.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("\(visibleRows.count) of \(resourceRows.count) resources shown")
+                if hasActiveFilters {
+                    Button("Reset") { resetFilters() }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                        .help("Clear search and filters")
+                }
+            }
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 5) {
+                filterPicker("All categories", selection: $query.mode, options: ["managed", "data"])
+                filterPicker("All resource types", selection: $query.type, options: index.types)
+                filterPicker("All providers", selection: $query.provider, options: index.providers)
+                filterPicker("All modules", selection: $query.module, options: index.modules)
             }
             .controlSize(.small)
         }
@@ -175,34 +147,28 @@ struct ResourceListPage: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        .help(title == "All types" ? "Filter managed resources and data sources" : title.replacingOccurrences(of: "All ", with: "Filter by "))
+        .help("Filter by \(title.replacingOccurrences(of: "All ", with: "").lowercased())")
     }
 
     private var resourceTable: some View {
-        Table(filteredResources, selection: $selection, sortOrder: $sortOrder) {
+        Table(visibleRows, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("Address", value: \.address) { row in
                 Text(row.address).font(.system(.callout, design: .monospaced)).lineLimit(1).help(row.address)
             }
-            TableColumn("Provider", value: \.provider) { row in
-                Text(row.provider).lineLimit(1).help(row.provider)
-            }
-            TableColumn("Type", value: \.type) { row in
-                Text(row.type).lineLimit(1).help(row.type)
-            }
-            TableColumn("Module", value: \.module) { row in
-                Text(row.module).lineLimit(1).help(row.module)
-            }
+            TableColumn("Provider", value: \.provider) { row in Text(row.provider).lineLimit(1).help(row.provider) }
+            TableColumn("Type", value: \.type) { row in Text(row.type).lineLimit(1).help(row.type) }
+            TableColumn("Module", value: \.module) { row in Text(row.module).lineLimit(1).help(row.module) }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
     }
 
     private var compactList: some View {
         List(selection: $selection) {
-            ForEach(filteredResources) { row in
+            ForEach(visibleRows) { row in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(row.address).font(.system(.callout, design: .monospaced)).lineLimit(2)
                     HStack(spacing: 5) {
-                        Text(row.mode == "data" ? "Data source" : "Managed")
+                        Text(row.record.mode == "data" ? "Data source" : "Managed")
                         Text("·")
                         Text(row.type)
                         if row.provider != "—" { Text("·"); Text(row.provider).lineLimit(1) }

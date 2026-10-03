@@ -186,6 +186,25 @@ final class ConfigurationModel: ObservableObject {
     }
     var canFormatCurrentFile: Bool { selectedFile.map { $0.name.hasSuffix(".tf") && !$0.name.hasSuffix(".tf.json") } ?? false }
 
+    /// Returns a one-based source line range using NSString coordinates, which are
+    /// the same UTF-16 offsets NSTextView uses for selections.
+    static func sourceRange(forLine requestedLine: Int, in source: String) -> NSRange? {
+        guard requestedLine > 0 else { return nil }
+        let nsSource = source as NSString
+        var line = 1
+        var start = 0
+        while line < requestedLine, start < nsSource.length {
+            let newline = nsSource.range(of: "\n", options: [], range: NSRange(location: start, length: nsSource.length - start))
+            guard newline.location != NSNotFound else { return nil }
+            start = NSMaxRange(newline)
+            line += 1
+        }
+        guard line == requestedLine else { return nil }
+        let newline = nsSource.range(of: "\n", options: [], range: NSRange(location: start, length: nsSource.length - start))
+        let end = newline.location == NSNotFound ? nsSource.length : newline.location
+        return NSRange(location: start, length: end - start)
+    }
+
     func attach(to workspace: Workspace) {
         let newDirectory = workspace.workingDirectory
         if self.workspace === workspace, attachedDirectory == newDirectory, !isWorkspaceSwitchPending {
