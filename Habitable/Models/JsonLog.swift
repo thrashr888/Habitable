@@ -409,8 +409,9 @@ class ShowResource: ObservableObject, Identifiable {
     var provider_name: String?
     var schema_version: Int?
     var values: [String: JSON]?
+    var sensitiveValues: JSON = .null
     
-    init(address: String?, mode: String?, type: String?, name: String?, provider_name: String?, schema_version: Int?, values: Dictionary<String, JSON>?) {
+    init(address: String?, mode: String?, type: String?, name: String?, provider_name: String?, schema_version: Int?, values: Dictionary<String, JSON>?, sensitiveValues: JSON = .null) {
         self.address = address
         self.mode = mode
         self.type = type
@@ -418,7 +419,144 @@ class ShowResource: ObservableObject, Identifiable {
         self.provider_name = provider_name
         self.schema_version = schema_version
         self.values = values
+        self.sensitiveValues = sensitiveValues
     }
+}
+
+struct ResourceAttribute: Identifiable, Equatable, Sendable {
+    let path: String
+    let value: String
+    var id: String { path }
+    var searchableText: String { path + " " + value }
+}
+
+func terraformProviderRegistryURL(_ identity: String?) -> URL? {
+    guard let identity else { return nil }
+    let parts = identity.split(separator: "/")
+    guard parts.count == 3, parts[0] == "registry.terraform.io",
+          parts.dropFirst().allSatisfy({ $0.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil }) else { return nil }
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "registry.terraform.io"
+    components.path = "/providers/\(parts[1])/\(parts[2])/latest"
+    return components.url
+}
+
+/// Flattens state attributes only after applying Terraform's parallel sensitive_values mask.
+/// If the mask shape is inconsistent with the value shape, the affected subtree is hidden.
+func resourceAttributes(values: [String: JSON]?, sensitiveValues: JSON) -> [ResourceAttribute] {
+    guard let values else { return [] }
+    if sensitiveValues.type == .null || sensitiveValues.bool == true {
+        return [ResourceAttribute(path: "$", value: "(sensitive value)")]
+    }
+    let rootMask = sensitiveValues.bool == false ? JSON.null : sensitiveValues
+    func maskMatches(_ value: JSON, _ mask: JSON) -> Bool {
+        if mask.type == .null { return true }
+        if mask.bool != nil { return true }
+        if let object = value.dictionary, let masks = mask.dictionary {
+            return masks.allSatisfy { key, childMask in
+                guard let child = object[key] else { return false }
+                return maskMatches(child, childMask)
+            }
+        }
+        if let array = value.array, let masks = mask.array {
+            return array.count == masks.count && zip(array, masks).allSatisfy { maskMatches($0, $1) }
+        }
+        return false
+    }
+    let root = JSON(values.mapValues(\.object))
+    guard maskMatches(root, rootMask) else {
+        return [ResourceAttribute(path: "$", value: "(sensitive value)")]
+    }
+    var knownSensitiveStrings = Set<String>()
+    func collectAllStrings(_ value: JSON) {
+        if let string = value.string {
+            if !string.isEmpty { knownSensitiveStrings.insert(string) }
+        } else if let object = value.dictionary {
+            for child in object.values { collectAllStrings(child) }
+        } else if let array = value.array {
+            for child in array { collectAllStrings(child) }
+        }
+    }
+    func collectSensitiveStrings(_ value: JSON, mask: JSON) {
+        if mask.bool == true {
+            collectAllStrings(value)
+            return
+        }
+        if mask.bool == false || mask.type == .null { return }
+        if let object = value.dictionary, let masks = mask.dictionary {
+            for (key, childMask) in masks {
+                if let child = object[key] { collectSensitiveStrings(child, mask: childMask) }
+            }
+        } else if let array = value.array, let masks = mask.array {
+            for (child, childMask) in zip(array, masks) {
+                collectSensitiveStrings(child, mask: childMask)
+            }
+        }
+    }
+    for key in values.keys {
+        collectSensitiveStrings(values[key] ?? .null, mask: rootMask[key])
+    }
+    let redactionValues = knownSensitiveStrings.sorted {
+        $0.count == $1.count ? $0 < $1 : $0.count > $1.count
+    }
+    func redactKnownSensitiveStrings(_ value: String) -> String {
+        redactionValues.reduce(value) { safe, secret in
+            safe.replacingOccurrences(of: secret, with: "(sensitive value)")
+        }
+    }
+    func quote(_ key: String) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: key, options: [.fragmentsAllowed])
+        return data.flatMap { String(data: $0, encoding: .utf8) } ?? "\"\(key)\""
+    }
+    func render(_ value: JSON, mask: JSON, path: String, into result: inout [ResourceAttribute]) {
+        if mask.bool == true {
+            result.append(ResourceAttribute(path: path, value: "(sensitive value)"))
+            return
+        }
+        if mask.bool == false {
+            render(value, mask: .null, path: path, into: &result)
+            return
+        }
+        if let object = value.dictionary {
+            guard mask.type == .null || mask.dictionary != nil else {
+                result.append(ResourceAttribute(path: path, value: "(sensitive value)")); return
+            }
+            let masks = mask.dictionaryValue
+            if object.isEmpty {
+                result.append(ResourceAttribute(path: path, value: "{}"))
+                return
+            }
+            for key in object.keys.sorted() {
+                let childMask = masks[key] ?? .null
+                render(object[key] ?? .null, mask: childMask, path: path + "[\(quote(key))]", into: &result)
+            }
+            return
+        }
+        if let array = value.array {
+            guard mask.type == .null || mask.array != nil else {
+                result.append(ResourceAttribute(path: path, value: "(sensitive value)")); return
+            }
+            let masks = mask.arrayValue
+            if array.isEmpty {
+                result.append(ResourceAttribute(path: path, value: "[]"))
+                return
+            }
+            for (index, child) in array.enumerated() {
+                render(child, mask: index < masks.count ? masks[index] : .null,
+                       path: "\(path)[\(index)]", into: &result)
+            }
+            return
+        }
+        guard let text = terraformOutputValue(value) else { return }
+        let safeText = value.string.map(redactKnownSensitiveStrings) ?? text
+        result.append(ResourceAttribute(path: path, value: safeText))
+    }
+    var result: [ResourceAttribute] = []
+    for key in values.keys.sorted() {
+        render(values[key] ?? .null, mask: rootMask[key], path: quote(key), into: &result)
+    }
+    return result
 }
 
 extension ShowResource: Hashable {
@@ -473,7 +611,8 @@ func transformShow(_ log: JSON) -> ShowMessage {
                 name: res["name"].string,
                 provider_name: res["provider_name"].string,
                 schema_version: res["schema_version"].int,
-                values: res["values"].dictionary
+                values: res["values"].dictionary,
+                sensitiveValues: res["sensitive_values"]
             )
             moduleResources.append(add)
         }

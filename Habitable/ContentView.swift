@@ -1,4 +1,23 @@
+import AppKit
 import SwiftUI
+
+struct WorkspaceWindowActions {
+    let recentFolders: [URL]
+    let openFolder: () -> Void
+    let openRecent: (URL) -> Void
+    let clearRecents: () -> Void
+}
+
+private struct WorkspaceWindowActionsKey: FocusedValueKey {
+    typealias Value = WorkspaceWindowActions
+}
+
+extension FocusedValues {
+    var workspaceWindowActions: WorkspaceWindowActions? {
+        get { self[WorkspaceWindowActionsKey.self] }
+        set { self[WorkspaceWindowActionsKey.self] = newValue }
+    }
+}
 
 struct ContentView: View {
     enum NavigationItem: String {
@@ -10,16 +29,21 @@ struct ContentView: View {
     }
 
     @StateObject var workspace = Workspace()
+    @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @State private var selection: NavigationItem? = .workspace
     @State private var selectedRun: UUID?
     @State private var selectedResource: String?
     @State private var selectedOutput: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isOpenErrorPresented = false
+    @State private var presentedOpenError: String?
 
     var body: some View {
         Group {
             if workspace.workingDirectory == nil {
-                BlankSlateView()
+                BlankSlateView(recentFolders: recentWorkspaces.folders,
+                               onChooseFolder: openFolder,
+                               onOpenRecent: openRecent)
             } else if selection?.hasDetailList == true {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     sidebar
@@ -42,6 +66,35 @@ struct ContentView: View {
             }
         }
         .environmentObject(workspace)
+        .focusedSceneValue(\.workspaceWindowActions, WorkspaceWindowActions(
+            recentFolders: recentWorkspaces.folders,
+            openFolder: openFolder,
+            openRecent: openRecent,
+            clearRecents: recentWorkspaces.clear
+        ))
+        .onChange(of: workspace.workspaceOpenError) { error in
+            if let error {
+                presentedOpenError = error
+                isOpenErrorPresented = true
+            }
+        }
+        .onChange(of: workspace.workingDirectory) { directory in
+            if let directory, isAvailableDirectory(directory) { recentWorkspaces.recordSuccessfulOpen(directory) }
+        }
+        .alert("Unable to Open Folder", isPresented: $isOpenErrorPresented) {
+            Button("OK", role: .cancel) { workspace.dismissWorkspaceOpenError() }
+        } message: {
+            Text(presentedOpenError ?? "The selected folder could not be opened.")
+        }
+        .onAppear {
+            if let directory = workspace.workingDirectory, isAvailableDirectory(directory) {
+                recentWorkspaces.recordSuccessfulOpen(directory)
+            }
+            if let error = workspace.workspaceOpenError {
+                presentedOpenError = error
+                isOpenErrorPresented = true
+            }
+        }
         .onChange(of: workspace.workingDirectory) { _ in
             selectedRun = nil
             selectedResource = nil
@@ -141,6 +194,39 @@ struct ContentView: View {
             Text(message).foregroundColor(.secondary)
         }
         .padding()
+    }
+
+    private func openFolder() {
+        guard !workspace.locked else {
+            presentedOpenError = "Wait for the current workspace command to finish before opening another folder."
+            isOpenErrorPresented = true
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.title = "Open Terraform Folder"
+        panel.message = "Choose a local folder containing your Terraform configuration."
+        panel.prompt = "Open"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            openRecent(url)
+        }
+    }
+
+    private func openRecent(_ url: URL) {
+        guard workspace.openWorkspaceDirectory(url) else {
+            presentedOpenError = workspace.workspaceOpenError
+            isOpenErrorPresented = true
+            return
+        }
+        recentWorkspaces.recordSuccessfulOpen(url)
+    }
+
+    private func isAvailableDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 }
 

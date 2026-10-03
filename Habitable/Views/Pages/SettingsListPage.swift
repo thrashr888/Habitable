@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 struct SettingsListPage: View {
     @EnvironmentObject var workspace: Workspace
@@ -13,8 +14,14 @@ struct SettingsListPage: View {
     var body: some View {
         Form {
             Section("Workspace") {
+                if let error = workspace.workspaceOpenError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Working directory").font(.headline)
+                    Text("Local folder").font(.headline)
                     HStack(alignment: .top, spacing: 12) {
                         Text(workspace.workingDirectory?.path ?? "No folder selected")
                             .textSelection(.enabled)
@@ -24,6 +31,12 @@ struct SettingsListPage: View {
                             .fixedSize(horizontal: false, vertical: true)
                         Button("Choose folder…", action: workspace.addUrl)
                             .disabled(workspace.locked)
+                        if let directory = workspace.workingDirectory {
+                            Button("Reveal in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([directory])
+                            }
+                            .disabled(!FileManager.default.fileExists(atPath: directory.path))
+                        }
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {

@@ -39,6 +39,13 @@ struct WorkspacePage: View {
                 .textSelection(.enabled)
                 .padding(.bottom, 8)
 
+            if let error = workspace.workspaceOpenError {
+                ErrorView(message: error)
+            }
+            if let error = workspace.rememberedInputsError {
+                ErrorView(message: error)
+            }
+
             CheckView(label: "Initialized", check: workspace.isInitialized)
             CheckView(label: "Config is valid", check: workspace.isValid)
             CheckView(label: "State available", check: workspace.hasState, failureIsError: false)

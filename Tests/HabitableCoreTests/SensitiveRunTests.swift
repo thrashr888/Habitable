@@ -111,6 +111,12 @@ final class SensitiveRunTests: XCTestCase {
         XCTAssertFalse(run.plan?.diagnostics.first?.diagnostic.detail?.contains("environment-secret-value") == true)
         XCTAssertFalse(run.textOutput?.contains("environment-secret-value") == true)
 
+        // Restore the reviewed inputs before confirmation. Context verification now
+        // intentionally rejects changed editor values rather than applying them.
+        string.value = "string-secret-value"
+        structured.value = #"{"auth":{"token":"nested-secret-value","items":["deep-secret-value"]}}"#
+        environment.value = "environment-secret-value"
+
         await withCheckedContinuation { continuation in
             run.doApply { _, error in
                 XCTAssertTrue(error?.contains("(sensitive)") == true)

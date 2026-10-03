@@ -11,9 +11,9 @@ struct EnvironmentVariableSummaryView: View {
     @ObservedObject var variable: EnvironmentVariable
     var body: some View {
         VStack(alignment: .leading) {
-            Text("\(variable.key) = \(variable.sensitive ? "(sensitive value)" : variable.value)")
+            Text("\(variable.key) = \(variable.rememberedSecretUnavailable ? "(remembered value unavailable)" : variable.sensitive ? "(sensitive value)" : variable.value)")
             if !variable.description.isEmpty { Text(variable.description).font(.caption).foregroundColor(.secondary) }
-            Text(variable.isUserInput ? "App override · This session · Overrides process environment" : "From process environment · Read-only")
+            Text(variable.isUserInput ? "App override · \(variable.isRemembered ? "Remembered for this workspace" : "This session") · Overrides process environment" : "From process environment · Read-only")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -34,6 +34,9 @@ struct EnvVarListPage: View {
 
     var body: some View {
         VStack(alignment: .leading) {
+            if let error = workspace.rememberedInputsError {
+                Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
+            }
             List {
                 ForEach(workspace.environmentVariables, id: \.id) { variable in
                     HStack {
@@ -88,7 +91,7 @@ struct EnvVarListPage: View {
                     do {
                         if let original = context.original {
                             try workspace.updateEnvironmentVariable(original, key: draft.key, value: draft.value,
-                                                                    description: draft.description, sensitive: draft.sensitive)
+                                                                    description: draft.description, sensitive: draft.sensitive, remember: draft.isRemembered)
                         } else {
                             try workspace.addEnvironmentVariable(draft)
                         }
@@ -110,6 +113,9 @@ struct EnvVarListPage: View {
         let result = EnvironmentVariable()
         result.key = source.key; result.value = source.value; result.description = source.description
         result.sensitive = source.sensitive
+        result.isRemembered = source.isRemembered
+        result.rememberedSecretUnavailable = source.rememberedSecretUnavailable
+        result.rememberedSecretID = source.rememberedSecretID
         return result
     }
 
@@ -140,6 +146,13 @@ private struct EnvironmentVariableEditor: View {
             Section(header: Text("Save an environment variable").font(.headline)) {
                 Text("App inputs apply to plans started in this session and override process environment values.")
                     .font(.caption).foregroundColor(.secondary)
+                Toggle("Remember for this workspace", isOn: $variable.isRemembered)
+                Text("Non-sensitive values are stored in a private local file. Sensitive values are stored in macOS Keychain.")
+                    .font(.caption).foregroundColor(.secondary)
+                if variable.rememberedSecretUnavailable {
+                    Text("This remembered secret is unavailable. Restore Keychain access or remove this input before running Terraform.")
+                        .font(.caption).foregroundColor(.red)
+                }
                 TextField("Key", text: $variable.key)
                 Toggle("Sensitive", isOn: $variable.sensitive)
                 Text("Hides this value in Habitable. Terraform plan output follows the sensitivity declared in your Terraform configuration.")
