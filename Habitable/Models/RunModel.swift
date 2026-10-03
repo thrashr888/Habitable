@@ -160,6 +160,26 @@ enum RunDisplayPhase: Int {
 
 enum RunLogSection: Hashable { case version, summary, outputs, activity }
 
+/// Live updates follow Terraform until the user elects to inspect another phase.
+struct RunPhaseSelection {
+    private(set) var phase: RunDisplayPhase = .plan
+    private(set) var followsLive = true
+
+    mutating func inspect(_ phase: RunDisplayPhase) {
+        self.phase = phase
+        followsLive = false
+    }
+
+    mutating func receive(_ current: RunDisplayPhase) {
+        if followsLive { phase = current }
+    }
+
+    mutating func resume(_ current: RunDisplayPhase) {
+        followsLive = true
+        phase = current
+    }
+}
+
 /// Reveal a live section once, without undoing a user's later collapse on each event.
 struct LiveRunDisclosureState {
     private(set) var expanded: Set<RunLogSection> = []

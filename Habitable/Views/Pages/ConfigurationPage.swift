@@ -326,7 +326,7 @@ struct ConfigurationPage: View {
     }
 
     @ViewBuilder private var editorActions: some View {
-        Button { model.openInEditor() } label: { Label("Open in Editor", systemImage: "arrow.up.forward.square") }
+        if let file = model.selectedFile?.url { ExternalEditorPicker(file: file) }
         Menu {
             ForEach(workspace.declaredTerraformInputs) { declaration in
                 Button {
@@ -505,5 +505,36 @@ struct ConfigurationPage: View {
             for url in createdURLs { try? FileManager.default.removeItem(at: url) }
             model.message = "Could not create the starter file: \(error.localizedDescription)"
         }
+    }
+}
+
+/// The main action uses the remembered choice; the menu changes it explicitly.
+struct ExternalEditorPicker: View {
+    let file: URL
+    @EnvironmentObject private var editors: ExternalEditorStore
+
+    var body: some View {
+        Menu {
+            if let selected = editors.selected {
+                Button("Open in \(selected.name)") { editors.open(file) }
+                Divider()
+            }
+            ForEach(editors.editors) { editor in
+                Button { editors.open(file, with: editor) } label: {
+                    if editor.id == editors.selectedID {
+                        Label(editor.name, systemImage: "checkmark")
+                    } else { Text(editor.name) }
+                }
+            }
+            Divider()
+            Button("Choose Other Editor…") { editors.chooseApplication() }
+            Button("Refresh Editors") { editors.refresh() }
+        } label: {
+            Label(editors.selected.map { "Open in \($0.name)" } ?? "Open in Editor", systemImage: "arrow.up.forward.square")
+        }
+        .help("Choose an editor. Habitable remembers your choice for all configuration files.")
+        .alert("Unable to Open Editor", isPresented: Binding(get: { editors.error != nil }, set: { if !$0 { editors.error = nil } })) {
+            Button("OK") { editors.error = nil }
+        } message: { Text(editors.error ?? "") }
     }
 }

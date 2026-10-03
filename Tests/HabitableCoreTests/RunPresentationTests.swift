@@ -11,6 +11,20 @@ final class RunPresentationTests: XCTestCase {
         XCTAssertEqual(RunDisplayPhase.current(status: .interrupted, hasApply: true, hasError: true), .errors)
     }
 
+    func testManualPlanInspectionSurvivesApplyEventsAndFailureUntilResuming() {
+        var selection = RunPhaseSelection()
+        selection.receive(.apply)
+        XCTAssertEqual(selection.phase, .apply)
+        selection.inspect(.plan)
+        selection.receive(.apply)
+        selection.receive(.errors)
+        XCTAssertEqual(selection.phase, .plan)
+        XCTAssertFalse(selection.followsLive)
+        selection.resume(.errors)
+        XCTAssertEqual(selection.phase, .errors)
+        XCTAssertTrue(selection.followsLive)
+    }
+
     func testIncomingSectionsRevealOnceAndRespectManualCollapse() {
         var state = LiveRunDisclosureState()
         state.receive([.version, .activity], isLive: true)

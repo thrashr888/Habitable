@@ -22,7 +22,7 @@ extension FocusedValues {
 
 struct ContentView: View {
     enum NavigationItem: String {
-        case workspace, configuration, runs, resources, outputs, variables, envVariables, settings
+        case workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings
 
         var hasDetailList: Bool {
             self == .runs || self == .resources || self == .outputs
@@ -33,6 +33,7 @@ struct ContentView: View {
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
     @StateObject private var releaseCatalog = TerraformReleaseCatalog()
+    @StateObject private var editors = ExternalEditorStore()
     @StateObject private var readme = WorkspaceReadmePresentation()
     @StateObject private var navigationTrace = NavigationTrace()
     @State private var selection: NavigationItem? = .workspace
@@ -78,6 +79,7 @@ struct ContentView: View {
             }
         }
         .environmentObject(workspace)
+        .environmentObject(editors)
         .animation(nil, value: selection)
         .background(NavigationLayoutProbe(trace: navigationTrace, page: selection?.rawValue ?? "workspace")
             .allowsHitTesting(false))
@@ -103,6 +105,7 @@ struct ContentView: View {
             Text(presentedOpenError ?? "The selected folder could not be opened.")
         }
         .onAppear {
+            editors.refresh()
             if let directory = workspace.workingDirectory, isAvailableDirectory(directory) {
                 recentWorkspaces.recordSuccessfulOpen(directory)
             }
@@ -136,6 +139,7 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: navigationSelection) {
             Label("Workspace", systemImage: "folder").tag(NavigationItem.workspace)
+            Label("README", systemImage: "book.closed").tag(NavigationItem.readme)
             Label("Configuration", systemImage: "doc.text").tag(NavigationItem.configuration)
             Label("Runs (\(max(workspace.historyTotalCount, workspace.runs.count)))", systemImage: "list.bullet.rectangle").tag(NavigationItem.runs)
             Label("Resources (\(workspace.state?.resources.count ?? 0))", systemImage: "globe").tag(NavigationItem.resources)
@@ -207,11 +211,12 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
+        case .readme: WorkspaceReadmePage(directory: workspace.workingDirectory, presentation: readme)
         case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel)
         case .variables: VariableListPage()
         case .envVariables: EnvVarListPage()
         case .settings: SettingsListPage(catalog: releaseCatalog)
-        default: WorkspacePage(readme: readme, onReviewRun: { id in
+        default: WorkspacePage(onReviewRun: { id in
             selectedRun = id
             navigationSelection.wrappedValue = .runs
         }, onOpenConfiguration: { navigationSelection.wrappedValue = .configuration },

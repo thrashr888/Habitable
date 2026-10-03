@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5310000000000000000002 /* WorkspaceReadme.swift */; };
+		AA5510000000000000000001 /* ExternalEditorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5510000000000000000002 /* ExternalEditorStore.swift */; };
 		AA5310000000000000000003 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = AA5310000000000000000004 /* MarkdownUI */; };
 		BC260000000000000000000001 /* RecentWorkspaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC260000000000000000000002 /* RecentWorkspaceStore.swift */; };
 		BC250000000000000000000001 /* WorkspaceContextFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC250000000000000000000002 /* WorkspaceContextFingerprint.swift */; };
@@ -64,6 +65,7 @@
 
 /* Begin PBXFileReference section */
 		AA5310000000000000000002 /* WorkspaceReadme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceReadme.swift; sourceTree = "<group>"; };
+		AA5510000000000000000002 /* ExternalEditorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalEditorStore.swift; sourceTree = "<group>"; };
 		BC260000000000000000000002 /* RecentWorkspaceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentWorkspaceStore.swift; sourceTree = "<group>"; };
 		BC250000000000000000000002 /* WorkspaceContextFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceContextFingerprint.swift; sourceTree = "<group>"; };
 		BC240000000000000000000002 /* WorkspaceInputStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInputStore.swift; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
 				550D972CC34B47978D05B9F9 /* RunGitContext.swift */,
 				0EEE1ABBAF394D628B436560 /* ConfigurationModel.swift */,
 				AA5310000000000000000002 /* WorkspaceReadme.swift */,
+				AA5510000000000000000002 /* ExternalEditorStore.swift */,
 				8A926B572648C48E00FDBA5C /* ndjson.swift */,
 				8AF2133E263A0CFB009F97C2 /* JsonLog.swift */,
 				8AF21342263A2DE9009F97C2 /* ResourceState.swift */,
@@ -342,6 +345,7 @@
 				093095698F3E40D39EF8EB1B /* RunGitContext.swift in Sources */,
 				45C6675D39CF46A2A199AD8B /* ConfigurationModel.swift in Sources */,
 				AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */,
+				AA5510000000000000000001 /* ExternalEditorStore.swift in Sources */,
 				8AF2133F263A0CFB009F97C2 /* JsonLog.swift in Sources */,
 				8AA12B0E264260570048A4A9 /* RunListPage.swift in Sources */,
 				8A926B69264E524C00FDBA5C /* ChangeSummary.swift in Sources */,
