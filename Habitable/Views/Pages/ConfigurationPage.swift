@@ -554,6 +554,7 @@ struct ConfigurationPage: View {
 /// The main action uses the remembered choice; the menu changes it explicitly.
 struct ExternalEditorPicker: View {
     let file: URL
+    var targetLabel = "file"
     @EnvironmentObject private var editors: ExternalEditorStore
 
     var body: some View {
@@ -574,8 +575,13 @@ struct ExternalEditorPicker: View {
             Button("Refresh Editors") { editors.refresh() }
         } label: {
             Label(editors.selected.map { "Open in \($0.name)" } ?? "Open in Editor", systemImage: "arrow.up.forward.square")
+        } primaryAction: {
+            if editors.selected != nil { editors.open(file) }
+            else { editors.chooseApplication() }
         }
-        .help("Choose an editor. Habitable remembers your choice for all configuration files.")
+        .help(editors.selected.map { "Open \(targetLabel) in \($0.name). Use the menu to choose another editor." }
+              ?? "Choose an editor to open \(targetLabel).")
+        .accessibilityLabel(editors.selected.map { "Open \(targetLabel) in \($0.name)" } ?? "Open \(targetLabel) in Editor")
         .alert("Unable to Open Editor", isPresented: Binding(get: { editors.error != nil }, set: { if !$0 { editors.error = nil } })) {
             Button("OK") { editors.error = nil }
         } message: { Text(editors.error ?? "") }
