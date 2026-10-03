@@ -51,8 +51,6 @@ struct WorkspacePage: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let directory = workspace.workingDirectory {
-                        Text(directory.lastPathComponent.isEmpty ? directory.path : directory.lastPathComponent)
-                            .font(.title3.weight(.medium))
                         Text(directory.path)
                             .font(.caption.monospaced()).foregroundStyle(.secondary)
                             .textSelection(.enabled)
