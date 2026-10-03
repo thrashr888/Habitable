@@ -9,29 +9,35 @@ import SwiftUI
 
 struct TerraformVariableSummaryView: View {
     @ObservedObject var variable: TerraformVariable
+
+    private var safeValuePreview: String {
+        if variable.rememberedSecretUnavailable { return "Remembered value unavailable" }
+        if variable.sensitive { return "Sensitive value hidden" }
+        return variable.value.isEmpty ? "(empty)" : variable.value
+    }
+
     var body: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                Text("\(variable.key)")
-                Spacer()
-                if variable.sensitive {
-                    Text("(sensitive)")
-                        .foregroundColor(.secondary)
-                }
-                if variable.hcl {
-                    Text("(HCL)")
-                        .foregroundColor(.secondary)
-                }
-            }
-            Text(variable.rememberedSecretUnavailable ? "(remembered value unavailable)" : variable.sensitive ? "(sensitive value)" : variable.value)
-                .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(variable.key).font(.body.weight(.medium))
             if !variable.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(variable.description)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.callout).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text(variable.isUserInput ? "App override · \(variable.isRemembered ? "Remembered for this workspace" : "This session") · Overrides workspace tfvars" : "From workspace tfvars · Read-only")
+            HStack(spacing: 8) {
+                if variable.hcl { Text("JSON") }
+                if variable.sensitive { Text("Sensitive") }
+                if variable.isRemembered { Text("Remembered") }
+                else if variable.isUserInput { Text("This session") }
+                if variable.rememberedSecretUnavailable { Text("Unavailable") }
+            }
+            .font(.caption).foregroundColor(.secondary)
+            Text(safeValuePreview)
+                .font(.callout).foregroundColor(.secondary)
+                .lineLimit(2).truncationMode(.middle)
+            Text(variable.isUserInput
+                 ? "Source: Habitable app override · takes precedence over workspace tfvars · editable"
+                 : "Source: workspace tfvars · read-only")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -61,11 +67,13 @@ struct VariableListPage: View {
                     Text("No Terraform inputs").font(.headline)
                     Text("Values from workspace tfvars appear here as read-only inputs. Add an app override to supply or replace a value for plans started from Habitable.")
                         .font(.callout).foregroundColor(.secondary).multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 420)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 420).frame(maxWidth: .infinity)
                     Button("Add Terraform input") { openEditor(for: nil) }
                         .disabled(workspace.locked)
                         .accessibilityHint("Create an app override for a Terraform variable")
                 }
+                .padding(.horizontal)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityElement(children: .contain)
             } else {
@@ -88,6 +96,7 @@ struct VariableListPage: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Terraform Variables")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

@@ -188,17 +188,68 @@ private struct ScopedPlanAttribute: Identifiable {
 private struct PlanReviewView: View {
     let plan: StructuredLog
     let diff: TerraformPlan?
+    @State private var addressFilter = ""
+    @State private var operationFilter = "All"
+
+    private var visibleChanges: [PlanResourceChange] {
+        let changes = (diff?.resourceChanges ?? []).filter {
+            $0.action != "no-op" || $0.originalAddress != nil || $0.importingID != nil
+        }
+        return changes.filter { change in
+            let operation = change.isReplacement ? "replace" :
+                (change.importingID != nil ? "import" : (change.originalAddress != nil ? "move" : change.action))
+            return (addressFilter.isEmpty || change.address.localizedCaseInsensitiveContains(addressFilter)) &&
+                (operationFilter == "All" || operation.localizedCaseInsensitiveContains(operationFilter))
+        }
+    }
+
+    private var counts: (add: Int, change: Int, destroy: Int, replace: Int, read: Int) {
+        let changes = diff?.resourceChanges ?? []
+        return changes.reduce(into: (0, 0, 0, 0, 0)) { result, item in
+            if item.isReplacement { result.3 += 1 }
+            else if item.action == "create" { result.0 += 1 }
+            else if item.action == "delete" { result.2 += 1 }
+            else if item.action == "update" { result.1 += 1 }
+            else if item.action == "read" { result.4 += 1 }
+        }
+    }
 
     var body: some View {
         List {
-            if let diff {
-                    if diff.resourceChanges.allSatisfy({ $0.action == "no-op" && $0.originalAddress == nil && $0.importingID == nil }) &&
-                        diff.outputChanges.allSatisfy({ $0.action == "no-op" }) {
-                        Text("No changes in this plan.")
-                            .foregroundStyle(.secondary)
+            if diff != nil {
+                Section {
+                    HStack(spacing: 18) {
+                        planCount("Create", value: counts.add, color: .green)
+                        planCount("Update", value: counts.change, color: .blue)
+                        planCount("Replace", value: counts.replace, color: .orange)
+                        planCount("Destroy", value: counts.destroy, color: .red)
+                        if counts.read > 0 { planCount("Read", value: counts.read, color: .secondary) }
+                        Spacer(minLength: 0)
                     }
-                    ForEach(diff.resourceChanges.filter { $0.action != "no-op" || $0.originalAddress != nil || $0.importingID != nil }) { change in
-                        Section {
+                    .padding(.vertical, 4)
+                } header: { Text("Planned actions") }
+            }
+            if let diff {
+                if visibleChanges.isEmpty && diff.outputChanges.allSatisfy({ $0.action == "no-op" }) {
+                    Text(addressFilter.isEmpty && operationFilter == "All"
+                         ? "No changes in this plan." : "No resources match this filter.")
+                        .foregroundStyle(.secondary)
+                }
+                Section {
+                    HStack(spacing: 8) {
+                        TextField("Filter by resource address", text: $addressFilter)
+                            .textFieldStyle(.roundedBorder)
+                        Picker("Operation", selection: $operationFilter) {
+                            ForEach(["All", "create", "update", "replace", "delete", "read", "import", "move"], id: \.self) { operation in
+                                Text(operationLabel(operation)).tag(operation)
+                            }
+                        }
+                        .frame(width: 130)
+                    }
+                } header: { Text("Resource changes · \(visibleChanges.count) of \(diff.resourceChanges.filter { $0.action != "no-op" || $0.originalAddress != nil || $0.importingID != nil }.count)") }
+                ForEach(visibleChanges) { change in
+                    Section {
+                        DisclosureGroup {
                             if let originalAddress = change.originalAddress {
                                 LabeledContent("Moved from") {
                                     Text(originalAddress).textSelection(.enabled)
@@ -249,7 +300,7 @@ private struct PlanReviewView: View {
                                 }
                                 .padding(.vertical, 3)
                             }
-                        } header: {
+                        } label: {
                             HStack {
                                 Text(change.address)
                                 Spacer()
@@ -259,8 +310,10 @@ private struct PlanReviewView: View {
                             }
                         }
                     }
-                    ForEach(diff.outputChanges.filter { $0.action != "no-op" }) { output in
-                        Section {
+                }
+                ForEach(diff.outputChanges.filter { $0.action != "no-op" }) { output in
+                    Section {
+                        DisclosureGroup {
                             ForEach(output.attributes.map {
                                 ScopedPlanAttribute(owner: "output:\(output.name)", attribute: $0)
                             }) { row in
@@ -280,7 +333,7 @@ private struct PlanReviewView: View {
                                 }
                                 .padding(.vertical, 3)
                             }
-                        } header: {
+                        } label: {
                             HStack {
                                 Text("Output: \(output.name)")
                                 Spacer()
@@ -288,6 +341,7 @@ private struct PlanReviewView: View {
                             }
                         }
                     }
+                }
             }
             StructuredLogSections(logs: plan)
             if diff == nil && plan.diagnostics.isEmpty && plan.versions.isEmpty && plan.resources.isEmpty &&
@@ -297,6 +351,22 @@ private struct PlanReviewView: View {
                      : "Waiting for Terraform events…")
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    @ViewBuilder private func planCount(_ title: String, value: Int, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)").font(.title3.weight(.semibold)).foregroundStyle(color)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func operationLabel(_ operation: String) -> String {
+        switch operation {
+        case "delete": return "Destroy"
+        case "All": return "All"
+        default: return operation.capitalized
         }
     }
 }

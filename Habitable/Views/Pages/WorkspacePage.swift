@@ -24,6 +24,12 @@ struct CheckView: View {
 
 struct WorkspacePage: View {
     @EnvironmentObject var workspace: Workspace
+    var onReviewRun: (UUID) -> Void = { _ in }
+
+    private var latestRun: TerraformRun? {
+        guard workspace.historyPageOffset == 0 else { return nil }
+        return workspace.runs.max { $0.number < $1.number }
+    }
 
     private var readiness: (title: String, detail: String, action: String) {
         if workspace.locked { return ("Terraform is running", "Wait for the current command to finish.", "") }
@@ -47,6 +53,60 @@ struct WorkspacePage: View {
                     Text(workspace.executionContextDisplay)
                         .font(.subheadline).foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                }
+
+                if !workspace.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(workspace.description)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 20) {
+                    Label("\(workspace.state?.resources.count ?? 0) resources", systemImage: "cube")
+                    Label("\(workspace.state?.outputs.count ?? 0) outputs", systemImage: "arrow.up.right.square")
+                }
+                .font(.callout).foregroundStyle(.secondary)
+
+                GroupBox("Latest run") {
+                    if let run = latestRun {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Run #\(run.number)").font(.headline)
+                                Spacer()
+                                Text(run.status.rawValue.capitalized).foregroundStyle(.secondary)
+                            }
+                            Text(run.createdAt, format: .dateTime.month().day().hour().minute())
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let message = run.message, !message.isEmpty { Text(message) }
+                            HStack(spacing: 16) {
+                                if let count = run.added { Text("\(count) to create") }
+                                if let count = run.changed { Text("\(count) to update") }
+                                if let count = run.destroyed { Text("\(count) to destroy") }
+                            }
+                            .font(.callout)
+                            Button("Review run") { onReviewRun(run.id) }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(workspace.historyError ?? (workspace.historyLoading || workspace.historyPageOffset > 0
+                             ? "Loading the latest run…" : "No saved runs. Create a plan to review the proposed changes."))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                GroupBox("Terraform context") {
+                    Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 10) {
+                        GridRow { Text("Version").foregroundStyle(.secondary); Text(workspace.terraformVersion) }
+                        GridRow { Text("State backend").foregroundStyle(.secondary); Text(workspace.backendIdentity) }
+                        GridRow { Text("Terraform CLI").foregroundStyle(.secondary); Text("This Mac") }
+                        GridRow {
+                            Text("Execution").foregroundStyle(.secondary)
+                            Text(workspace.backendIdentity == "local" ? "This Mac" : "Determined by Terraform configuration")
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 GroupBox("Readiness") {
@@ -114,6 +174,9 @@ struct WorkspacePage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Workspace")
+        .onAppear {
+            if workspace.historyPageOffset > 0, !workspace.locked { workspace.reloadRunHistory() }
+        }
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button(action: { workspace.initialize() }) {
