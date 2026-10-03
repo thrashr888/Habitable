@@ -346,6 +346,9 @@ final class RunHistoryTests: XCTestCase {
         try Data().write(to: file)
         let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, historyStore: RunHistoryStore(directory: file), commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
         workspace.workingDirectory = directory
+        // Queueing is disabled while the initial history page is loading.
+        // Wait for readiness so this exercises the failing write, not a no-op.
+        try await waitUntil { !workspace.historyLoading }
         workspace.isValid = true
         workspace.queueRun()
         try await waitUntil { !workspace.locked && !workspace.historyLoading }
