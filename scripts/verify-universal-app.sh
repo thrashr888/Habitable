@@ -21,6 +21,10 @@ done
 (($# == 1)) || usage
 INPUT="$1"
 [[ -e "$INPUT" ]] || { echo "Artifact not found: $INPUT" >&2; exit 1; }
+if ((ALLOW_UNSIGNED)) && [[ "$INPUT" == *.zip ]]; then
+  echo "--allow-unsigned applies only to an extracted .app and cannot be used for release ZIPs" >&2
+  exit 1
+fi
 
 if [[ -n "$CHECKSUM_FILE" ]]; then
   [[ -f "$INPUT" ]] || { echo "Checksum manifests apply to file artifacts such as release ZIPs, not app bundles" >&2; exit 1; }
@@ -65,18 +69,15 @@ for ARCH in arm64 x86_64; do
   esac
 done
 
-if codesign -dv "$APP" >/dev/null 2>&1; then
+if ((ALLOW_UNSIGNED)); then
+  echo "Signature checks skipped for explicitly allowed unsigned app build."
+else
   codesign --verify --deep --strict "$APP"
   codesign -dv --verbose=2 "$APP" 2>&1 | sed -n 's/^Authority=/Signing authority: /p; s/^TeamIdentifier=/Team identifier: /p'
   if [[ -n "$TEMP_DIR" ]]; then
     xcrun stapler validate "$APP"
     spctl --assess --type execute --verbose=4 "$APP"
   fi
-elif ((ALLOW_UNSIGNED)); then
-  echo "Signature check skipped for explicitly allowed unsigned build."
-else
-  echo "App is unsigned; pass --allow-unsigned only for a CI build artifact." >&2
-  exit 1
 fi
 
 echo "Verified universal architectures: $ARCHITECTURES"
