@@ -21,3 +21,17 @@ The full suite passed 124 tests with no failures, using managed Terraform 1.16.5
 Native verification used /tmp/habitable-batch-four-20261002 and a second disposable folder. A remembered non-sensitive greeting survived app restart. The inspector showed nested paths, empty maps/arrays, public siblings, and masked input/output duplicates; searching the synthetic secret returned no matches. An external configuration edit expired the reviewed plan before Terraform apply ran, and Validate and plan produced a fresh review. Native Command-O opened the second folder; Open Recent returned to the original with its remembered input and run history. An unavailable recent folder showed an error and preserved the active runs, input, resources, and Ready state.
 
 Saved-plan diff review still has a separate preexisting duplicate-sensitive-value edge: terraform_data before.output can echo a marked-sensitive before.input string without its own mask. This is tracked as Habitable-vov. The new inspector handles that resource-level echo safely; broader plan-review redaction is the next follow-up.
+
+## Signed app and distribution
+
+The signed candidate recovered a remembered synthetic environment secret after restart with Ready status and masked presentation. Its metadata contained only the opaque Keychain reference, no secret value, and used file mode 0600. Removing the test input through the app removed the corresponding Keychain item. No real user credential was used for this test.
+
+A real Terraform named workspace qa produced a plan with the correct local backend label. Switching to default externally expired that plan before apply. No resources were created in the second fixture.
+
+0.4.6 build 10 is published to both the source repository and Homebrew tap and installed through thrashr888/tap/habitable. Exact app build revision: 34f0782b55794a1af9a2e812b504a0efddcd7ca6. Universal ZIP SHA-256: 453efdac9889f81d1feb88dd63d488c2ed161aa295db1df20451a39f3dad07ae. Both uploaded archive and checksum-manifest digests match local artifacts. Installed Developer ID signature, stapled ticket, Gatekeeper assessment, both architectures, and version/build checks passed. The installed app is open on the masked resource inspector fixture.
+
+Remote CI passed: https://github.com/thrashr888/Habitable/actions/runs/37092743344 . Packaging independently passed 124 tests with the optional online-download test skipped; the separate full local and remote runs enabled that download test.
+
+Source release: https://github.com/thrashr888/Habitable/releases/tag/v0.4.6 . Tap release: https://github.com/thrashr888/homebrew-tap/releases/tag/habitable-v0.4.6 . Beads items rt3.8, rt3.9, rt3.15, and rt3.17 are closed. Habitable-vov remains the next plan-review privacy follow-up.
+
+Homebrew cask style and online audit passed for the published 0.4.6 cask.
