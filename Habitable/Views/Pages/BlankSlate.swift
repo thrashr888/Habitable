@@ -9,6 +9,7 @@ struct BlankSlateView: View {
     let recentFolders: [URL]
     let onChooseFolder: () -> Void
     let onOpenRecent: (URL) -> Void
+    var onOpenHCP: (() -> Void)? = nil
 
     var body: some View {
         ScrollView {
@@ -22,6 +23,9 @@ struct BlankSlateView: View {
                 Button("Choose Folder…", action: onChooseFolder)
                     .buttonStyle(.borderedProminent)
                     .padding(.top, 4)
+                if let onOpenHCP {
+                    Button("Connect to HCP Terraform…", action: onOpenHCP)
+                }
             }
 
             VStack(alignment: .leading, spacing: 10) {

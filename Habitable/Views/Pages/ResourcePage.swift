@@ -242,24 +242,29 @@ struct ShowResourceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(filteredAttributes) { attribute in
-                    HStack(alignment: .top, spacing: 12) {
-                        Text(attribute.path)
-                            .font(.system(.callout, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .frame(minWidth: 150, alignment: .leading)
-                        Text(attribute.value)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        SafeCopyButton(value: attribute.value, label: "Copy value for \(attribute.path)")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 12) {
+                            attributeName(attribute)
+                                .frame(width: 150, alignment: .leading)
+                            attributeValue(attribute)
+                                .frame(minWidth: 180, maxWidth: .infinity, alignment: .leading)
+                            SafeCopyButton(value: attribute.value, label: "Copy value for \(attribute.path)")
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .top) {
+                                attributeName(attribute)
+                                Spacer(minLength: 8)
+                                SafeCopyButton(value: attribute.value, label: "Copy value for \(attribute.path)")
+                            }
+                            attributeValue(attribute)
+                        }
                     }
                     .padding(.vertical, 4)
                 }
                 .listStyle(.plain)
             }
         }
-        .padding()
+        .padding(20)
         .frame(minWidth: 400, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity, alignment: .topLeading)
         .task(id: documentationID) {
             loadedDeclaration = nil
@@ -290,6 +295,22 @@ struct ShowResourceView: View {
         .onChange(of: workspaceDirectory?.path) { _ in schemaHelp.reset() }
         .onChange(of: terraformExecutableURL?.path) { _ in schemaHelp.reset() }
     }
+    private func attributeName(_ attribute: ResourceAttribute) -> some View {
+        Text(attribute.path)
+            .font(.system(.callout, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func attributeValue(_ attribute: ResourceAttribute) -> some View {
+        Text(attribute.value)
+            .font(.system(.body, design: .monospaced))
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func metadataRow(_ label: String, value: String) -> some View {
         GridRow(alignment: .top) {
             Text(label).foregroundStyle(.secondary)

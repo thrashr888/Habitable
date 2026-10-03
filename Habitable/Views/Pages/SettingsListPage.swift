@@ -11,6 +11,7 @@ import AppKit
 struct SettingsListPage: View {
     @EnvironmentObject var workspace: Workspace
     @ObservedObject var catalog: TerraformReleaseCatalog
+    @ObservedObject var agentAccess: HabitableAgentAccess = HabitableAgentAccess()
 
     var body: some View {
         ScrollView {
@@ -59,6 +60,7 @@ struct SettingsListPage: View {
                             Button("Retry saving description", action: workspace.retrySavingWorkspaceDescription)
                                 .disabled(workspace.locked)
                         }
+                        DescriptionDraftControls(workspace: workspace)
                     }
                 }
 
@@ -88,6 +90,7 @@ struct SettingsListPage: View {
                 }
 
                 TerraformVersionSettings(workspace: workspace, catalog: catalog)
+                AgentsSettingsPage(access: agentAccess, workspace: workspace)
 
                 SettingsSection("Execution", footer: "When enabled, a successful plan applies immediately without a review step.") {
                     Toggle("Apply automatically after planning", isOn: $workspace.autoApply)

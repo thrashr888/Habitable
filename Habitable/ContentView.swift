@@ -29,7 +29,7 @@ extension FocusedValues {
 
 struct ContentView: View {
     enum NavigationItem: String {
-        case workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings
+        case workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings, hcpTerraform
 
         var title: String {
             switch self {
@@ -42,6 +42,7 @@ struct ContentView: View {
             case .variables: "Variables"
             case .envVariables: "Environment Variables"
             case .settings: "Settings"
+            case .hcpTerraform: "HCP Terraform"
             }
         }
 
@@ -57,6 +58,9 @@ struct ContentView: View {
     @StateObject private var editors = ExternalEditorStore()
     @StateObject private var readme = WorkspaceReadmePresentation()
     @StateObject private var navigationTrace = NavigationTrace()
+    @StateObject private var hcpViewer = HCPWorkspaceViewerModel()
+    @StateObject private var agentAccess = HabitableAgentAccess()
+    @StateObject private var windowIdentity = WorkspaceTitlebarController()
     @State private var selection: NavigationItem? = .workspace
     @State private var selectedRun: UUID?
     @State private var selectedRunDetail: TerraformRun?
@@ -77,7 +81,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: workspace.workingDirectory) { directory in
-            if let directory, isAvailableDirectory(directory) { recentWorkspaces.recordSuccessfulOpen(directory) }
+            agentAccess.workspaceChanged(in: workspace)
+            if let directory, isAvailableDirectory(directory) {
+                recentWorkspaces.recordSuccessfulOpen(directory)
+                if selection == .hcpTerraform { navigationSelection.wrappedValue = .workspace }
+            }
         }
         .alert("Unable to Open Folder", isPresented: $isOpenErrorPresented) {
             Button("OK", role: .cancel) { workspace.dismissWorkspaceOpenError() }
@@ -99,6 +107,10 @@ struct ContentView: View {
             selectedRunDetail = nil
             selectedResource = nil
             selectedOutput = nil
+        }
+        .onDisappear { agentAccess.setEnabled(false, in: workspace) }
+        .onChange(of: selection) { page in
+            if page == .hcpTerraform { agentAccess.setEnabled(false, in: workspace) }
         }
         .onChange(of: selectedRun) { id in
             selectedRunDetail = workspace.runs.first { $0.id == id }
@@ -124,7 +136,10 @@ struct ContentView: View {
 
     private var configuredWindowContent: some View {
         windowContent
-        .background(WorkspaceWindowIdentity(title: workspaceName))
+        .background(WorkspaceWindowIdentity(controller: windowIdentity, title: workspaceName,
+                                            sidebarVisible: sidebarVisible && (workspace.workingDirectory != nil || selection == .hcpTerraform),
+                                            hasWorkspace: workspace.workingDirectory != nil || selection == .hcpTerraform,
+                                            toggleSidebar: { sidebarVisible.toggle() }))
         .environmentObject(workspace)
         .environmentObject(editors)
         .buttonStyle(.borderless)
@@ -138,30 +153,19 @@ struct ContentView: View {
 
     private var windowContent: some View {
         Group {
-            if workspace.workingDirectory == nil {
+            if workspace.workingDirectory == nil && selection != .hcpTerraform {
                 BlankSlateView(recentFolders: recentWorkspaces.folders,
                                onChooseFolder: openFolder,
-                               onOpenRecent: openRecent)
+                               onOpenRecent: openRecent,
+                               onOpenHCP: { navigationSelection.wrappedValue = .hcpTerraform })
             } else {
                 HSplitView {
                     if sidebarVisible {
                         sidebar.frame(minWidth: 180, idealWidth: 200, maxWidth: 240, maxHeight: .infinity)
+                            .background(WorkspaceSidebarEdge(controller: windowIdentity))
                     }
                     destinationContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .toolbar {
-                    QuietToolbar {
-                        ToolbarItem(placement: .navigation) {
-                            Button { sidebarVisible.toggle() } label: {
-                                Label(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
-                            }
-                            .buttonStyle(.borderless)
-                            .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
-                            .keyboardShortcut("s", modifiers: [.command, .control])
-                        }
-
-                    }
                 }
             }
         }
@@ -193,6 +197,7 @@ struct ContentView: View {
             openRecent: openRecent,
             clearRecents: recentWorkspaces.clear,
             plan: {
+                guard selection != .hcpTerraform else { return }
                 workspace.validateAndQueueRun(onCreated: { id in
                     selectedRun = id
                     navigationSelection.wrappedValue = .runs
@@ -200,15 +205,18 @@ struct ContentView: View {
             },
             initialize: workspace.initialize,
             validate: workspace.validate,
-            canPlan: workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
+            canPlan: selection != .hcpTerraform && workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
                 && workspace.historyError == nil && !workspace.isInspectingInputs && !workspace.hasUnavailableRememberedInputs,
-            canInitialize: workspace.workingDirectory != nil && !workspace.locked,
-            canValidate: workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
+            canInitialize: selection != .hcpTerraform && workspace.workingDirectory != nil && !workspace.locked,
+            canValidate: selection != .hcpTerraform && workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
             planTitle: workspace.autoApply ? "Plan and apply automatically" : "Plan"
         )
     }
 
     private var workspaceName: String {
+        if selection == .hcpTerraform {
+            return hcpViewer.selectedWorkspace.map { "\($0.name) · \(hcpViewer.selectedOrganization)" } ?? "HCP Terraform"
+        }
         guard let directory = workspace.workingDirectory else { return "Habitable" }
         return directory.lastPathComponent.isEmpty ? directory.path : directory.lastPathComponent
     }
@@ -218,17 +226,21 @@ struct ContentView: View {
             Label("Workspace", systemImage: "folder").tag(NavigationItem.workspace)
             Label("README", systemImage: "book.closed").tag(NavigationItem.readme)
             Label("Configuration", systemImage: "doc.text").tag(NavigationItem.configuration)
-            Label("Runs (\(max(workspace.historyTotalCount, workspace.runs.count)))", systemImage: "list.bullet.rectangle").tag(NavigationItem.runs)
-            Label("Resources (\(workspace.state?.resources.count ?? 0))", systemImage: "globe").tag(NavigationItem.resources)
-            Label("Outputs (\(workspace.state?.outputs.count ?? 0))", systemImage: "chevron.right.square").tag(NavigationItem.outputs)
-            Label("Variables (\(workspace.terraformVariables.count))", systemImage: "dollarsign.circle").tag(NavigationItem.variables)
-            Label("Env Vars (\(workspace.environmentVariables.count))", systemImage: "dollarsign.circle").tag(NavigationItem.envVariables)
+            sidebarRow("Runs", symbol: "list.bullet.rectangle", count: max(workspace.historyTotalCount, workspace.runs.count)).tag(NavigationItem.runs)
+            sidebarRow("Resources", symbol: "globe", count: workspace.state?.resources.count ?? 0).tag(NavigationItem.resources)
+            sidebarRow("Outputs", symbol: "chevron.right.square", count: workspace.state?.outputs.count ?? 0).tag(NavigationItem.outputs)
+            sidebarRow("Variables", symbol: "dollarsign.circle", count: workspace.terraformVariables.count).tag(NavigationItem.variables)
+            sidebarRow("Environment", symbol: "terminal", count: workspace.environmentVariables.count).tag(NavigationItem.envVariables)
             Label("Settings", systemImage: "gear").tag(NavigationItem.settings)
+            Divider()
+            Label("HCP Terraform", systemImage: "cloud").tag(NavigationItem.hcpTerraform)
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
-                if workspace.locked {
+                if selection == .hcpTerraform {
+                    Label(hcpViewer.isConnected ? "HCP · Read-only" : "HCP disconnected", systemImage: "cloud")
+                } else if workspace.locked {
                     ProgressView().controlSize(.small)
                     Text("Running Terraform").lineLimit(1)
                 } else if workspace.isInspectingInputs {
@@ -244,11 +256,23 @@ struct ContentView: View {
                 }
                 Spacer()
             }
-            .font(.callout)
+            .font(.caption)
             .foregroundStyle(.secondary)
-            .padding()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .accessibilityElement(children: .combine)
         }
+    }
+
+    private func sidebarRow(_ title: String, symbol: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Label(title, systemImage: symbol).lineLimit(1)
+            Spacer(minLength: 4)
+            Text(count, format: .number)
+                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(count)")
     }
 
     @ViewBuilder private var collection: some View {
@@ -295,7 +319,10 @@ struct ContentView: View {
                                                declarationRequest: $declarationRequest)
         case .variables: VariableListPage(showMissingOnly: showMissingInputs)
         case .envVariables: EnvVarListPage()
-        case .settings: SettingsListPage(catalog: releaseCatalog)
+        case .settings: SettingsListPage(catalog: releaseCatalog, agentAccess: agentAccess)
+        case .hcpTerraform: HCPWorkspaceViewer(model: hcpViewer)
+                .onAppear { hcpViewer.setVisible(true) }
+                .onDisappear { hcpViewer.setVisible(false) }
         default: WorkspacePage(onReviewRun: { id in
             selectedRun = id
             navigationSelection.wrappedValue = .runs
@@ -412,24 +439,151 @@ struct ContentView_Previews: PreviewProvider {
     static var previews: some View { ContentView() }
 }
 
-/// AppKit owns the single visible title and its normal toolbar-space truncation.
+/// The title remains the window identity for the Window menu and accessibility.
+/// Its one visible label lives in a standard left titlebar accessory, aligned to
+/// the real sidebar edge rather than an assumed sidebar width or page heading.
+@MainActor
+private final class WorkspaceTitlebarController: ObservableObject {
+    private weak var window: NSWindow?
+    private weak var sidebar: NSView?
+    private let accessory = NSTitlebarAccessoryViewController()
+    private let titleView = WorkspaceTitlebarLabel()
+    private var sidebarVisible = true
+
+    init() {
+        accessory.layoutAttribute = .left
+        accessory.view = titleView
+    }
+
+    func update(window: NSWindow?, title: String, sidebarVisible: Bool, hasWorkspace: Bool, toggleSidebar: @escaping () -> Void) {
+        self.sidebarVisible = sidebarVisible
+        guard let window else { return }
+        if self.window !== window {
+            if let oldWindow = self.window,
+               let index = oldWindow.titlebarAccessoryViewControllers.firstIndex(of: accessory) {
+                oldWindow.removeTitlebarAccessoryViewController(at: index)
+            }
+            self.window = window
+            window.addTitlebarAccessoryViewController(accessory)
+        }
+        window.title = title
+        window.titleVisibility = .hidden
+        window.toolbarStyle = .unifiedCompact
+        titleView.toggleSidebar = toggleSidebar
+        titleView.sidebarButton.isHidden = !hasWorkspace
+        titleView.sidebarButton.toolTip = sidebarVisible ? "Hide Sidebar" : "Show Sidebar"
+        titleView.sidebarButton.setAccessibilityLabel(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+        titleView.label.stringValue = title
+        titleView.label.toolTip = title
+        titleView.label.setAccessibilityLabel("Workspace: \(title)")
+        updateGeometry()
+    }
+
+    func track(sidebar: NSView) {
+        self.sidebar = sidebar
+        updateGeometry()
+    }
+
+    func updateGeometry() {
+        guard let window else { return }
+        let sidebarEdge = sidebarVisible && sidebar?.window === window
+            ? sidebar?.convert(sidebar?.bounds ?? .zero, to: nil).maxX : nil
+        titleView.sidebarEdge = sidebarEdge
+        titleView.availableWindowWidth = window.frame.width
+        titleView.needsLayout = true
+    }
+}
+
+private final class WorkspaceTitlebarLabel: NSView {
+    let label = NSTextField(labelWithString: "")
+    let sidebarButton = NSButton()
+    var toggleSidebar: (() -> Void)?
+    var sidebarEdge: CGFloat?
+    var availableWindowWidth: CGFloat = 900
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 28))
+        label.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        label.textColor = .labelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        addSubview(label)
+        sidebarButton.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)
+        sidebarButton.imagePosition = .imageOnly
+        sidebarButton.isBordered = false
+        sidebarButton.bezelStyle = .accessoryBarAction
+        sidebarButton.target = self
+        sidebarButton.action = #selector(toggleSidebarAction)
+        sidebarButton.keyEquivalent = "s"
+        sidebarButton.keyEquivalentModifierMask = [.command, .control]
+        addSubview(sidebarButton)
+    }
+
+    @objc private func toggleSidebarAction() { toggleSidebar?() }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func layout() {
+        super.layout()
+        guard window != nil else { return }
+        let origin = convert(bounds, to: nil).minX
+        let leadingSpace: CGFloat = sidebarButton.isHidden ? 8 : 36
+        let inset = sidebarEdge.map { max(leadingSpace, $0 + 16 - origin) } ?? leadingSpace
+        // Leave room for page actions/search at the minimum supported window size.
+        let titleWidth = min(260, max(120, (availableWindowWidth - (sidebarEdge ?? origin)) * 0.30))
+        let width = inset + titleWidth
+        if abs(frame.width - width) > 0.5 { setFrameSize(NSSize(width: width, height: frame.height)) }
+        let height = ceil(label.intrinsicContentSize.height)
+        sidebarButton.frame = NSRect(x: 0, y: floor((bounds.height - 28) / 2), width: 28, height: 28)
+        label.frame = NSRect(x: inset, y: floor((bounds.height - height) / 2), width: titleWidth, height: height)
+    }
+}
+
 private struct WorkspaceWindowIdentity: NSViewRepresentable {
+    let controller: WorkspaceTitlebarController
     let title: String
+    let sidebarVisible: Bool
+    let hasWorkspace: Bool
+    let toggleSidebar: () -> Void
     func makeNSView(context: Context) -> IdentityView { IdentityView() }
     func updateNSView(_ view: IdentityView, context: Context) {
-        view.title = title
-        view.updateIdentity()
+        view.update = { [weak controller] window in
+            controller?.update(window: window, title: title, sidebarVisible: sidebarVisible,
+                               hasWorkspace: hasWorkspace, toggleSidebar: toggleSidebar)
+        }
+        view.update?(view.window)
     }
     final class IdentityView: NSView {
-        var title = "Habitable"
+        var update: ((NSWindow?) -> Void)?
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            updateIdentity()
+            update?(window)
         }
-        func updateIdentity() {
-            window?.title = title
-            window?.titleVisibility = .visible
-            window?.toolbarStyle = .unifiedCompact
+        override func layout() {
+            super.layout()
+            update?(window)
+        }
+    }
+}
+
+private struct WorkspaceSidebarEdge: NSViewRepresentable {
+    let controller: WorkspaceTitlebarController
+    func makeNSView(context: Context) -> EdgeView { EdgeView() }
+    func updateNSView(_ view: EdgeView, context: Context) {
+        view.controller = controller
+        controller.track(sidebar: view)
+    }
+    final class EdgeView: NSView {
+        weak var controller: WorkspaceTitlebarController?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            controller?.track(sidebar: self)
+        }
+        override func layout() {
+            super.layout()
+            controller?.track(sidebar: self)
         }
     }
 }

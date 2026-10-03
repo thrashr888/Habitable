@@ -1,0 +1,726 @@
+import Foundation
+import Combine
+import Security
+
+struct HCPConnectionIdentity: Codable, Equatable, Sendable {
+    var hostname: String
+    var organization: String
+    var workspaceID: String?
+    var runID: String?
+
+    static let app = HCPConnectionIdentity(hostname: "app.terraform.io", organization: "pthrasher_v2")
+}
+
+struct HCPOrganization: Identifiable, Equatable, Sendable {
+    let name: String
+    let email: String?
+    var id: String { name }
+}
+
+struct HCPWorkspace: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let terraformVersion: String?
+    let executionMode: String?
+    let locked: Bool
+    let htmlURL: URL?
+}
+
+struct HCPRun: Identifiable, Equatable, Sendable {
+    let id: String
+    let workspaceID: String
+    let workspaceName: String
+    let status: String
+    let message: String?
+    let operation: String?
+    let createdAt: Date?
+    let hasChanges: Bool?
+    let isDestroy: Bool
+    let planID: String?
+    let applyID: String?
+    let htmlURL: URL?
+    var isActive: Bool {
+        !["applied", "discarded", "errored", "canceled", "force_canceled", "planned_and_finished", "planned_and_saved"].contains(status)
+    }
+}
+
+struct HCPRunDetails: Equatable, Sendable {
+    let run: HCPRun
+    let planStatus: String?
+    let applyStatus: String?
+    let planLogs: String?
+    let applyLogs: String?
+    let planReviewURL: URL?
+    let runURL: URL?
+}
+
+struct HCPPage<T: Sendable>: Sendable {
+    let items: [T]
+    let page: Int
+    let hasNextPage: Bool
+    let totalCount: Int?
+}
+
+enum HCPViewerError: LocalizedError, Equatable {
+    case invalidHost
+    case noCredential
+    case invalidCredentialFile
+    case credentialTooLarge
+    case response(status: Int, message: String)
+    case invalidResponse
+    case rateLimited
+    case responseTooLarge
+    case transport(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidHost: "Enter a valid HCP Terraform hostname."
+        case .noCredential: "Import a Terraform CLI credential before connecting."
+        case .invalidCredentialFile: "The selected Terraform credentials file does not contain a token for app.terraform.io."
+        case .credentialTooLarge: "The Terraform credentials file is larger than the allowed 64 KB."
+        case .response(let status, let message): "HCP Terraform returned HTTP \(status): \(message)"
+        case .invalidResponse: "HCP Terraform returned a response Habitable could not read."
+        case .rateLimited: "Refresh is cooling down to respect HCP Terraform's run-history limit. Try again shortly."
+        case .responseTooLarge: "HCP Terraform returned more data than Habitable will read for this request."
+        case .transport(let message): message
+        }
+    }
+}
+
+protocol HCPTokenStore: Sendable {
+    func read(hostname: String) throws -> String?
+    func write(_ token: String, hostname: String) throws
+    func delete(hostname: String) throws
+}
+
+struct KeychainHCPTokenStore: HCPTokenStore {
+    private let service = "com.thrashr888.Habitable.hcp-terraform"
+    func read(hostname: String) throws -> String? {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query(hostname, returningData: true) as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data,
+              let token = String(data: data, encoding: .utf8), !token.isEmpty else {
+            throw HCPViewerError.transport("Could not read the HCP Terraform credential from Keychain (\(status)).")
+        }
+        return token
+    }
+    func write(_ token: String, hostname: String) throws {
+        let base = query(hostname)
+        let data = Data(token.utf8)
+        let status = SecItemUpdate(base as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var insertion = base
+            insertion[kSecValueData as String] = data
+            insertion[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let add = SecItemAdd(insertion as CFDictionary, nil)
+            guard add == errSecSuccess else { throw HCPViewerError.transport("Could not store the HCP Terraform credential in Keychain (\(add)).") }
+        } else if status != errSecSuccess {
+            throw HCPViewerError.transport("Could not store the HCP Terraform credential in Keychain (\(status)).")
+        }
+    }
+    func delete(hostname: String) throws {
+        let status = SecItemDelete(query(hostname) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw HCPViewerError.transport("Could not remove the HCP Terraform credential from Keychain (\(status)).")
+        }
+    }
+    private func query(_ host: String, returningData: Bool = false) -> [String: Any] {
+        var value: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: host,
+            kSecMatchLimit as String: kSecMatchLimitOne]
+        if returningData { value[kSecReturnData as String] = true }
+        return value
+    }
+}
+
+struct HCPStoredSelection: Codable, Sendable {
+    var identity: HCPConnectionIdentity
+    var selectedWorkspaceID: String?
+    var selectedRunID: String?
+}
+
+protocol HCPSelectionStore: Sendable {
+    func load() -> HCPStoredSelection?
+    func save(_ selection: HCPStoredSelection)
+}
+
+struct UserDefaultsHCPSelectionStore: HCPSelectionStore {
+    private let key = "HCPWorkspaceViewer.selection.v1"
+    func load() -> HCPStoredSelection? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(HCPStoredSelection.self, from: data)
+    }
+    func save(_ selection: HCPStoredSelection) {
+        guard let data = try? JSONEncoder().encode(selection) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
+struct HCPAPIClient: Sendable {
+    let session: URLSession
+    init(configuration: URLSessionConfiguration = .ephemeral) {
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        self.session = URLSession(configuration: configuration, delegate: HCPRedirectPolicy(), delegateQueue: nil)
+    }
+
+    private static let apiResponseLimit = 8 * 1024 * 1024
+    private static let artifactResponseLimit = 2 * 1024 * 1024
+
+    func organizations(hostname: String, token: String, page: Int) async throws -> HCPPage<HCPOrganization> {
+        let object = try await get(path: "/api/v2/organizations", hostname: hostname, token: token, query: pagination(page))
+        let data = array(object["data"])
+        let items = data.compactMap { row -> HCPOrganization? in
+            let attributes = row["attributes"] as? [String: Any] ?? [:]
+            guard let name = attributes["name"] as? String ?? row["id"] as? String else { return nil }
+            return HCPOrganization(name: name, email: attributes["email"] as? String)
+        }
+        return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
+    }
+
+    func workspaces(hostname: String, organization: String, token: String, page: Int) async throws -> HCPPage<HCPWorkspace> {
+        let path = "/api/v2/organizations/\(pathComponent(organization))/workspaces"
+        let object = try await get(path: path, hostname: hostname, token: token, query: pagination(page))
+        let items = array(object["data"]).compactMap { decodeWorkspace($0, hostname: hostname, organization: organization) }
+        return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
+    }
+
+    func runs(hostname: String, organization: String, workspace: HCPWorkspace, token: String, page: Int) async throws -> HCPPage<HCPRun> {
+        let path = "/api/v2/workspaces/\(pathComponent(workspace.id))/runs"
+        // The API omits plan_only runs unless an operation filter is supplied.
+        let query = pagination(page) + [URLQueryItem(name: "filter[operation]", value: "plan_only,plan_and_apply,save_plan,refresh_only,destroy,empty_apply,action_only")]
+        let object = try await get(path: path, hostname: hostname, token: token, query: query)
+        let items = array(object["data"]).compactMap {
+            decodeRun($0, hostname: hostname, organization: organization, workspaceID: workspace.id, workspaceName: workspace.name)
+        }
+        return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
+    }
+
+    func runDetails(hostname: String, organization: String, run: HCPRun, token: String) async throws -> HCPRunDetails {
+        let object = try await get(path: "/api/v2/runs/\(pathComponent(run.id))", hostname: hostname, token: token,
+                                  query: [URLQueryItem(name: "include", value: "plan,apply")])
+        guard let row = object["data"] as? [String: Any],
+              var freshRun = decodeRun(row, hostname: hostname, organization: organization,
+                                       workspaceID: run.workspaceID, workspaceName: run.workspaceName) else {
+            throw HCPViewerError.invalidResponse
+        }
+        freshRun = HCPRun(id: freshRun.id, workspaceID: freshRun.workspaceID, workspaceName: run.workspaceName,
+                          status: freshRun.status, message: freshRun.message, operation: freshRun.operation,
+                          createdAt: freshRun.createdAt, hasChanges: freshRun.hasChanges, isDestroy: freshRun.isDestroy,
+                          planID: freshRun.planID, applyID: freshRun.applyID, htmlURL: run.htmlURL ?? freshRun.htmlURL)
+        let included = array(object["included"])
+        let planRow = included.first { ($0["type"] as? String) == "plans" && ($0["id"] as? String) == freshRun.planID }
+        let applyRow = included.first { ($0["type"] as? String) == "applies" && ($0["id"] as? String) == freshRun.applyID }
+        var planLogs: String?
+        var applyLogs: String?
+        let planAttributes = planRow?["attributes"] as? [String: Any]
+        let applyAttributes = applyRow?["attributes"] as? [String: Any]
+        if let urlString = planAttributes?["log-read-url"] as? String,
+           let url = secureArtifactURL(urlString) { planLogs = try await fetchArtifact(url) }
+        if let urlString = applyAttributes?["log-read-url"] as? String,
+           let url = secureArtifactURL(urlString) { applyLogs = try await fetchArtifact(url) }
+        let planStatus = planAttributes?["status"] as? String
+        let applyStatus = applyAttributes?["status"] as? String
+        let planReview = freshRun.planID == nil ? nil : freshRun.htmlURL
+        return HCPRunDetails(run: freshRun, planStatus: planStatus, applyStatus: applyStatus,
+                             planLogs: Self.redactLogs(planLogs), applyLogs: Self.redactLogs(applyLogs),
+                             planReviewURL: planReview, runURL: freshRun.htmlURL)
+    }
+
+    private func get(path: String, hostname: String, token: String, query: [URLQueryItem] = []) async throws -> [String: Any] {
+        guard let host = Self.normalizedHostname(hostname), let base = URL(string: "https://\(host)"),
+              var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false) else {
+            throw HCPViewerError.invalidHost
+        }
+        components.queryItems = query.isEmpty ? nil : query
+        guard let url = components.url else { throw HCPViewerError.invalidHost }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 25
+        do {
+            let (data, response) = try await boundedData(for: request, limit: Self.apiResponseLimit)
+            guard let http = response as? HTTPURLResponse else { throw HCPViewerError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else { throw responseError(data, status: http.statusCode) }
+            guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw HCPViewerError.invalidResponse }
+            return result
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
+    }
+
+    private func fetchArtifact(_ url: URL) async throws -> String? {
+        guard url.scheme == "https", url.user == nil, url.password == nil else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 25
+        // Signed artifact URLs carry their own authorization. Never forward the API token.
+        do {
+            let (data, response) = try await boundedData(for: request, limit: Self.artifactResponseLimit)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+            return String(data: data, encoding: .utf8)
+        } catch HCPViewerError.responseTooLarge {
+            return "Log output exceeded the 2 MB display limit."
+        } catch { return nil }
+    }
+
+    private func secureArtifactURL(_ value: String) -> URL? {
+        guard value.utf8.count <= 4096, let url = URL(string: value), url.scheme == "https",
+              url.host != nil, url.user == nil, url.password == nil else { return nil }
+        return url
+    }
+
+    private func boundedData(for request: URLRequest, limit: Int) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request)
+        let expected = response.expectedContentLength
+        guard expected < 0 || expected <= Int64(limit) else {
+            bytes.task.cancel()
+            throw HCPViewerError.responseTooLarge
+        }
+        var body = Data()
+        body.reserveCapacity(expected > 0 ? min(Int(expected), limit) : min(limit, 64 * 1024))
+        do {
+            for try await byte in bytes {
+                guard body.count < limit else {
+                    bytes.task.cancel()
+                    throw HCPViewerError.responseTooLarge
+                }
+                body.append(byte)
+            }
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
+        return (body, response)
+    }
+
+    private func decodeWorkspace(_ row: [String: Any], hostname: String, organization: String) -> HCPWorkspace? {
+        guard let id = row["id"] as? String, let attributes = row["attributes"] as? [String: Any],
+              let name = attributes["name"] as? String else { return nil }
+        let url = URL(string: "https://\(hostname)/app/\(pathComponent(organization))/workspaces/\(pathComponent(name))")
+        return HCPWorkspace(id: id, name: name, terraformVersion: attributes["terraform-version"] as? String,
+                            executionMode: attributes["execution-mode"] as? String,
+                            locked: attributes["locked"] as? Bool ?? false, htmlURL: url)
+    }
+
+    private func decodeRun(_ row: [String: Any], hostname: String, organization: String,
+                           workspaceID: String, workspaceName: String) -> HCPRun? {
+        guard let id = row["id"] as? String, let attributes = row["attributes"] as? [String: Any],
+              let status = attributes["status"] as? String else { return nil }
+        let relationships = row["relationships"] as? [String: Any] ?? [:]
+        let planID = relationshipID(relationships["plan"])
+        let applyID = relationshipID(relationships["apply"])
+        let date = (attributes["created-at"] as? String).flatMap(isoDate)
+        let url = URL(string: "https://\(hostname)/app/\(pathComponent(organization))/workspaces/\(pathComponent(workspaceName))/runs/\(pathComponent(id))")
+        return HCPRun(id: id, workspaceID: workspaceID, workspaceName: workspaceName, status: status,
+                      message: attributes["message"] as? String, operation: attributes["operation"] as? String,
+                      createdAt: date, hasChanges: attributes["has-changes"] as? Bool,
+                      isDestroy: attributes["is-destroy"] as? Bool ?? false,
+                      planID: planID, applyID: applyID, htmlURL: url)
+    }
+
+    private func responseError(_ data: Data, status: Int) -> HCPViewerError {
+        let fallback: String
+        switch status {
+        case 401: fallback = "The token was rejected. Reimport a user or team token."
+        case 403: fallback = "This account cannot view that organization, workspace, or run. Check its permissions and entitlements."
+        case 404: fallback = "The organization, workspace, or run is unavailable to this account."
+        case 429: fallback = "HCP Terraform is limiting requests. Wait before refreshing."
+        default: fallback = "The request could not be completed."
+        }
+        _ = data // API error details are intentionally omitted because they can echo secrets.
+        return .response(status: status, message: fallback)
+    }
+
+    private func pagination(_ page: Int) -> [URLQueryItem] {
+        [URLQueryItem(name: "page[number]", value: String(max(1, page))), URLQueryItem(name: "page[size]", value: "50")]
+    }
+    private func array(_ value: Any?) -> [[String: Any]] { value as? [[String: Any]] ?? [] }
+    private func nextPage(_ object: [String: Any]) -> String? { (object["links"] as? [String: Any])?["next"] as? String }
+    private func paginationCount(_ object: [String: Any]) -> Int? {
+        ((object["meta"] as? [String: Any])?["pagination"] as? [String: Any])?["total-count"] as? Int
+    }
+    private func relationshipID(_ value: Any?) -> String? { (value as? [String: Any])?["data"].flatMap { ($0 as? [String: Any])?["id"] as? String } }
+    private func pathComponent(_ value: String) -> String { value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? value }
+    private func isoDate(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+    static func normalizedHostname(_ raw: String) -> String? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .replacingOccurrences(of: "https://", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !value.isEmpty, !value.contains("/"), !value.contains("@"), !value.contains(":") else { return nil }
+        let labels = value.split(separator: ".")
+        guard !value.contains(".."), labels.count >= 2,
+              labels.allSatisfy({ !$0.isEmpty && $0.first != "-" && $0.last != "-" && $0.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" } }) else { return nil }
+        return value
+    }
+    static func redactLogs(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        var output = raw.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            redactStructuredLog(String(line))
+        }.joined(separator: "\n")
+        let patterns: [(String, String)] = [
+            (#"(?i)(authorization\s*[:=]\s*bearer\s+)\S+"#, "$1[redacted]"),
+            (#"(?i)([\"']?[A-Za-z0-9_-]*(?:token|password|secret|private[_-]?key|access[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]*[\"']?\s*[:=]\s*)(\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s,;]+)"#, "$1[redacted]"),
+            (#"(?i)(TF_VAR_[A-Za-z0-9_]+\s*=\s*)([^\s]+)"#, "$1[redacted]")
+        ]
+        for (pattern, replacement) in patterns {
+            output = output.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+        }
+        return String(output.prefix(100_000))
+    }
+
+    private static func redactStructuredLog(_ line: String) -> String {
+        guard let data = line.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { return line }
+        func scrub(_ value: Any) -> Any {
+            if let dictionary = value as? [String: Any] {
+                let sensitive = dictionary["sensitive"] as? Bool == true
+                var result: [String: Any] = [:]
+                for (key, item) in dictionary {
+                    let normalized = key.lowercased().replacingOccurrences(of: "-", with: "_")
+                    let secretKey = ["password", "token", "secret", "private_key", "access_key", "client_secret", "credential"]
+                        .contains(where: normalized.contains)
+                    if secretKey || (sensitive && ["value", "values", "before", "after", "raw"].contains(key)) {
+                        result[key] = "[redacted]"
+                    } else {
+                        result[key] = scrub(item)
+                    }
+                }
+                return result
+            }
+            if let array = value as? [Any] { return array.map(scrub) }
+            return value
+        }
+        guard let encoded = try? JSONSerialization.data(withJSONObject: scrub(value), options: [.fragmentsAllowed, .sortedKeys]),
+              let sanitized = String(data: encoded, encoding: .utf8) else { return line }
+        return sanitized
+    }
+}
+
+/// Credentialed API requests may only follow redirects within their original HTTPS origin.
+/// Signed artifact requests have no API bearer and are allowed to follow HTTPS storage redirects.
+final class HCPRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let target = request.url, target.scheme?.lowercased() == "https",
+              target.user == nil, target.password == nil else {
+            completionHandler(nil)
+            return
+        }
+        if task.originalRequest?.value(forHTTPHeaderField: "Authorization") != nil {
+            guard let source = task.originalRequest?.url, Self.sameOrigin(source, target) else {
+                completionHandler(nil)
+                return
+            }
+        }
+        completionHandler(request)
+    }
+
+    private static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        guard let left = URLComponents(url: lhs, resolvingAgainstBaseURL: false),
+              let right = URLComponents(url: rhs, resolvingAgainstBaseURL: false) else { return false }
+        return left.scheme?.lowercased() == "https" && right.scheme?.lowercased() == "https"
+            && left.host?.lowercased() == right.host?.lowercased()
+            && (left.port ?? 443) == (right.port ?? 443)
+    }
+}
+
+@MainActor
+final class HCPWorkspaceViewerModel: ObservableObject {
+    @Published private(set) var identity: HCPConnectionIdentity
+    @Published private(set) var organizations: [HCPOrganization] = []
+    @Published private(set) var workspaces: [HCPWorkspace] = []
+    @Published private(set) var runs: [HCPRun] = []
+    @Published private(set) var selectedRunDetails: HCPRunDetails?
+    @Published var selectedWorkspaceID: String? {
+        didSet {
+            guard oldValue != selectedWorkspaceID else { return }
+            currentOperation = UUID()
+            isLoading = false
+            runRefreshTime = .distantPast
+            cancelPolling()
+            runs = []; selectedRunDetails = nil; selectedRunID = nil
+            runPage = 1; runHasNextPage = false
+            persistSelection()
+        }
+    }
+    @Published var selectedRunID: String? {
+        didSet {
+            guard oldValue != selectedRunID else { return }
+            currentOperation = UUID()
+            isLoading = false
+            selectedRunDetails = nil
+            persistSelection()
+        }
+    }
+    @Published var selectedOrganization: String {
+        didSet {
+            guard oldValue != selectedOrganization else { return }
+            disconnect()
+            identity.organization = selectedOrganization
+            selectedWorkspaceID = nil
+            persistSelection()
+        }
+    }
+    @Published var hostname: String {
+        didSet {
+            guard oldValue != hostname else { return }
+            disconnect()
+            identity.hostname = hostname
+            hasStoredCredential = (try? tokenStore.read(hostname: HCPAPIClient.normalizedHostname(hostname) ?? "")) != nil
+            persistSelection()
+        }
+    }
+    @Published private(set) var isConnected = false
+    @Published private(set) var isLoading = false
+    @Published private(set) var isImporting = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var lastUpdated: Date?
+    @Published private(set) var hasStoredCredential = false
+    @Published private(set) var workspacePage = 1
+    @Published private(set) var runPage = 1
+    @Published private(set) var workspaceHasNextPage = false
+    @Published private(set) var runHasNextPage = false
+
+    private let tokenStore: HCPTokenStore
+    private let selectionStore: HCPSelectionStore
+    private let client: HCPAPIClient
+    private var runRefreshTime = Date.distantPast
+    private var workspaceRefreshTime = Date.distantPast
+    private var currentOperation = UUID()
+    private var pollTask: Task<Void, Never>?
+    private var pollingGeneration = UUID()
+    private var isVisible = true
+
+    init(tokenStore: HCPTokenStore = KeychainHCPTokenStore(),
+         selectionStore: HCPSelectionStore = UserDefaultsHCPSelectionStore(),
+         client: HCPAPIClient = HCPAPIClient()) {
+        self.tokenStore = tokenStore
+        self.selectionStore = selectionStore
+        self.client = client
+        let saved = selectionStore.load()
+        let base = saved?.identity ?? .app
+        identity = base
+        hostname = base.hostname
+        selectedOrganization = base.organization
+        selectedWorkspaceID = saved?.selectedWorkspaceID ?? base.workspaceID
+        selectedRunID = saved?.selectedRunID ?? base.runID
+        hasStoredCredential = (try? tokenStore.read(hostname: base.hostname)) != nil
+    }
+
+    var connectionSummary: String { "\(selectedOrganization) · \(hostname)" }
+    var selectedWorkspace: HCPWorkspace? { workspaces.first { $0.id == selectedWorkspaceID } }
+    var selectedRun: HCPRun? { runs.first { $0.id == selectedRunID } }
+    var isPolling: Bool { pollTask != nil }
+
+    func importTerraformCredentialFile() async {
+        guard HCPAPIClient.normalizedHostname(hostname) == "app.terraform.io" else {
+            errorMessage = "The Terraform CLI credentials file is only imported for app.terraform.io."
+            return
+        }
+        isImporting = true
+        defer { isImporting = false }
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".terraform.d", isDirectory: true)
+            .appendingPathComponent("habitable.credentials.tfrc.json")
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            guard let size = attributes[.size] as? NSNumber, size.intValue <= 65_536 else { throw HCPViewerError.credentialTooLarge }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard data.count <= 65_536,
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let credentials = json["credentials"] as? [String: Any],
+                  let hostCredentials = credentials["app.terraform.io"] as? [String: Any],
+                  let token = hostCredentials["token"] as? String, !token.isEmpty,
+                  token.utf8.count <= 8192 else { throw HCPViewerError.invalidCredentialFile }
+            try tokenStore.write(token, hostname: "app.terraform.io")
+            hasStoredCredential = true
+            errorMessage = nil
+        } catch let error as HCPViewerError { errorMessage = error.localizedDescription }
+        catch { errorMessage = "Could not import the Terraform CLI credential file. Confirm it exists and is readable." }
+    }
+
+    func connect() async {
+        guard let host = HCPAPIClient.normalizedHostname(hostname) else { errorMessage = HCPViewerError.invalidHost.localizedDescription; return }
+        hostname = host
+        cancelPolling()
+        runRefreshTime = .distantPast
+        currentOperation = UUID()
+        let operation = currentOperation
+        guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {
+            hasStoredCredential = false; isConnected = false; errorMessage = HCPViewerError.noCredential.localizedDescription; return
+        }
+        hasStoredCredential = true
+        isLoading = true
+        defer { if currentOperation == operation { isLoading = false } }
+        do {
+            let organization = selectedOrganization
+            var workspaceResult = try await client.workspaces(hostname: host, organization: organization, token: token, page: 1)
+            let orgPage = try? await client.organizations(hostname: host, token: token, page: 1)
+            guard currentOperation == operation, hostname == host else { return }
+            organizations = orgPage?.items ?? []
+            var loadedWorkspaces = workspaceResult.items
+            if let wantedID = selectedWorkspaceID, !loadedWorkspaces.contains(where: { $0.id == wantedID }) {
+                // Restore at most five pages (250 workspaces) during connect; keep the saved ID if
+                // it is farther back so loading more can resolve it without selecting another workspace.
+                for page in 2...5 where workspaceResult.hasNextPage {
+                    workspaceResult = try await client.workspaces(hostname: host, organization: organization, token: token, page: page)
+                    guard currentOperation == operation, hostname == host, selectedOrganization == organization else { return }
+                    loadedWorkspaces.append(contentsOf: workspaceResult.items)
+                    if loadedWorkspaces.contains(where: { $0.id == wantedID }) || !workspaceResult.hasNextPage { break }
+                }
+            }
+            workspaces = loadedWorkspaces
+            workspacePage = workspaceResult.page; workspaceHasNextPage = workspaceResult.hasNextPage
+            isConnected = true; errorMessage = nil; lastUpdated = Date()
+            if selectedWorkspaceID == nil {
+                selectedWorkspaceID = workspaces.first?.id
+            } else if selectedWorkspace == nil {
+                errorMessage = "The saved workspace was not found in the first 250 workspaces. Load more to locate it."
+            }
+            if selectedWorkspace != nil { await refreshRuns(force: true) }
+        } catch {
+            guard currentOperation == operation else { return }
+            isConnected = false; errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshWorkspaces(nextPage: Bool = false) async {
+        guard isConnected, let token = try? tokenStore.read(hostname: hostname) else { return }
+        let page = nextPage ? workspacePage + 1 : 1
+        guard Date().timeIntervalSince(workspaceRefreshTime) >= 2 else { return }
+        workspaceRefreshTime = Date()
+        let host = hostname
+        let organization = selectedOrganization
+        let operation = currentOperation
+        do {
+            var result = try await client.workspaces(hostname: host, organization: organization, token: token, page: page)
+            guard currentOperation == operation, hostname == host, selectedOrganization == organization, isConnected else { return }
+            var pageItems = result.items
+            if !nextPage, let wantedID = selectedWorkspaceID, !pageItems.contains(where: { $0.id == wantedID }) {
+                for page in 2...5 where result.hasNextPage {
+                    result = try await client.workspaces(hostname: host, organization: organization, token: token, page: page)
+                    guard currentOperation == operation, hostname == host, selectedOrganization == organization, isConnected else { return }
+                    pageItems.append(contentsOf: result.items)
+                    if pageItems.contains(where: { $0.id == wantedID }) || !result.hasNextPage { break }
+                }
+            }
+            let hadSelectedWorkspace = selectedWorkspace != nil
+            workspaces = nextPage ? workspaces + pageItems : pageItems
+            workspacePage = result.page; workspaceHasNextPage = result.hasNextPage; lastUpdated = Date(); errorMessage = nil
+            if selectedWorkspaceID != nil, selectedWorkspace == nil {
+                errorMessage = "The saved workspace was not found in the first 250 workspaces. Load more to locate it."
+            }
+            if !hadSelectedWorkspace, selectedWorkspace != nil { await refreshRuns(force: true) }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func refreshRuns(nextPage: Bool = false, force: Bool = false) async {
+        guard isConnected, let workspace = selectedWorkspace,
+              let token = try? tokenStore.read(hostname: hostname) else { return }
+        _ = force
+        guard Date().timeIntervalSince(runRefreshTime) >= 3 else { errorMessage = HCPViewerError.rateLimited.localizedDescription; return }
+        runRefreshTime = Date()
+        let op = UUID(); currentOperation = op
+        isLoading = true
+        defer { if currentOperation == op { isLoading = false } }
+        let page = nextPage ? runPage + 1 : 1
+        do {
+            let organization = selectedOrganization
+            let result = try await client.runs(hostname: hostname, organization: organization, workspace: workspace, token: token, page: page)
+            guard currentOperation == op, selectedWorkspaceID == workspace.id,
+                  selectedOrganization == organization, hostname == identity.hostname else { return }
+            runs = nextPage ? runs + result.items : result.items
+            runPage = result.page; runHasNextPage = result.hasNextPage; lastUpdated = Date(); errorMessage = nil
+            if self.selectedRunID == nil { self.selectedRunID = runs.first?.id }
+            isLoading = false
+            if let selected = selectedRun, selectedRunDetails?.run != selected {
+                await load(run: selected)
+            } else if selectedRun == nil, let runID = selectedRunID, let workspace = selectedWorkspace {
+                let remembered = HCPRun(id: runID, workspaceID: workspace.id, workspaceName: workspace.name,
+                                        status: "loading", message: nil, operation: nil, createdAt: nil,
+                                        hasChanges: nil, isDestroy: false, planID: nil, applyID: nil, htmlURL: nil)
+                await load(run: remembered)
+            }
+            if runs.contains(where: \.isActive) { startPollingIfNeeded() } else { cancelPolling() }
+        } catch {
+            guard currentOperation == op else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func load(run: HCPRun) async {
+        guard isConnected, let token = try? tokenStore.read(hostname: hostname) else { return }
+        let op = UUID(); currentOperation = op
+        let host = hostname
+        let organization = selectedOrganization
+        do {
+            let details = try await client.runDetails(hostname: host, organization: organization, run: run, token: token)
+            guard currentOperation == op, hostname == host, selectedOrganization == organization,
+                  selectedWorkspaceID == run.workspaceID, selectedRunID == run.id else { return }
+            selectedRunDetails = details
+            if var current = selectionStore.load() {
+                current.identity.hostname = hostname; current.identity.organization = selectedOrganization
+                current.identity.workspaceID = run.workspaceID; current.identity.runID = run.id
+                current.selectedWorkspaceID = run.workspaceID; current.selectedRunID = run.id
+                selectionStore.save(current)
+            }
+        } catch {
+            guard currentOperation == op else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func disconnect() {
+        cancelPolling(); currentOperation = UUID()
+        isLoading = false
+        isConnected = false; organizations = []; workspaces = []; runs = []; selectedRunDetails = nil
+    }
+
+    func loadNextWorkspacePage() async { await refreshWorkspaces(nextPage: true) }
+    func loadNextRunPage() async { await refreshRuns(nextPage: true, force: true) }
+    func clearError() { errorMessage = nil }
+    func setVisible(_ visible: Bool) {
+        guard isVisible != visible else { return }
+        isVisible = visible
+        if visible {
+            if isConnected && runs.contains(where: \.isActive) { startPollingIfNeeded() }
+        } else {
+            cancelPolling()
+            currentOperation = UUID()
+            isLoading = false
+        }
+    }
+
+    private func persistSelection() {
+        guard !hostname.isEmpty else { return }
+        identity.hostname = hostname; identity.organization = selectedOrganization
+        identity.workspaceID = selectedWorkspaceID; identity.runID = selectedRunID
+        selectionStore.save(HCPStoredSelection(identity: identity, selectedWorkspaceID: selectedWorkspaceID, selectedRunID: selectedRunID))
+    }
+    private func startPollingIfNeeded() {
+        guard isVisible, pollTask == nil else { return }
+        pollingGeneration = UUID()
+        let generation = pollingGeneration
+        pollTask = Task { [weak self] in
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard !Task.isCancelled, let self, self.isConnected,
+                      self.runs.contains(where: \.isActive) else { break }
+                await self.refreshRuns(force: true)
+            }
+            if self?.pollingGeneration == generation { self?.pollTask = nil }
+        }
+    }
+    private func cancelPolling() {
+        pollingGeneration = UUID()
+        pollTask?.cancel()
+        pollTask = nil
+    }
+}

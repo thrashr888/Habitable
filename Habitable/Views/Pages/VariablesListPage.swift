@@ -34,7 +34,8 @@ struct TerraformVariableSummaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(variable.key).font(.body.weight(.medium))
+                Text(variable.key).font(.system(.body, design: .monospaced).weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
                 SafeCopyButton(value: variable.key, label: "Copy input key \(variable.key)")
                 SafeCopyButton(value: "var.\(variable.key)", label: "Copy variable reference var.\(variable.key)")
             }
@@ -44,21 +45,24 @@ struct TerraformVariableSummaryView: View {
                     .font(.callout).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                if let type = variable.declaration?.type {
-                    let compactType = type.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                    Text(compactType).lineLimit(1).truncationMode(.middle)
-                        .help(type).accessibilityLabel("Type: \(type)")
-                }
-                if variable.declaration?.required == true { Text("Required") }
-                if variable.declaration?.hasDefault == true { Text("Default") }
-                if variable.sensitive { Label("Sensitive", systemImage: "eye.slash") }
-                if variable.declaration?.ephemeral == true { Text("Ephemeral") }
-                if variable.isRemembered { Text("Remembered") }
-                else if variable.isUserInput { Text("This session") }
-                if variable.rememberedSecretUnavailable { Text("Unavailable") }
+            if let type = variable.declaration?.type {
+                Text(type.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression))
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(type).accessibilityLabel("Type: \(type)")
             }
-            .font(.caption).foregroundColor(.secondary).lineLimit(2)
+            let metadata = [
+                variable.declaration?.required == true ? "Required" : nil,
+                variable.declaration?.hasDefault == true ? "Default" : nil,
+                variable.sensitive ? "Sensitive" : nil,
+                variable.declaration?.ephemeral == true ? "Ephemeral" : nil,
+                variable.isRemembered ? "Remembered" : (variable.isUserInput ? "This session" : nil),
+                variable.rememberedSecretUnavailable ? "Unavailable" : nil
+            ].compactMap { $0 }.joined(separator: " · ")
+            if !metadata.isEmpty {
+                Text(metadata).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(status).font(.callout.weight(.medium))
                 .foregroundStyle(variable.isUserInput || variable.discoveredSource != nil ? .primary : .secondary)
             if variable.isUserInput || variable.discoveredSource != nil {
@@ -111,7 +115,7 @@ struct VariableListPage: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 0) {
             if !workspace.terraformInputDiagnostics.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Some Terraform inputs could not be inspected", systemImage: "exclamationmark.triangle")
@@ -141,10 +145,10 @@ struct VariableListPage: View {
                 Spacer()
                 if !workspace.declaredTerraformInputs.isEmpty {
                     Toggle("Required only", isOn: $requiredOnly)
-                        .toggleStyle(.button)
+                        .toggleStyle(.checkbox)
                         .help("Show only root inputs without a Terraform default")
                     Toggle("Missing only", isOn: $missingOnly)
-                        .toggleStyle(.button)
+                        .toggleStyle(.checkbox)
                         .help("Show required root inputs without an app value or resolved workspace value")
                 }
             }
@@ -153,25 +157,27 @@ struct VariableListPage: View {
                 .textFieldStyle(.roundedBorder).padding(.horizontal, 16).padding(.bottom, 6)
             List {
                 ForEach(visibleVariables, id: \.id) { variable in
-                    HStack {
+                    HStack(alignment: .top, spacing: 12) {
                         TerraformVariableSummaryView(variable: variable)
-                        Spacer()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if variable.isUserInput {
                             Button("Edit") { openEditor(for: variable) }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
+                                .buttonStyle(.borderless).fixedSize().disabled(workspace.locked)
                             Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
                                 .buttonStyle(.borderless).disabled(workspace.locked)
                                 .accessibilityLabel("Remove app input \(variable.key)")
                                 .help("Remove app input")
                         } else if variable.declaration != nil {
                             Button(variable.discoveredSource == nil ? "Set value" : "Override") { openEditor(for: variable) }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
+                                .buttonStyle(.borderless).fixedSize().disabled(workspace.locked)
                                 .accessibilityLabel("Set value for \(variable.key)")
                         }
                     }
+                    .padding(.vertical, 6)
                     .accessibilityElement(children: .contain)
                 }
             }
+            .listStyle(.inset)
             .overlay {
                 if visibleVariables.isEmpty {
                     VStack(spacing: 10) {
@@ -208,14 +214,10 @@ struct VariableListPage: View {
                     .disabled(workspace.locked || workspace.isInspectingInputs)
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    // TODO move to footer
                     Button(action: {
                         openEditor(for: nil)
                     }) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "text.badge.plus")
-                            Text("Add")
-                        }
+                        Label("Add input", systemImage: "plus")
                     }
                     .disabled(workspace.locked)
                 }

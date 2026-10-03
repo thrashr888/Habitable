@@ -18,23 +18,26 @@ struct EnvironmentVariableSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(variable.key).font(.body.weight(.medium))
+            Text(variable.key).font(.system(.body, design: .monospaced).weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
             if !variable.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(variable.description).font(.callout).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 8) {
-                if variable.sensitive { Text("Sensitive") }
-                if variable.isRemembered { Text("Remembered") }
-                else if variable.isUserInput { Text("This session") }
-                if variable.rememberedSecretUnavailable { Text("Unavailable") }
+            let metadata = [
+                variable.sensitive ? "Sensitive" : nil,
+                variable.isRemembered ? "Remembered" : (variable.isUserInput ? "This session" : nil),
+                variable.rememberedSecretUnavailable ? "Unavailable" : nil
+            ].compactMap { $0 }.joined(separator: " · ")
+            if !metadata.isEmpty {
+                Text(metadata).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.caption).foregroundColor(.secondary)
             Text(safeValuePreview).font(.callout).foregroundColor(.secondary)
                 .lineLimit(2).truncationMode(.middle)
             Text(variable.isUserInput
-                 ? "Source: Habitable app override · takes precedence over process environment · editable"
-                 : "Source: process environment · read-only")
+                 ? "Habitable override · takes precedence over process environment"
+                 : "Process environment · read-only")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -54,27 +57,29 @@ struct EnvVarListPage: View {
     @State private var inputError: String?
 
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 0) {
             if let error = workspace.rememberedInputsError {
                 Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
             }
             List {
                 ForEach(workspace.environmentVariables, id: \.id) { variable in
-                    HStack {
+                    HStack(alignment: .top, spacing: 12) {
                         EnvironmentVariableSummaryView(variable: variable)
-                        Spacer()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         if variable.isUserInput {
                             Button("Edit") { openEditor(for: variable) }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
+                                .buttonStyle(.borderless).fixedSize().disabled(workspace.locked)
                             Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
                                 .buttonStyle(.borderless).disabled(workspace.locked)
                                 .accessibilityLabel("Remove app input \(variable.key)")
                                 .help("Remove app input")
                         }
                     }
+                    .padding(.vertical, 6)
                     .accessibilityElement(children: .contain)
                 }
             }
+            .listStyle(.inset)
             .overlay {
                 if workspace.environmentVariables.isEmpty {
                     VStack(spacing: 10) {
@@ -109,10 +114,7 @@ struct EnvVarListPage: View {
                     Button(action: {
                         openEditor(for: nil)
                     }) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "text.badge.plus")
-                            Text("Add")
-                        }
+                        Label("Add environment variable", systemImage: "plus")
                     }
                     .disabled(workspace.locked)
                 }

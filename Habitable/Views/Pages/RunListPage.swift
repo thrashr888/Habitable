@@ -127,8 +127,10 @@ struct RunListPage: View {
                 ForEach(workspace.runs.sorted { $0.number > $1.number }) { run in
                     RunSummaryView(run: run)
                         .tag(run.id)
+                        .padding(.vertical, 6)
                 }
             }
+            .listStyle(.inset)
             HStack(spacing: 12) {
                 Text(workspace.historyTotalCount == 0 ? "No saved runs" : "Saved runs \(workspace.historyPageOffset + 1)–\(min(workspace.historyPageOffset + workspace.historyPageSize, workspace.historyTotalCount)) of \(workspace.historyTotalCount)")
                     .font(.caption)
