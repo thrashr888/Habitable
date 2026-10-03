@@ -310,3 +310,10 @@ The follow-on candidate applies only that correction: removes pageHeader and its
 The design reviewer explicitly identified remaining rendered risks: AppKit title placement/truncation and possible SwiftUI overrides need actual visual confirmation. Check Environment Variables, a long workspace name, the 900-point minimum width, both sidebar widths, hidden sidebar and pages with several toolbar actions. A source review or successful build does not establish these outcomes. The requested Astra review is complete; native acceptance remains open.
 
 Astra reviewed the exact follow-on patch and found no material source issues. It confirmed there is no column-owned navigationTitle or explicit toolbar tracking separator, reducing the prior sidebar-width risk without proving rendered behavior. The optimized universal build, arm64/x86_64 verifier and whitespace checks pass. The new candidate launched under `/private/tmp/habitable-native-title-release`; native inspection still fails with a closed-pipe error, so the screenshot acceptance remains open.
+
+
+## Design deferred; release hold — October 3
+
+The user rejected the native-title follow-on candidate in the 9:38 screenshot and explicitly asked to move on, revisit the appearance with a larger design review later, and not release this version as-is. Habitable-rt3.57 is deferred and labeled release-blocker; docs/RELEASE-GATES.md records the distribution and tap hold. Titlebar/header experiments are set aside while functional work continues. Previous source review/build success does not count as user design acceptance.
+
+Next functional priorities remain Habitable-rt3.45 (missing-input filtering/search and direct navigation), rt3.50 (typed input editors), rt3.51 (open source declarations), rt3.49 (consistent commands/shortcuts), rt3.39 (safe copy actions), and rt3.52/rt3.37 (history filters and Git provenance). Live navigation profiling and the broader native acceptance matrix remain unresolved; deeper AI and HCP integrations remain outside this immediate batch.
