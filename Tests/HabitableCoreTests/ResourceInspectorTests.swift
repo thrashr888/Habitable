@@ -44,12 +44,89 @@ final class ResourceInspectorTests: XCTestCase {
         XCTAssertEqual(attributes.first { $0.path == "\"empty\"" }?.value, "[]")
     }
 
-    func testProviderLinksUseOnlyOfficialTerraformRegistryAddresses() throws {
-        let url = try XCTUnwrap(terraformProviderRegistryURL("registry.terraform.io/hashicorp/aws"))
-        XCTAssertEqual(url.absoluteString, "https://registry.terraform.io/providers/hashicorp/aws/latest")
-        XCTAssertNil(terraformProviderRegistryURL("https://attacker.example/hashicorp/aws"))
-        XCTAssertNil(terraformProviderRegistryURL("terraform.io/builtin/terraform"))
-        XCTAssertNil(terraformProviderRegistryURL("hashicorp/aws"))
+    func testProviderDocumentationUsesExactLockedVersionAndResourceSlug() throws {
+        let lock = try lockFile("provider \"registry.terraform.io/hashicorp/aws\" {\n  version = \"5.42.0\"\n}")
+        let docs = try XCTUnwrap(TerraformProviderDocumentation.resolve(
+            providerIdentity: "registry.terraform.io/hashicorp/aws",
+            resourceType: "aws_vpc",
+            lockFile: lock
+        ))
+        XCTAssertEqual(docs.lockedVersion, "5.42.0")
+        XCTAssertEqual(docs.providerURL?.absoluteString, "https://registry.terraform.io/providers/hashicorp/aws/5.42.0")
+        XCTAssertEqual(docs.resourceURL?.absoluteString, "https://registry.terraform.io/providers/hashicorp/aws/5.42.0/docs/resources/vpc")
+
+        let dataSource = try XCTUnwrap(TerraformProviderDocumentation.resolve(
+            providerIdentity: "registry.terraform.io/hashicorp/aws",
+            resourceType: "aws_vpc",
+            resourceMode: "data",
+            lockFile: lock
+        ))
+        XCTAssertEqual(dataSource.resourceURL?.absoluteString,
+                       "https://registry.terraform.io/providers/hashicorp/aws/5.42.0/docs/data-sources/vpc")
+    }
+
+    func testProviderDocumentationDoesNotGuessLatestOrLinkPrivateSources() throws {
+        let lock = try lockFile("provider \"registry.terraform.io/hashicorp/aws\" {\n  version = \"5.42.0\"\n}")
+        let missingVersion = try XCTUnwrap(TerraformProviderDocumentation.resolve(
+            providerIdentity: "registry.terraform.io/hashicorp/random",
+            resourceType: "random_id",
+            lockFile: lock
+        ))
+        XCTAssertNil(missingVersion.lockedVersion)
+        XCTAssertNil(missingVersion.resourceURL)
+        XCTAssertNil(TerraformProviderDocumentation.resolve(
+            providerIdentity: "terraform.example.com/team/custom",
+            resourceType: "custom_widget",
+            lockFile: lock
+        ))
+        XCTAssertNil(TerraformProviderDocumentation.resolve(
+            providerIdentity: "terraform.io/builtin/terraform",
+            resourceType: "terraform_data",
+            lockFile: lock
+        ))
+    }
+
+    func testProviderAliasUsesCanonicalStateSourceFromLockFile() throws {
+        let lock = try lockFile("provider \"registry.terraform.io/hashicorp/aws\" {\n  version = \"5.42.0\"\n}")
+        let docs = try XCTUnwrap(TerraformProviderDocumentation.resolve(
+            providerIdentity: "registry.terraform.io/hashicorp/aws",
+            resourceType: "aws_instance",
+            lockFile: lock
+        ))
+        XCTAssertEqual(docs.resourceURL?.host, "registry.terraform.io")
+        XCTAssertTrue(docs.resourceURL?.path.contains("/5.42.0/") == true)
+    }
+
+    func testInstalledPublicModuleContextUsesExactVersionAndModuleAddress() throws {
+        let workspace = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let manifestURL = workspace.appendingPathComponent(".terraform/modules/modules.json")
+        try FileManager.default.createDirectory(at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let manifest = #"{"Modules":[{"Key":"network","Source":"terraform-aws-modules/vpc/aws//modules/subnets","Version":"5.8.1","Dir":".terraform/modules/network"},{"Key":"network.dns","Source":"./modules/dns","Dir":"modules/dns"}]}"#
+        try manifest.write(to: manifestURL, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: workspace) }
+
+        let docs = try XCTUnwrap(TerraformModuleDocumentation.resolve(
+            resourceAddress: #"module.network["east.west"].aws_subnet.public"#,
+            workspaceDirectory: workspace
+        ))
+        XCTAssertEqual(docs.key, "network")
+        XCTAssertEqual(docs.version, "5.8.1")
+        XCTAssertEqual(docs.registryURL?.absoluteString,
+                       "https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/5.8.1")
+
+        let local = try XCTUnwrap(TerraformModuleDocumentation.resolve(
+            resourceAddress: "module.network.module.dns.null_resource.example",
+            workspaceDirectory: workspace
+        ))
+        XCTAssertNil(local.registryURL)
+        XCTAssertEqual(local.source, "./modules/dns")
+    }
+
+    private func lockFile(_ contents: String) throws -> URL {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".terraform.lock.hcl")
+        try contents.write(to: file, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        return file
     }
 
     func testRootSensitivityAndMissingRootMaskFailClosed() {

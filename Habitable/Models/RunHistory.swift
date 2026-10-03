@@ -25,6 +25,12 @@ struct RunRecord: Codable, Sendable {
     var added: Int?
     var changed: Int?
     var destroyed: Int?
+    var planStartedAt: Date? = nil
+    var planFinishedAt: Date? = nil
+    var applyStartedAt: Date? = nil
+    var applyFinishedAt: Date? = nil
+    var gitBranch: String? = nil
+    var gitCommit: String? = nil
 }
 
 struct RunHistoryError: LocalizedError {

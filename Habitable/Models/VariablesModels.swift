@@ -41,6 +41,10 @@ class TerraformVariable: ObservableObject {
     @Published var isRemembered = false
     @Published var rememberedSecretUnavailable = false
     @Published var rememberedSecretID: String?
+    @Published var declaration: TerraformDeclaredInput?
+    @Published var discoveredSource: String?
+    @Published var hasUnresolvedDiscoveredValue = false
+    @Published var unresolvedSource: String?
 
     /// The value to place in Terraform's JSON variable file. Structured values
     /// are entered as JSON so strings, equals signs, and nested values survive

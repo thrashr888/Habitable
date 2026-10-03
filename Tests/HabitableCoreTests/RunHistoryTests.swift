@@ -48,6 +48,12 @@ final class RunHistoryTests: XCTestCase {
         record.planOutput = #"{"type":"change_summary","changes":{"add":1,"change":0,"remove":0}}"#
         record.applyOutput = #"{"type":"outputs","outputs":{"greeting":{"sensitive":false,"value":"hello"},"token":{"sensitive":true,"value":"never-persist-this"}}}"#
         record.added = 1
+        record.planStartedAt = record.createdAt.addingTimeInterval(1)
+        record.planFinishedAt = record.createdAt.addingTimeInterval(4)
+        record.applyStartedAt = record.createdAt.addingTimeInterval(5)
+        record.applyFinishedAt = record.createdAt.addingTimeInterval(9)
+        record.gitBranch = "main"
+        record.gitCommit = String(repeating: "a", count: 40)
         try store.save(record, workspace: directory)
         let reopened = RunHistoryStore(directory: store.directory)
         let loaded = try XCTUnwrap(reopened.load(workspace: directory).first)
@@ -58,6 +64,12 @@ final class RunHistoryTests: XCTestCase {
         XCTAssertEqual(loaded.selectedTerraformWorkspace, "production")
         XCTAssertEqual(loaded.backendIdentity, "remote #12345")
         XCTAssertEqual(loaded.added, 1)
+        XCTAssertEqual(loaded.planStartedAt, record.planStartedAt)
+        XCTAssertEqual(loaded.planFinishedAt, record.planFinishedAt)
+        XCTAssertEqual(loaded.applyStartedAt, record.applyStartedAt)
+        XCTAssertEqual(loaded.applyFinishedAt, record.applyFinishedAt)
+        XCTAssertEqual(loaded.gitBranch, record.gitBranch)
+        XCTAssertEqual(loaded.gitCommit, record.gitCommit)
         XCTAssertTrue(loaded.applyOutput?.contains("hello") == true)
         XCTAssertFalse(loaded.applyOutput?.contains("never-persist-this") == true)
         let attributes = try FileManager.default.attributesOfItem(atPath: store.recordURL(id: record.id, workspace: directory).path)
@@ -73,6 +85,9 @@ final class RunHistoryTests: XCTestCase {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         object.removeValue(forKey: "selectedTerraformWorkspace")
         object.removeValue(forKey: "backendIdentity")
+        for key in ["planStartedAt", "planFinishedAt", "applyStartedAt", "applyFinishedAt", "gitBranch", "gitCommit"] {
+            object.removeValue(forKey: key)
+        }
         let legacyData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         try legacyData.write(to: file)
 
@@ -80,6 +95,12 @@ final class RunHistoryTests: XCTestCase {
         XCTAssertEqual(decoded.id, record.id)
         XCTAssertNil(decoded.selectedTerraformWorkspace)
         XCTAssertNil(decoded.backendIdentity)
+        XCTAssertNil(decoded.planStartedAt)
+        XCTAssertNil(decoded.planFinishedAt)
+        XCTAssertNil(decoded.applyStartedAt)
+        XCTAssertNil(decoded.applyFinishedAt)
+        XCTAssertNil(decoded.gitBranch)
+        XCTAssertNil(decoded.gitCommit)
     }
 
     func testCanonicalWorkspaceIdentityAndIndependentNumbering() throws {
@@ -334,6 +355,15 @@ final class RunHistoryTests: XCTestCase {
         XCTAssertEqual(restored.id, run.id)
         XCTAssertEqual(restored.status, .applied)
         XCTAssertEqual(restored.message, "Durable run")
+        let planStart = try XCTUnwrap(run.planStartedAt)
+        let planFinish = try XCTUnwrap(run.planFinishedAt)
+        let applyStart = try XCTUnwrap(run.applyStartedAt)
+        let applyFinish = try XCTUnwrap(run.applyFinishedAt)
+        XCTAssertLessThanOrEqual(planStart, planFinish)
+        XCTAssertLessThanOrEqual(planFinish, applyStart)
+        XCTAssertLessThanOrEqual(applyStart, applyFinish)
+        XCTAssertEqual(restored.planDuration, run.planDuration)
+        XCTAssertEqual(restored.applyDuration, run.applyDuration)
         XCTAssertEqual(restored.added, 1)
         XCTAssertEqual(restored.apply?.resources.first?.stages.last?.done, true)
         XCTAssertFalse(restored.canConfirm)

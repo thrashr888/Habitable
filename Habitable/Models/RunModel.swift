@@ -19,11 +19,17 @@ struct SensitiveInputRedactor {
         var values: [String] = []
         var numbers: Set<String> = []
         var booleans: Set<Bool> = []
-        for variable in variables where variable.isUserInput && variable.sensitive {
+        for variable in variables where variable.sensitive {
             Self.collect(variable.value, structured: variable.hcl, strings: &values,
                          numbers: &numbers, booleans: &booleans)
+            if !variable.isUserInput, variable.discoveredSource == nil,
+               let defaultJSON = variable.declaration?.defaultJSON,
+               let defaultValue = String(data: defaultJSON, encoding: .utf8) {
+                Self.collect(defaultValue, structured: true, strings: &values,
+                             numbers: &numbers, booleans: &booleans)
+            }
         }
-        for variable in environmentVariables where variable.isUserInput && variable.sensitive {
+        for variable in environmentVariables where variable.sensitive {
             values.append(variable.value)
         }
         let valuesAndLineFragments = values.flatMap { value in
@@ -148,6 +154,21 @@ class TerraformRun: ObservableObject, Identifiable {
     var number = 0
     private weak var workspace: Workspace?
     var createdAt = Date()
+    @Published private(set) var planStartedAt: Date?
+    @Published private(set) var planFinishedAt: Date?
+    @Published private(set) var applyStartedAt: Date?
+    @Published private(set) var applyFinishedAt: Date?
+    private(set) var gitBranch: String?
+    private(set) var gitCommit: String?
+
+    var planDuration: TimeInterval? {
+        guard let start = planStartedAt, let finish = planFinishedAt, finish >= start else { return nil }
+        return finish.timeIntervalSince(start)
+    }
+    var applyDuration: TimeInterval? {
+        guard let start = applyStartedAt, let finish = applyFinishedAt, finish >= start else { return nil }
+        return finish.timeIntervalSince(start)
+    }
     var message: String?
     var terraformVersion = "Unknown"
     private(set) var isRestored = false
@@ -361,6 +382,9 @@ class TerraformRun: ObservableObject, Identifiable {
         self.workspace = workspace
         number = record.number; createdAt = record.createdAt
         updatedAt = record.updatedAt; message = record.message
+        planStartedAt = record.planStartedAt; planFinishedAt = record.planFinishedAt
+        applyStartedAt = record.applyStartedAt; applyFinishedAt = record.applyFinishedAt
+        gitBranch = record.gitBranch; gitCommit = record.gitCommit
         terraformVersion = record.terraformVersion
         selectedTerraformWorkspace = record.selectedTerraformWorkspace ?? selectedTerraformWorkspace
         backendIdentity = record.backendIdentity ?? backendIdentity
@@ -398,7 +422,10 @@ class TerraformRun: ObservableObject, Identifiable {
                                applyHistoryOutput: persistedHistoryOutput(tail: applyHistoryOutput, version: applyHistoryVersionEvent),
                                applyHistoryOutputTruncated: applyHistoryOutputTruncated,
                                errorMessage: errorMessage,
-                               added: added, changed: changed, destroyed: destroyed)
+                               added: added, changed: changed, destroyed: destroyed,
+                               planStartedAt: planStartedAt, planFinishedAt: planFinishedAt,
+                               applyStartedAt: applyStartedAt, applyFinishedAt: applyFinishedAt,
+                               gitBranch: gitBranch, gitCommit: gitCommit)
         return workspace.persistRun(record, directory: directory)
     }
 
@@ -432,8 +459,8 @@ class TerraformRun: ObservableObject, Identifiable {
         backendIdentity = workspace.backendIdentity
         let variables = workspace.terraformVariables.filter(\.isUserInput)
         let environmentVariables = workspace.environmentVariables.filter(\.isUserInput)
-        sensitiveInputRedactor = SensitiveInputRedactor(variables: variables,
-                                                        environmentVariables: environmentVariables)
+        sensitiveInputRedactor = SensitiveInputRedactor(variables: workspace.terraformVariables,
+                                                        environmentVariables: workspace.environmentVariables)
         status = .planning
         guard persist() else {
             status = .errored
@@ -511,10 +538,20 @@ class TerraformRun: ObservableObject, Identifiable {
         let liveLog = StructuredLog()
         let decoder = NDJSONStreamDecoder()
         plan = liveLog
+        let git = RunGitContext.capture(directory: context.directory)
+        gitBranch = git?.branch; gitCommit = git?.commit
+        planStartedAt = Date()
+        guard persist() else {
+            planStartedAt = nil
+            failContextCheck(workspace: workspace, lease: lease, status: .errored,
+                             message: workspace.historyError ?? "Unable to save run start time.", completion: completion)
+            return
+        }
         activeCommand = runner.plan(workingDirectory: context.directory, runId: id.uuidString,
                     variables: variables,
                     environmentVariables: environmentVariables,
                     onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog, phase: .planning) }) { [self, workspace] output, error in
+            planFinishedAt = Date()
             finishLiveOutput(decoder: decoder, log: liveLog, phase: .planning)
             planOutput = redactOutput(output ?? error?.output)
             plan = error?.outputTruncated == true || error?.cancelled == true
@@ -797,7 +834,9 @@ class TerraformRun: ObservableObject, Identifiable {
                             lease: WorkspaceCommandCoordinator.Lease,
                             completion: @escaping (StructuredLog?, String?) -> Void) {
         status = .applying
+        applyStartedAt = Date()
         guard persist() else {
+            applyStartedAt = nil
             status = .planned
             workspace.unlock()
             lease.release()
@@ -814,6 +853,7 @@ class TerraformRun: ObservableObject, Identifiable {
         apply = liveLog
         activeCommand = runner.apply(workingDirectory: directory, runId: id.uuidString,
                                     onOutput: { [self] stream, text in appendOutput(text, stream: stream, decoder: decoder, log: liveLog, phase: .applying) }) { [self, workspace] output, error in
+            applyFinishedAt = Date()
             finishLiveOutput(decoder: decoder, log: liveLog, phase: .applying)
             finishCommand()
             workspace.unlock()

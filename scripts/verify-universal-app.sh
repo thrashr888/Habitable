@@ -69,6 +69,17 @@ for ARCH in arm64 x86_64; do
   esac
 done
 
+HELPER="$APP/Contents/Helpers/habitable-config-inspect"
+if [[ -f "$HELPER" ]]; then
+  HELPER_ARCHITECTURES="$(lipo -archs "$HELPER")"
+  for ARCH in arm64 x86_64; do
+    case " $HELPER_ARCHITECTURES " in
+      *" $ARCH "*) ;;
+      *) echo "Missing configuration parser architecture $ARCH; found: $HELPER_ARCHITECTURES" >&2; exit 1 ;;
+    esac
+  done
+fi
+
 if ((ALLOW_UNSIGNED)); then
   echo "Signature checks skipped for explicitly allowed unsigned app build."
 else

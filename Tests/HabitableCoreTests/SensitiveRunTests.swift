@@ -4,6 +4,31 @@ import XCTest
 
 @MainActor
 final class SensitiveRunTests: XCTestCase {
+    func testDiscoveredSensitiveValuesAreRedactedWithoutCreatingOverrides() {
+        let discovered = TerraformVariable()
+        discovered.key = "token"
+        discovered.value = "\"discovered-secret-value\""
+        discovered.hcl = true
+        discovered.sensitive = true
+        let defaulted = TerraformVariable()
+        defaulted.key = "default_token"
+        defaulted.sensitive = true
+        defaulted.declaration = TerraformDeclaredInput(name: "default_token", type: "string", description: nil,
+            hasDefault: true, defaultJSON: Data("\"default-secret-value\"".utf8), required: false,
+            sensitive: true, ephemeral: false, sourceFile: "main.tf", sourceLine: 1)
+        let environment = EnvironmentVariable()
+        environment.key = "TF_VAR_token"
+        environment.value = "environment-discovered-secret"
+        environment.sensitive = true
+        let redactor = SensitiveInputRedactor(variables: [discovered, defaulted], environmentVariables: [environment])
+        XCTAssertFalse(discovered.isUserInput)
+        XCTAssertFalse(environment.isUserInput)
+        let result = redactor.redact("discovered-secret-value environment-discovered-secret default-secret-value")
+        XCTAssertFalse(result.contains("discovered-secret-value"))
+        XCTAssertFalse(result.contains("environment-discovered-secret"))
+        XCTAssertFalse(result.contains("default-secret-value"))
+    }
+
     @MainActor
     func testRunSnapshotRedactsPlanReviewApplyErrorsAndHistoryButKeepsSavedPlanBytes() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable sensitive run \(UUID())")

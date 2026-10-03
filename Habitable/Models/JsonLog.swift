@@ -430,16 +430,139 @@ struct ResourceAttribute: Identifiable, Equatable, Sendable {
     var searchableText: String { path + " " + value }
 }
 
-func terraformProviderRegistryURL(_ identity: String?) -> URL? {
-    guard let identity else { return nil }
-    let parts = identity.split(separator: "/")
-    guard parts.count == 3, parts[0] == "registry.terraform.io",
-          parts.dropFirst().allSatisfy({ $0.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil }) else { return nil }
-    var components = URLComponents()
-    components.scheme = "https"
-    components.host = "registry.terraform.io"
-    components.path = "/providers/\(parts[1])/\(parts[2])/latest"
-    return components.url
+struct TerraformProviderDocumentation: Equatable, Sendable {
+    let source: String
+    let lockedVersion: String?
+    let resourceURL: URL?
+    let providerURL: URL?
+
+    static func resolve(providerIdentity: String?, resourceType: String?, resourceMode: String? = nil, lockFile: URL?) -> Self? {
+        guard let identity = providerIdentity, isRegistryAddress(identity) else { return nil }
+        let version = lockFile.flatMap { lockedVersion(for: identity, in: $0) }
+        guard let version else {
+            return Self(source: identity, lockedVersion: nil, resourceURL: nil, providerURL: nil)
+        }
+        let parts = identity.split(separator: "/").map(String.init)
+        let root = "https://registry.terraform.io/providers/\(parts[1])/\(parts[2])/\(version)"
+        let providerURL = URL(string: root)
+        let resourceURL = resourceType.flatMap { type -> URL? in
+            guard type.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { return nil }
+            let prefix = parts[2] + "_"
+            let slug = type.hasPrefix(prefix) ? String(type.dropFirst(prefix.count)) : type
+            guard !slug.isEmpty else { return nil }
+            let section = resourceMode == "data" ? "data-sources" : "resources"
+            return URL(string: root + "/docs/\(section)/\(slug)")
+        }
+        return Self(source: identity, lockedVersion: version, resourceURL: resourceURL, providerURL: providerURL)
+    }
+
+    private static func isRegistryAddress(_ identity: String) -> Bool {
+        let parts = identity.split(separator: "/")
+        return parts.count == 3 && parts[0] == "registry.terraform.io" &&
+            parts.dropFirst().allSatisfy { $0.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil }
+    }
+
+    private static func lockedVersion(for identity: String, in file: URL) -> String? {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        let escaped = NSRegularExpression.escapedPattern(for: identity)
+        let pattern = #"provider\s+""# + escaped + #""\s*\{([^}]*)\}"#
+        guard let expression = try? NSRegularExpression(pattern: pattern),
+              let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let blockRange = Range(match.range(at: 1), in: text) else { return nil }
+        let block = String(text[blockRange])
+        let versionPattern = #"(?m)^\s*version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)""#
+        guard let versionExpression = try? NSRegularExpression(pattern: versionPattern),
+              let versionMatch = versionExpression.firstMatch(in: block, range: NSRange(block.startIndex..., in: block)),
+              let range = Range(versionMatch.range(at: 1), in: block) else { return nil }
+        return String(block[range])
+    }
+}
+
+struct TerraformModuleDocumentation: Equatable, Sendable {
+    let key: String
+    let source: String
+    let version: String?
+    let registryURL: URL?
+
+    static func resolve(resourceAddress: String?, workspaceDirectory: URL?) -> Self? {
+        guard let resourceAddress, let workspaceDirectory,
+              let key = moduleKey(in: resourceAddress) else { return nil }
+        return resolve(moduleKey: key, workspaceDirectory: workspaceDirectory)
+    }
+
+    static func resolve(moduleKey key: String, workspaceDirectory: URL?) -> Self? {
+        guard let workspaceDirectory,
+              key.split(separator: ".").allSatisfy({ $0.range(of: #"^[A-Za-z_][A-Za-z0-9_-]*$"#, options: .regularExpression) != nil }) else { return nil }
+        let manifest = workspaceDirectory.appendingPathComponent(".terraform/modules/modules.json")
+        guard let size = (try? manifest.resourceValues(forKeys: [.fileSizeKey]).fileSize), size <= 1_048_576,
+              let data = try? Data(contentsOf: manifest),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let modules = object["Modules"] as? [[String: Any]], modules.count <= 128 else { return nil }
+
+        let candidates = modules.compactMap { item -> Self? in
+            guard let itemKey = item["Key"] as? String, itemKey == key,
+                  let source = item["Source"] as? String, !source.isEmpty else { return nil }
+            let version = item["Version"] as? String
+            return Self(key: itemKey, source: source, version: version,
+                        registryURL: moduleURL(source: source, version: version))
+        }
+        return candidates.first
+    }
+
+    private static func moduleURL(source: String, version: String?) -> URL? {
+        guard let version,
+              version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"#, options: .regularExpression) != nil else { return nil }
+        var address = source
+        if address.hasPrefix("registry.terraform.io/") { address = String(address.dropFirst("registry.terraform.io/".count)) }
+        guard !address.contains("://"), !address.hasPrefix("./"), !address.hasPrefix("../"),
+              let subdirectory = address.range(of: "//") else {
+            if source.contains("//") { return nil }
+            return registryModuleURL(address: address, version: version)
+        }
+        address = String(address[..<subdirectory.lowerBound])
+        return registryModuleURL(address: address, version: version)
+    }
+
+    private static func registryModuleURL(address: String, version: String) -> URL? {
+        let parts = address.split(separator: "/")
+        guard parts.count == 3,
+              parts.allSatisfy({ $0.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil }) else { return nil }
+        return URL(string: "https://registry.terraform.io/modules/\(parts[0])/\(parts[1])/\(parts[2])/\(version)")
+    }
+
+    private static func moduleKey(in address: String) -> String? {
+        var cursor = address.startIndex
+        var names: [String] = []
+        while address[cursor...].hasPrefix("module.") {
+            cursor = address.index(cursor, offsetBy: "module.".count)
+            let nameStart = cursor
+            while cursor < address.endIndex, address[cursor] != ".", address[cursor] != "[" { cursor = address.index(after: cursor) }
+            let name = String(address[nameStart..<cursor])
+            guard name.range(of: #"^[A-Za-z_][A-Za-z0-9_-]*$"#, options: .regularExpression) != nil else { return nil }
+            names.append(name)
+
+            while cursor < address.endIndex, address[cursor] == "[" {
+                var depth = 0
+                var quoted = false
+                var escaped = false
+                repeat {
+                    let character = address[cursor]
+                    cursor = address.index(after: cursor)
+                    if quoted {
+                        if escaped { escaped = false }
+                        else if character == "\\" { escaped = true }
+                        else if character == "\"" { quoted = false }
+                    } else if character == "\"" { quoted = true }
+                    else if character == "[" { depth += 1 }
+                    else if character == "]" { depth -= 1 }
+                } while cursor < address.endIndex && depth > 0
+                guard depth == 0 else { return nil }
+            }
+            guard address[cursor...].hasPrefix(".module.") else { break }
+            cursor = address.index(cursor, offsetBy: 1)
+        }
+        return names.isEmpty ? nil : names.joined(separator: ".")
+    }
 }
 
 /// Flattens state attributes only after applying Terraform's parallel sensitive_values mask.

@@ -196,19 +196,24 @@ private struct EnvironmentVariableEditor: View {
                         .font(.caption).foregroundColor(.red)
                 }
                 Text("Key").font(.caption).foregroundColor(.secondary)
-                TextField("Environment variable key", text: $variable.key).multilineTextAlignment(.leading)
+                TextField("Environment variable key", text: $variable.key)
+                    .labelsHidden().accessibilityLabel("Environment variable key")
+                    .multilineTextAlignment(.leading)
                 Toggle("Sensitive", isOn: $variable.sensitive)
                 Text("Hides this value in Habitable. Terraform plan output follows the sensitivity declared in your Terraform configuration.")
                     .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 Text("Value").font(.caption).foregroundColor(.secondary)
                 if variable.sensitive {
                     SecureField("Value", text: $variable.value)
+                        .labelsHidden().accessibilityLabel("Sensitive value")
                 } else {
                     TextField("Value", text: $variable.value)
+                        .labelsHidden().accessibilityLabel("Value")
                         .multilineTextAlignment(.leading)
                 }
                 Text("Description").font(.caption).foregroundColor(.secondary)
                 TextField("Optional description", text: $variable.description)
+                    .labelsHidden().accessibilityLabel("Description")
                     .multilineTextAlignment(.leading)
                 if (didEditKey || didAttemptSave), let validationError = variable.validationError {
                     Text(validationError).foregroundColor(.red)
