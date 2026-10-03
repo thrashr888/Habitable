@@ -15,9 +15,14 @@ struct ShowResourceView: View {
     @State private var schemaSearchText = ""
     @State private var showSchemaAttributes = false
     @StateObject private var schemaHelp = TerraformProviderSchemaHelpModel()
+    @State private var loadedDocumentationID: String?
+    @State private var loadedProviderDocumentation: TerraformProviderDocumentation?
+    @State private var loadedModuleDocumentation: TerraformModuleDocumentation?
+
+    private var documentationID: String { "\(resource.id)-\(workspaceDirectory?.path ?? "")" }
 
     private var attributes: [ResourceAttribute] {
-        resourceAttributes(values: resource.values, sensitiveValues: resource.sensitiveValues)
+        resource.displayAttributes
     }
 
     private var filteredAttributes: [ResourceAttribute] {
@@ -26,12 +31,7 @@ struct ShowResourceView: View {
     }
 
     private var providerDocumentation: TerraformProviderDocumentation? {
-        TerraformProviderDocumentation.resolve(
-            providerIdentity: resource.provider_name,
-            resourceType: resource.type,
-            resourceMode: resource.mode,
-            lockFile: workspaceDirectory?.appendingPathComponent(".terraform.lock.hcl")
-        )
+        loadedDocumentationID == documentationID ? loadedProviderDocumentation : nil
     }
 
     private var builtInResourceDocumentation: URL? {
@@ -41,7 +41,7 @@ struct ShowResourceView: View {
     }
 
     private var moduleDocumentation: TerraformModuleDocumentation? {
-        TerraformModuleDocumentation.resolve(resourceAddress: resource.address, workspaceDirectory: workspaceDirectory)
+        loadedDocumentationID == documentationID ? loadedModuleDocumentation : nil
     }
 
     private var schemaAttributes: [TerraformSchemaAttribute]? {
@@ -97,6 +97,7 @@ struct ShowResourceView: View {
                     }
                 }
                 if resource.provider_name?.hasPrefix("registry.terraform.io/") == true,
+                   loadedDocumentationID == documentationID,
                    providerDocumentation?.lockedVersion == nil {
                     GridRow(alignment: .top) {
                         Text("Documentation").foregroundStyle(.secondary)
@@ -237,6 +238,23 @@ struct ShowResourceView: View {
         }
         .padding()
         .frame(minWidth: 400, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: documentationID) {
+            let id = documentationID
+            let identity = resource.provider_name
+            let type = resource.type
+            let mode = resource.mode
+            let address = resource.address
+            let directory = workspaceDirectory
+            let result = await Task.detached(priority: .utility) {
+                (TerraformProviderDocumentation.resolve(providerIdentity: identity, resourceType: type,
+                    resourceMode: mode, lockFile: directory?.appendingPathComponent(".terraform.lock.hcl")),
+                 TerraformModuleDocumentation.resolve(resourceAddress: address, workspaceDirectory: directory))
+            }.value
+            guard !Task.isCancelled else { return }
+            loadedProviderDocumentation = result.0
+            loadedModuleDocumentation = result.1
+            loadedDocumentationID = id
+        }
         .onChange(of: resource.address) { _ in schemaHelp.reset() }
         .onChange(of: workspaceDirectory?.path) { _ in schemaHelp.reset() }
         .onChange(of: terraformExecutableURL?.path) { _ in schemaHelp.reset() }

@@ -7,10 +7,15 @@ struct TerraformRelease: Identifiable, Equatable, Sendable {
     var id: String { version }
 
     static func components(_ version: String) -> [Int]? {
-        guard version.range(of: #"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"#,
-                            options: .regularExpression) != nil else { return nil }
-        let values = version.split(separator: ".").compactMap { Int($0) }
-        return values.count == 3 ? values : nil
+        let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        var values: [Int] = []
+        for part in parts {
+            guard !part.isEmpty, (part.count == 1 || part.first != "0"),
+                  part.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }), let value = Int(part) else { return nil }
+            values.append(value)
+        }
+        return values
     }
 
     static func newestFirst(_ lhs: TerraformRelease, _ rhs: TerraformRelease) -> Bool {
@@ -200,22 +205,28 @@ struct TerraformReleaseService: Sendable {
 
 @MainActor
 final class TerraformReleaseCatalog: ObservableObject {
-    @Published var releases: [TerraformRelease] = []
-    @Published var installed: [TerraformRelease] = []
+    @Published var releases: [TerraformRelease] = [] { didSet { updateAvailable() } }
+    @Published var installed: [TerraformRelease] = [] { didSet { updateAvailable() } }
+    @Published private(set) var available: [TerraformRelease] = []
     @Published var isLoading = false
     @Published var isInstalling = false
     @Published var status: String?
     @Published var error: String?
     let service: TerraformReleaseService
+    private var lastRefresh: Date?
 
     init(service: TerraformReleaseService = TerraformReleaseService()) {
         self.service = service
-        installed = service.installedReleases()
     }
 
-    var available: [TerraformRelease] {
-        Array(Set((releases + installed).map(\.version))).map { TerraformRelease(version: $0) }
+    private func updateAvailable() {
+        available = Array(Set((releases + installed).map(\.version))).map { TerraformRelease(version: $0) }
             .sorted(by: TerraformRelease.newestFirst)
+    }
+
+    func refreshIfNeeded() async {
+        guard lastRefresh.map({ Date().timeIntervalSince($0) < 300 }) != true else { return }
+        await refresh()
     }
 
     func refresh() async {
@@ -224,8 +235,10 @@ final class TerraformReleaseCatalog: ObservableObject {
         error = nil
         defer { isLoading = false }
         do { releases = try await service.releases() }
-        catch { self.error = "Could not load releases: \(error.localizedDescription)" }
-        installed = service.installedReleases()
+        catch { if !Task.isCancelled { self.error = "Could not load releases: \(error.localizedDescription)" } }
+        let service = service
+        installed = await Task.detached(priority: .utility) { service.installedReleases() }.value
+        if !Task.isCancelled { lastRefresh = Date() }
     }
 
     func install(_ release: TerraformRelease) async -> URL? {
@@ -237,7 +250,8 @@ final class TerraformReleaseCatalog: ObservableObject {
             let url = try await service.install(release) { [weak self] message in
                 self?.status = message
             }
-            installed = service.installedReleases()
+            let service = service
+            installed = await Task.detached(priority: .utility) { service.installedReleases() }.value
             return url
         } catch {
             self.error = error.localizedDescription

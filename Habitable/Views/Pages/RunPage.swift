@@ -240,12 +240,13 @@ private struct PlanReviewSections: View {
         Group {
             if diff != nil {
                 Section {
+                    let totals = counts
                     HStack(spacing: 18) {
-                        planCount("Create", value: counts.add, color: .green)
-                        planCount("Update", value: counts.change, color: .blue)
-                        planCount("Replace", value: counts.replace, color: .orange)
-                        planCount("Destroy", value: counts.destroy, color: .red)
-                        if counts.read > 0 { planCount("Read", value: counts.read, color: .secondary) }
+                        planCount("Create", value: totals.add, color: .green)
+                        planCount("Update", value: totals.change, color: .blue)
+                        planCount("Replace", value: totals.replace, color: .orange)
+                        planCount("Destroy", value: totals.destroy, color: .red)
+                        if totals.read > 0 { planCount("Read", value: totals.read, color: .secondary) }
                         Spacer(minLength: 0)
                     }
                     .padding(.vertical, 4)

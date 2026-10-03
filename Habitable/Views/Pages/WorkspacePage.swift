@@ -25,6 +25,7 @@ struct CheckView: View {
 
 struct WorkspacePage: View {
     @EnvironmentObject var workspace: Workspace
+    @ObservedObject var readme: WorkspaceReadmePresentation
     var onReviewRun: @MainActor @Sendable (UUID) -> Void = { _ in }
     var onOpenConfiguration: () -> Void = {}
     var onOpenInputs: () -> Void = {}
@@ -188,7 +189,7 @@ struct WorkspacePage: View {
                 if let error = workspace.rememberedInputsError { ErrorView(message: error) }
                 if let error = workspace.errorMessage { ErrorView(message: error) }
 
-                WorkspaceReadmeView(directory: workspace.workingDirectory)
+                WorkspaceReadmeView(directory: workspace.workingDirectory, presentation: readme)
 
                 if workspace.canCancelCommand {
                     HStack(spacing: 10) {
@@ -239,22 +240,20 @@ struct WorkspacePage: View {
 
 private struct WorkspaceReadmeView: View {
     let directory: URL?
-    @State private var document: WorkspaceReadme?
-    @State private var loadError: String?
-    @State private var loading = true
+    @ObservedObject var presentation: WorkspaceReadmePresentation
     @State private var refreshID = UUID()
 
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                if loading {
+                if presentation.loading || !presentation.matches(directory: directory) {
                     ProgressView("Reading README…")
-                } else if let document {
+                } else if let document = presentation.prepared?.document {
                     Text(document.file.path)
                         .font(.caption.monospaced()).foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                    if document.isMarkdown {
-                        Markdown(document.content, baseURL: document.file.deletingLastPathComponent())
+                    if let markdown = presentation.prepared?.markdown {
+                        Markdown(markdown, baseURL: document.file.deletingLastPathComponent())
                             .markdownImageProvider(ReadmeImageLinks())
                             .markdownTextStyle { FontSize(14) }
                             .textSelection(.enabled)
@@ -267,7 +266,7 @@ private struct WorkspaceReadmeView: View {
                     }
                     Button("Open README") { NSWorkspace.shared.open(document.file) }
                 } else {
-                    Text(loadError ?? "Add a README.md to your repository to describe this workspace and how to use it.")
+                    Text(presentation.loadError ?? "Add a README.md to your repository to describe this workspace and how to use it.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -283,18 +282,7 @@ private struct WorkspaceReadmeView: View {
             }
         }
         .task(id: "\(directory?.path ?? "")-\(refreshID)") {
-            document = nil
-            loadError = nil
-            loading = true
-            let result = await Task.detached(priority: .utility) { () -> Result<WorkspaceReadme?, Error> in
-                Result { try directory.flatMap { try WorkspaceReadme.load(directory: $0) } }
-            }.value
-            guard !Task.isCancelled else { return }
-            switch result {
-            case .success(let value): document = value
-            case .failure(let error): loadError = error.localizedDescription
-            }
-            loading = false
+            await presentation.load(directory: directory)
         }
     }
 }
@@ -312,7 +300,53 @@ private struct ReadmeImageLinks: ImageProvider {
 
 struct WorkspacePage_Previews: PreviewProvider {
     static var previews: some View {
-        WorkspacePage()
+        WorkspacePage(readme: WorkspaceReadmePresentation())
             .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
+    }
+}
+
+// MarkdownUI's parsed tree is immutable, composed of value-type nodes, and is
+// constructed off the main actor before being handed to the rendering actor.
+struct PreparedWorkspaceReadme: @unchecked Sendable {
+    let document: WorkspaceReadme
+    let markdown: MarkdownContent?
+}
+
+@MainActor
+final class WorkspaceReadmePresentation: ObservableObject {
+    @Published private(set) var prepared: PreparedWorkspaceReadme?
+    @Published private(set) var loadError: String?
+    @Published private(set) var loading = true
+    private var directory: URL?
+    private var requestID = UUID()
+
+    func matches(directory: URL?) -> Bool { self.directory == directory }
+
+    func load(directory: URL?) async {
+        let id = UUID()
+        requestID = id
+        if self.directory != directory {
+            prepared = nil
+            loadError = nil
+        }
+        self.directory = directory
+        loading = prepared == nil
+        let previous = prepared
+        let result = await Task.detached(priority: .utility) { () -> Result<PreparedWorkspaceReadme?, Error> in
+            Result {
+                guard let document = try directory.flatMap({ try WorkspaceReadme.load(directory: $0) }) else { return nil }
+                if let previous, previous.document.file == document.file, previous.document.content == document.content {
+                    return previous
+                }
+                return PreparedWorkspaceReadme(document: document,
+                    markdown: document.isMarkdown ? MarkdownContent(document.content) : nil)
+            }
+        }.value
+        guard !Task.isCancelled, requestID == id else { return }
+        switch result {
+        case .success(let value): prepared = value; loadError = nil
+        case .failure(let error): prepared = nil; loadError = error.localizedDescription
+        }
+        loading = false
     }
 }
