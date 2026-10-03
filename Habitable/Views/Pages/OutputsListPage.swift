@@ -62,20 +62,22 @@ struct OutputsListPage: View {
                 }
             }
         }
-        .navigationTitle("Outputs")
+
 //        .navigationSubtitle("\(outputs.count) outputs")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: refresh) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                        .help("Refresh state")
+            QuietToolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: refresh) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .help("Refresh state")
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(workspace.locked)
                 }
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(workspace.locked)
-            }
-            ToolbarItem {
-                SearchField(search: $searchText, accessibilityLabel: "Search outputs")
-                    .frame(minWidth: 100, idealWidth: 200, maxWidth: .infinity)
+                ToolbarItem {
+                    SearchField(search: $searchText, accessibilityLabel: "Search outputs")
+                        .frame(minWidth: 100, idealWidth: 200, maxWidth: .infinity)
+                }
             }
         }
         .onChange(of: filteredOutputs.map(\.key)) { keys in

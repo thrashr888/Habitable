@@ -50,7 +50,6 @@ struct WorkspacePage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Workspace").font(.largeTitle)
                     if let directory = workspace.workingDirectory {
                         Text(directory.lastPathComponent.isEmpty ? directory.path : directory.lastPathComponent)
                             .font(.title3.weight(.medium))
@@ -214,24 +213,26 @@ struct WorkspacePage: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle("Workspace")
+
         .onAppear {
             if workspace.historyPageOffset > 0, !workspace.locked { workspace.reloadRunHistory() }
         }
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button(action: { workspace.initialize() }) {
-                    Label(workspace.isInitialized ? "Reinitialize" : "Initialize", systemImage: "shippingbox")
+            QuietToolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button(action: { workspace.initialize() }) {
+                        Label(workspace.isInitialized ? "Reinitialize" : "Initialize", systemImage: "shippingbox")
+                    }
+                    .help(workspace.isInitialized ? "Reinitialize backend and provider dependencies" : "Initialize Terraform in this folder")
+                    .disabled(workspace.locked || workspace.workingDirectory == nil)
                 }
-                .help(workspace.isInitialized ? "Reinitialize backend and provider dependencies" : "Initialize Terraform in this folder")
-                .disabled(workspace.locked || workspace.workingDirectory == nil)
-            }
-            ToolbarItem(placement: .automatic) {
-                Button(action: { workspace.validate() }) {
-                    Label("Validate", systemImage: "checkmark.seal")
+                ToolbarItem(placement: .automatic) {
+                    Button(action: { workspace.validate() }) {
+                        Label("Validate", systemImage: "checkmark.seal")
+                    }
+                    .help("Validate Terraform configuration")
+                    .disabled(workspace.locked || workspace.workingDirectory == nil)
                 }
-                .help("Validate Terraform configuration")
-                .disabled(workspace.locked || workspace.workingDirectory == nil)
             }
         }
     }
@@ -249,7 +250,7 @@ private struct WorkspaceCard<Content: View>: View {
 
     var body: some View {
         GroupBox(title) {
-            content().padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            content().frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -302,7 +303,7 @@ struct WorkspaceReadmePage: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle("README")
+
         .task(id: "\(directory?.path ?? "")-\(refreshID)") {
             await presentation.load(directory: directory)
         }

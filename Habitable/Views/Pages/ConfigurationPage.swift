@@ -147,7 +147,7 @@ struct ConfigurationPage: View {
             }
         }
         }
-        .navigationTitle("Configuration")
+
         .onAppear { model.attach(to: workspace); model.setVisible(true); model.readDiagnostics(from: workspace.textOutput) }
         .onDisappear { model.setVisible(false) }
         .onChange(of: workspace.workingDirectory) { _ in

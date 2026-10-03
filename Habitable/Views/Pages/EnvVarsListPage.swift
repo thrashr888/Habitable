@@ -95,25 +95,27 @@ struct EnvVarListPage: View {
 
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Environment Variables")
+
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: { workspace.checkVariables() }) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                        .help("Refresh variables")
-                }
-                .disabled(workspace.locked)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: {
-                    openEditor(for: nil)
-                }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "text.badge.plus")
-                        Text("Add")
+            QuietToolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { workspace.checkVariables() }) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .help("Refresh variables")
                     }
+                    .disabled(workspace.locked)
                 }
-                .disabled(workspace.locked)
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: {
+                        openEditor(for: nil)
+                    }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "text.badge.plus")
+                            Text("Add")
+                        }
+                    }
+                    .disabled(workspace.locked)
+                }
             }
         }
         .sheet(item: $editorContext) { context in

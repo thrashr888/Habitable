@@ -125,15 +125,17 @@ struct ResourceListPage: View {
                 }
             }
         }
-        .navigationTitle("Resources")
+
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: refresh) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                        .help("Refresh state")
+            QuietToolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: refresh) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .help("Refresh state")
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(workspace.locked)
                 }
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(workspace.locked)
             }
         }
         .onChange(of: filteredResources.map(\.id)) { addresses in

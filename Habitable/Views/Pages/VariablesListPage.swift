@@ -175,26 +175,28 @@ struct VariableListPage: View {
 
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("Terraform Variables")
+
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: { workspace.checkVariables() }) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                        .help("Refresh variables")
-                }
-                .disabled(workspace.locked || workspace.isInspectingInputs)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                // TODO move to footer
-                Button(action: {
-                    openEditor(for: nil)
-                }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "text.badge.plus")
-                        Text("Add")
+            QuietToolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: { workspace.checkVariables() }) {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .help("Refresh variables")
                     }
+                    .disabled(workspace.locked || workspace.isInspectingInputs)
                 }
-                .disabled(workspace.locked)
+                ToolbarItem(placement: .primaryAction) {
+                    // TODO move to footer
+                    Button(action: {
+                        openEditor(for: nil)
+                    }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "text.badge.plus")
+                            Text("Add")
+                        }
+                    }
+                    .disabled(workspace.locked)
+                }
             }
         }
         .sheet(item: $terraformEditorContext) { context in

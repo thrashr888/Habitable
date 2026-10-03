@@ -100,7 +100,7 @@ struct SettingsListPage: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .navigationTitle("Settings")
+
     }
 }
 

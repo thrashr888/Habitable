@@ -284,3 +284,15 @@ The local complex QA configuration declares an actual output named `nested` and 
 The Apply decision now includes a nearby summary of create/update/replace/destroy/read/import/move and output changes, with a short warning for destructive actions. Replacements count once as replacements, rather than duplicating create/destroy counts; output-only plans remain explicit. A regression checks replacement/deletion/import counts and an output-only summary.
 
 Verification: **164 tests pass, zero failures, two expected opt-in skips** (online download and separate benchmark), including real local Terraform fmt, validation debounce/visibility/external-edit behavior, draft preservation and redaction coverage. Native inspection again returned a closed-pipe error; no live visual or timing acceptance is claimed. The optimized universal Release build succeeds and its verifier confirms arm64 and x86_64. The remaining ranked Beads work and live acceptance matrix are unchanged.
+
+## Restrained titlebar and content styling — October 3
+
+Screenshot feedback showed the previous title repair was inadequate: the page's native navigation title still crossed the sidebar divider while the new principal title appeared as a separate glass capsule. The Alchemy reference uses a plain titlebar identity and an independent content heading. Tracking: Habitable-rt3.57; this supersedes the previous title presentation candidate in rt3.56.
+
+Every page's `.navigationTitle` is removed. A single page heading is laid out above the content pane, after the sidebar divider, with two-line wrapping available. The titlebar contains only a plain workspace name and native sidebar control. It retains useful window-menu identity and full-path help. The Workspace body's duplicate large page heading is removed.
+
+All toolbar items use Apple's supported `sharedBackgroundVisibility(.hidden)` on macOS 26 and newer; older macOS versions retain their ordinary toolbar presentation. This hides the shared glass capsules without replacing native action semantics, shortcuts or menus. Ordinary actions use borderless native buttons; explicit primary actions retain their native emphasis.
+
+Group boxes use opaque, flat control-background panels with restrained four-point corners, thin separators and consistent internal padding. Workspace cards no longer add a second layer of padding. These changes apply across destinations, rather than producing another bespoke title or card treatment for one page.
+
+This batch changes presentation only. Native visual acceptance still requires checking the long Environment Variables title, narrow/wide sidebars, hidden sidebar, toolbar actions, keyboard focus, light/dark appearance, and workspace switching in the rebuilt candidate. Existing data/command execution and sensitivity behavior are unchanged. Build and delivery verification are recorded on the associated Beads issue.
