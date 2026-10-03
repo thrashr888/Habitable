@@ -34,7 +34,7 @@ struct ContentView: View {
     @State private var selectedRun: UUID?
     @State private var selectedResource: String?
     @State private var selectedOutput: String?
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var sidebarVisible = true
     @State private var isOpenErrorPresented = false
     @State private var presentedOpenError: String?
 
@@ -44,25 +44,32 @@ struct ContentView: View {
                 BlankSlateView(recentFolders: recentWorkspaces.folders,
                                onChooseFolder: openFolder,
                                onOpenRecent: openRecent)
-            } else if selection?.hasDetailList == true {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    sidebar
-                } content: {
-                    collection
-                        .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 340)
-                } detail: {
-                    detail
-                        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .navigationSplitViewStyle(.balanced)
             } else {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    sidebar
-                } detail: {
-                    page
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HSplitView {
+                    if sidebarVisible {
+                        sidebar.frame(minWidth: 180, idealWidth: 200, maxWidth: 240, maxHeight: .infinity)
+                    }
+                    if selection?.hasDetailList == true {
+                        HSplitView {
+                            collection
+                                .frame(minWidth: 240, idealWidth: selection == .resources ? 460 : 280,
+                                       maxWidth: selection == .resources ? .infinity : 340,
+                                       maxHeight: .infinity)
+                            detail.frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    } else {
+                        page.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
-                .navigationSplitViewStyle(.balanced)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button { sidebarVisible.toggle() } label: {
+                            Label(sidebarVisible ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left")
+                        }
+                        .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+                        .keyboardShortcut("s", modifiers: [.command, .control])
+                    }
+                }
             }
         }
         .environmentObject(workspace)
@@ -128,7 +135,6 @@ struct ContentView: View {
             Label("Settings", systemImage: "gear").tag(NavigationItem.settings)
         }
         .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 if workspace.locked {
@@ -186,7 +192,10 @@ struct ContentView: View {
         case .variables: VariableListPage()
         case .envVariables: EnvVarListPage()
         case .settings: SettingsListPage()
-        default: WorkspacePage()
+        default: WorkspacePage(onReviewRun: { id in
+            selectedRun = id
+            selection = .runs
+        })
         }
     }
 

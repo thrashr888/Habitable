@@ -34,6 +34,16 @@ struct StructuredLogView: View {
 /// Sections can be embedded beside plan changes so review and events share one scroll area.
 struct StructuredLogSections: View {
     @ObservedObject var logs: StructuredLog
+    @State private var resourceQuery = ""
+    @State private var resourceOperation = "All"
+
+    private var visibleResources: [ResourceState] {
+        logs.resources.filter { resource in
+            let matchesAddress = resourceQuery.isEmpty || resource.address.localizedCaseInsensitiveContains(resourceQuery)
+            let operation = resource.action.rawValue.localizedCapitalized
+            return matchesAddress && (resourceOperation == "All" || operation == resourceOperation)
+        }
+    }
 
     var body: some View {
         if !logs.diagnostics.isEmpty {
@@ -44,37 +54,58 @@ struct StructuredLogSections: View {
             }
         }
         if !logs.versions.isEmpty {
-            Section("Terraform version") {
+            Section {
+                DisclosureGroup("Terraform version") {
                 ForEach(logs.versions, id: \.id) { log in
                     if let version = log.version { VersionView(version: version) }
+                }
                 }
             }
         }
         if !logs.resources.isEmpty {
-            Section("Resources") {
-                ForEach(logs.resources, id: \.id) { resource in
+            Section {
+                HStack(spacing: 8) {
+                    TextField("Filter resource address", text: $resourceQuery)
+                        .textFieldStyle(.roundedBorder)
+                    Picker("Operation", selection: $resourceOperation) {
+                        ForEach(["All"] + Array(Set(logs.resources.map { $0.action.rawValue.localizedCapitalized })).sorted(), id: \.self) { operation in
+                            Text(operation == "Delete" ? "Destroy" : operation).tag(operation)
+                        }
+                    }
+                    .frame(width: 130)
+                }
+                if visibleResources.isEmpty {
+                    Text("No resources match this filter.").foregroundStyle(.secondary)
+                }
+                ForEach(visibleResources, id: \.id) { resource in
                     ResourceView(resourceState: resource)
                 }
-            }
+            } header: { Text("Resources · \(visibleResources.count) of \(logs.resources.count)") }
         }
         if !logs.changeSummaries.isEmpty {
-            Section("Change summary") {
+            Section {
+                DisclosureGroup("Change summary") {
                 ForEach(logs.changeSummaries, id: \.id) { summary in
                     ChangeSummaryView(changes: summary.changes)
+                }
                 }
             }
         }
         if !logs.outputs.isEmpty {
-            Section("Outputs") {
+            Section {
+                DisclosureGroup("Outputs") {
                 ForEach(logs.outputs, id: \.id) { output in
                     OutputView(outputs: output.outputs)
+                }
                 }
             }
         }
         if !logs.logs.isEmpty {
-            Section("Activity") {
+            Section {
+                DisclosureGroup("Activity · \(logs.logs.count) events") {
                 ForEach(logs.logs, id: \.id) { log in
                     if let message = log.message { LogView(message: message) }
+                }
                 }
             }
         }
