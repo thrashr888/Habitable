@@ -55,21 +55,36 @@ struct VariableListPage: View {
             if let error = workspace.rememberedInputsError {
                 Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
             }
-            List {
-                ForEach(workspace.terraformVariables, id: \.id) { variable in
-                    HStack {
-                        TerraformVariableSummaryView(variable: variable)
-                        Spacer()
-                        if variable.isUserInput {
-                            Button("Edit") { openEditor(for: variable) }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
-                            Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
-                                .accessibilityLabel("Remove app input \(variable.key)")
-                                .help("Remove app input")
+            if workspace.terraformVariables.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "text.badge.plus").font(.largeTitle).foregroundColor(.secondary)
+                    Text("No Terraform inputs").font(.headline)
+                    Text("Values from workspace tfvars appear here as read-only inputs. Add an app override to supply or replace a value for plans started from Habitable.")
+                        .font(.callout).foregroundColor(.secondary).multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 420)
+                    Button("Add Terraform input") { openEditor(for: nil) }
+                        .disabled(workspace.locked)
+                        .accessibilityHint("Create an app override for a Terraform variable")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .contain)
+            } else {
+                List {
+                    ForEach(workspace.terraformVariables, id: \.id) { variable in
+                        HStack {
+                            TerraformVariableSummaryView(variable: variable)
+                            Spacer()
+                            if variable.isUserInput {
+                                Button("Edit") { openEditor(for: variable) }
+                                    .buttonStyle(.borderless).disabled(workspace.locked)
+                                Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
+                                    .buttonStyle(.borderless).disabled(workspace.locked)
+                                    .accessibilityLabel("Remove app input \(variable.key)")
+                                    .help("Remove app input")
+                            }
                         }
+                        .accessibilityElement(children: .contain)
                     }
-                    .accessibilityElement(children: .contain)
                 }
             }
         }
@@ -157,23 +172,26 @@ private struct TerraformVariableEditor: View {
     let errorMessage: String?
     let onCancel: () -> Void
     let onSave: (TerraformVariable) -> Void
+    @State private var didAttemptSave = false
+    @State private var didEditKey = false
 
     private var isDuplicate: Bool { existingKeys.contains(variable.key) }
 
     var body: some View {
         Form {
             Section(header: Text("Save a Terraform variable").font(.headline)) {
-                Text("App inputs apply to plans started in this session and override values from workspace tfvars.")
-                    .font(.caption).foregroundColor(.secondary)
+                Text("App inputs override workspace tfvars for plans started in Habitable. Choose Remember to keep this input for this workspace; otherwise it lasts for this app session.")
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 Toggle("Remember for this workspace", isOn: $variable.isRemembered)
                 Text("Non-sensitive values are stored in a private local file. Sensitive values are stored in macOS Keychain.")
-                    .font(.caption).foregroundColor(.secondary)
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 if variable.rememberedSecretUnavailable {
                     Text("This remembered secret is unavailable. Restore Keychain access or remove this input before running Terraform.")
                         .font(.caption).foregroundColor(.red)
                 }
-                TextField("Key", text: $variable.key)
-                Text("Value")
+                Text("Key").font(.caption).foregroundColor(.secondary)
+                TextField("Variable key", text: $variable.key).multilineTextAlignment(.leading)
+                Text("Value").font(.caption).foregroundColor(.secondary)
                 if variable.sensitive {
                     SecureField("Value", text: $variable.value)
                 } else {
@@ -184,25 +202,31 @@ private struct TerraformVariableEditor: View {
                 Toggle("Value is JSON (list, map, number, boolean, or null)", isOn: $variable.hcl)
                 Toggle("Sensitive", isOn: $variable.sensitive)
                 Text("Hides this value and redacts matching input values from Habitable run logs and reviews. Also mark it sensitive in your Terraform configuration for Terraform’s own output.")
-                    .font(.caption).foregroundColor(.secondary)
-                TextField("Description", text: $variable.description)
+                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Description").font(.caption).foregroundColor(.secondary)
+                TextField("Optional description", text: $variable.description)
                     .multilineTextAlignment(.leading)
-                if let validationError = variable.validationError {
+                if (didEditKey || didAttemptSave), let validationError = variable.validationError {
                     Text(validationError).foregroundColor(.red)
-                } else if isDuplicate {
+                } else if (didEditKey || didAttemptSave), isDuplicate {
                     Text("A variable with this key already exists.").foregroundColor(.red)
                 }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
                 HStack {
                     Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
                     Spacer()
-                    Button("Save variable") { onSave(variable) }
-                        .disabled(variable.validationError != nil || isDuplicate)
+                    Button("Save variable") {
+                        didAttemptSave = true
+                        guard variable.validationError == nil, !isDuplicate else { return }
+                        onSave(variable)
+                    }
                         .keyboardShortcut(.return, modifiers: .command)
                 }
             }
         }
         .padding(.all)
+        .frame(minWidth: 420, idealWidth: 520, minHeight: 380, idealHeight: 520)
+        .onChange(of: variable.key) { _ in didEditKey = true }
     }
 }
 

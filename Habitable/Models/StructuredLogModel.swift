@@ -121,8 +121,9 @@ struct TerraformPlan: Equatable, Sendable {
     }
 }
 
-func transformPlan(_ log: JSON) -> TerraformPlan {
-    TerraformPlan(
+func transformPlan(_ source: JSON) -> TerraformPlan {
+    let log = redactEchoedPlanValues(source)
+    return TerraformPlan(
         resourceChanges: log["resource_changes"].arrayValue.map(transformPlanResourceChange),
         outputChanges: log["output_changes"].dictionaryValue.keys.sorted().map { name in
             transformPlanOutputChange(name: name, change: log["output_changes"][name])
@@ -130,6 +131,89 @@ func transformPlan(_ log: JSON) -> TerraformPlan {
         formatVersion: log["format_version"].string,
         terraformVersion: log["terraform_version"].string
     )
+}
+
+/// A provider can echo a marked secret into an unmarked attribute, another
+/// resource, or an output. Sanitize payloads before flattening so every review
+/// consumer receives safe strings, including composite values and paths.
+private func redactEchoedPlanValues(_ source: JSON) -> JSON {
+    var strings = Set<String>()
+    var scalars = Set<String>()
+    func collectAll(_ value: JSON) {
+        if let text = value.string, !text.isEmpty { strings.insert(text) }
+        else if let object = value.dictionary {
+            strings.formUnion(object.keys.filter { !$0.isEmpty })
+            object.values.forEach(collectAll)
+        }
+        else if let array = value.array { array.forEach(collectAll) }
+        else if value.type != .null { scalars.insert(value.rawString() ?? "") }
+    }
+    func collect(_ value: JSON, _ mask: JSON) {
+        if mask.bool == true { collectAll(value); return }
+        if let object = value.dictionary {
+            for (key, child) in object { collect(child, mask[key]) }
+        } else if let array = value.array {
+            for (index, child) in array.enumerated() { collect(child, mask[index]) }
+        }
+    }
+    let changes = source["resource_changes"].arrayValue.map { $0["change"] }
+        + Array(source["output_changes"].dictionaryValue.values)
+    for change in changes {
+        collect(change["before"], change["before_sensitive"])
+        collect(change["after"], change["after_sensitive"])
+    }
+    let literals = strings.sorted { $0.count > $1.count }
+    func safeText(_ text: String) -> String {
+        let safe = literals.reduce(text) { $0.replacingOccurrences(of: $1, with: "(sensitive value)") }
+        return scalars.sorted { $0.count > $1.count }.reduce(safe) { result, token in
+            guard !token.isEmpty,
+                  let regex = try? NSRegularExpression(pattern: "(?<![A-Za-z0-9_.])\(NSRegularExpression.escapedPattern(for: token))(?![A-Za-z0-9_.])") else { return result }
+            return regex.stringByReplacingMatches(in: result,
+                range: NSRange(result.startIndex..<result.endIndex, in: result), withTemplate: "(sensitive value)")
+        }
+    }
+    func sanitize(_ value: JSON) -> JSON {
+        if let text = value.string { return JSON(safeText(text)) }
+        if let object = value.dictionary {
+            // Redacted keys can collide. Do not re-expose either value.
+            var safe: [String: JSON] = [:]
+            for (key, child) in object {
+                let key = safeText(key)
+                safe[key] = safe[key] == nil ? sanitize(child) : JSON("(sensitive value)")
+            }
+            return JSON(safe)
+        }
+        if let array = value.array { return JSON(array.map(sanitize)) }
+        return scalars.contains(value.rawString() ?? "") ? JSON("(sensitive value)") : value
+    }
+    var result = source
+    for index in result["resource_changes"].arrayValue.indices {
+        for field in ["address", "previous_address"] {
+            if let text = source["resource_changes"][index][field].string {
+                result["resource_changes"][index][field] = JSON(safeText(text))
+            }
+        }
+        let paths = source["resource_changes"][index]["change"]["replace_paths"]
+        if let paths = paths.array {
+            result["resource_changes"][index]["change"]["replace_paths"] = JSON(paths.map { path in
+                JSON(path.arrayValue.map { component in
+                    component.string.map { JSON(safeText($0)) } ?? component
+                })
+            })
+        }
+        if let importingID = source["resource_changes"][index]["change"]["importing"]["id"].string {
+            result["resource_changes"][index]["change"]["importing"]["id"] = JSON(safeText(importingID))
+        }
+        for field in ["before", "after"] {
+            result["resource_changes"][index]["change"][field] = sanitize(source["resource_changes"][index]["change"][field])
+        }
+    }
+    for name in result["output_changes"].dictionaryValue.keys {
+        for field in ["before", "after"] {
+            result["output_changes"][name][field] = sanitize(source["output_changes"][name][field])
+        }
+    }
+    return result
 }
 
 private func transformPlanOutputChange(name: String, change: JSON) -> PlanOutputChange {

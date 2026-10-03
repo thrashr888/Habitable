@@ -188,12 +188,10 @@ private struct ScopedPlanAttribute: Identifiable {
 private struct PlanReviewView: View {
     let plan: StructuredLog
     let diff: TerraformPlan?
-    @State private var selection = 0
 
     var body: some View {
-        TabView(selection: $selection) {
+        List {
             if let diff {
-                List {
                     if diff.resourceChanges.allSatisfy({ $0.action == "no-op" && $0.originalAddress == nil && $0.importingID == nil }) &&
                         diff.outputChanges.allSatisfy({ $0.action == "no-op" }) {
                         Text("No changes in this plan.")
@@ -290,18 +288,15 @@ private struct PlanReviewView: View {
                             }
                         }
                     }
-                }
-                .tabItem { Label("Review", systemImage: "arrow.left.arrow.right") }
-                .tag(0)
             }
-
-            StructuredLogView(logs: plan)
-                .tabItem { Label("Events", systemImage: "list.bullet") }
-                .tag(1)
-        }
-        .onAppear { selection = diff == nil ? 1 : 0 }
-        .onChange(of: diff != nil) { available in
-            if available { selection = 0 }
+            StructuredLogSections(logs: plan)
+            if diff == nil && plan.diagnostics.isEmpty && plan.versions.isEmpty && plan.resources.isEmpty &&
+                plan.changeSummaries.isEmpty && plan.outputs.isEmpty && plan.logs.isEmpty {
+                Text(plan.isComplete
+                     ? "Terraform did not return structured events for this plan."
+                     : "Waiting for Terraform events…")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
