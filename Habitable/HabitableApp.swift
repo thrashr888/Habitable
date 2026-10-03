@@ -14,6 +14,7 @@ struct HabitableApp: App {
             ContentView()
                 .frame(minWidth: 900, minHeight: 560)
         }
+        .windowToolbarStyle(.unifiedCompact)
         .commands { WorkspaceCommands() }
     }
 }

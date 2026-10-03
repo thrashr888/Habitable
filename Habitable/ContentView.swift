@@ -70,8 +70,6 @@ struct ContentView: View {
                         sidebar.frame(minWidth: 180, idealWidth: 200, maxWidth: 240, maxHeight: .infinity)
                     }
                     VStack(spacing: 0) {
-                        pageHeader
-                        Divider()
                         if selection?.hasDetailList == true {
                             HSplitView {
                                 collection
@@ -96,17 +94,12 @@ struct ContentView: View {
                             .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
                             .keyboardShortcut("s", modifiers: [.command, .control])
                         }
-                        ToolbarItem(placement: .principal) {
-                            Text(workspaceName).font(.body)
-                                .lineLimit(1).truncationMode(.middle)
-                                .frame(idealWidth: 280, maxWidth: 400)
-                                .help(workspace.workingDirectory?.path ?? workspaceName)
-                        }
+
                     }
                 }
             }
         }
-        .background(WorkspaceWindowIdentity(title: "\(workspaceName) — \((selection ?? .workspace).title)"))
+        .background(WorkspaceWindowIdentity(title: "\((selection ?? .workspace).title) — \(workspaceName)"))
         .environmentObject(workspace)
         .environmentObject(editors)
         .buttonStyle(.borderless)
@@ -165,15 +158,6 @@ struct ContentView: View {
                 self.selectedOutput = nil
             }
         }
-    }
-
-    private var pageHeader: some View {
-        Text((selection ?? .workspace).title)
-            .font(.title2.weight(.semibold)).lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20).padding(.vertical, 14)
-            .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var workspaceName: String {
@@ -365,7 +349,7 @@ struct ContentView_Previews: PreviewProvider {
     static var previews: some View { ContentView() }
 }
 
-/// Keep Window-menu identity useful; the content header owns the visible title.
+/// AppKit owns the single visible title and its normal toolbar-space truncation.
 private struct WorkspaceWindowIdentity: NSViewRepresentable {
     let title: String
     func makeNSView(context: Context) -> IdentityView { IdentityView() }
@@ -381,7 +365,8 @@ private struct WorkspaceWindowIdentity: NSViewRepresentable {
         }
         func updateIdentity() {
             window?.title = title
-            window?.titleVisibility = .hidden
+            window?.titleVisibility = .visible
+            window?.toolbarStyle = .unifiedCompact
         }
     }
 }
