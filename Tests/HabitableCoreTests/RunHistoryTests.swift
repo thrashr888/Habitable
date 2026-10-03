@@ -345,10 +345,11 @@ final class RunHistoryTests: XCTestCase {
         let file = root.appendingPathComponent("not-a-directory")
         try Data().write(to: file)
         let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults, historyStore: RunHistoryStore(directory: file), commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        // Isolate this write-failure test from the default CLI's asynchronous
+        // version probe, which could otherwise invalidate the queue context.
+        workspace.runner = Runner(executableURL: root.appendingPathComponent("must-not-run"))
+        workspace.terraformVersion = "fixture"
         workspace.workingDirectory = directory
-        // Queueing is disabled while the initial history page is loading.
-        // Wait for readiness so this exercises the failing write, not a no-op.
-        try await waitUntil { !workspace.historyLoading }
         workspace.isValid = true
         workspace.queueRun()
         try await waitUntil { !workspace.locked && !workspace.historyLoading }
