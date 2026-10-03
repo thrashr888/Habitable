@@ -61,6 +61,17 @@
 		B1EAA330000000000000003 /* TerraformConfigurationContextHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */; };
 		B1EAA330000000000000005 /* TerraformConfigurationContextHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */; };
 		AA6030000000000000000001 /* CopyButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000002 /* CopyButton.swift */; };
+		AC6030000000000000000001 /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = AC6030000000000000000003 /* MCP */; };
+		D5AD53BC239E4A7F8F41D736 /* AgentConnectionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8680473AA64240379CAC8EE4 /* AgentConnectionModel.swift */; };
+		A197D33D0FB54E668F84EAEE /* HCPWorkspaceViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CDD60EE544E42578F32C1DA /* HCPWorkspaceViewer.swift */; };
+		9FAD8170AED748C9A2B5CD98 /* HabitableMCPRequestPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F66797C9F1B4594ACA6CE44 /* HabitableMCPRequestPolicy.swift */; };
+		3076C7E851FF428685F6D9C0 /* HabitableMCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641F56ECEC4E4B749E9EBD12 /* HabitableMCPServer.swift */; };
+		446DA802D11D4AA1A2DC4ADB /* WorkspaceDescriptionDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0F95AAB6E44AE797D29D2F /* WorkspaceDescriptionDraft.swift */; };
+		10EB50EF4A344B63AFAA76D2 /* DescriptionDraftControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C2DD8D73C0644428A0A231B /* DescriptionDraftControls.swift */; };
+		158D8262F98F4EB5BD230CFD /* HabitableAgentAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1425AB5A61DE4435A8FD0133 /* HabitableAgentAccess.swift */; };
+		B91637601B374FF8AA9B4158 /* HabitableMCPHTTPListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19EAE0957D04266A436D7CA /* HabitableMCPHTTPListener.swift */; };
+		4C2E594417E941249EC613A0 /* AgentsSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B02AA0237D4977AF66F66A /* AgentsSettingsPage.swift */; };
+		903CDE668045415297D22E75 /* HCPWorkspaceViewerPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B23EFB8441426EB410A5C2 /* HCPWorkspaceViewerPage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -122,6 +133,16 @@
 		B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformConfigurationContextHelp.swift; sourceTree = "<group>"; };
 		B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformConfigurationContextHelpView.swift; sourceTree = "<group>"; };
 		AA6030000000000000000002 /* CopyButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyButton.swift; sourceTree = "<group>"; };
+		8680473AA64240379CAC8EE4 /* AgentConnectionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentConnectionModel.swift; sourceTree = "<group>"; };
+		0CDD60EE544E42578F32C1DA /* HCPWorkspaceViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPWorkspaceViewer.swift; sourceTree = "<group>"; };
+		6F66797C9F1B4594ACA6CE44 /* HabitableMCPRequestPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitableMCPRequestPolicy.swift; sourceTree = "<group>"; };
+		641F56ECEC4E4B749E9EBD12 /* HabitableMCPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitableMCPServer.swift; sourceTree = "<group>"; };
+		0F0F95AAB6E44AE797D29D2F /* WorkspaceDescriptionDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDescriptionDraft.swift; sourceTree = "<group>"; };
+		2C2DD8D73C0644428A0A231B /* DescriptionDraftControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DescriptionDraftControls.swift; sourceTree = "<group>"; };
+		1425AB5A61DE4435A8FD0133 /* HabitableAgentAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitableAgentAccess.swift; sourceTree = "<group>"; };
+		F19EAE0957D04266A436D7CA /* HabitableMCPHTTPListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitableMCPHTTPListener.swift; sourceTree = "<group>"; };
+		64B02AA0237D4977AF66F66A /* AgentsSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsSettingsPage.swift; sourceTree = "<group>"; };
+		A7B23EFB8441426EB410A5C2 /* HCPWorkspaceViewerPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPWorkspaceViewerPage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -131,6 +152,7 @@
 			files = (
 				8AF2133D263A0448009F97C2 /* SwiftyJSON in Frameworks */,
 				AA5310000000000000000003 /* MarkdownUI in Frameworks */,
+				AC6030000000000000000001 /* MCP in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -154,6 +176,13 @@
 		8A0D933D263F7186001CB06C /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				F19EAE0957D04266A436D7CA /* HabitableMCPHTTPListener.swift */,
+				1425AB5A61DE4435A8FD0133 /* HabitableAgentAccess.swift */,
+				0F0F95AAB6E44AE797D29D2F /* WorkspaceDescriptionDraft.swift */,
+				641F56ECEC4E4B749E9EBD12 /* HabitableMCPServer.swift */,
+				6F66797C9F1B4594ACA6CE44 /* HabitableMCPRequestPolicy.swift */,
+				0CDD60EE544E42578F32C1DA /* HCPWorkspaceViewer.swift */,
+				8680473AA64240379CAC8EE4 /* AgentConnectionModel.swift */,
 				0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */,
 				B1EAA330000000000000002 /* TerraformProviderSchema.swift */,
 				B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */,
@@ -197,6 +226,9 @@
 		8AA12B1F26427D340048A4A9 /* Pages */ = {
 			isa = PBXGroup;
 			children = (
+				A7B23EFB8441426EB410A5C2 /* HCPWorkspaceViewerPage.swift */,
+				64B02AA0237D4977AF66F66A /* AgentsSettingsPage.swift */,
+				2C2DD8D73C0644428A0A231B /* DescriptionDraftControls.swift */,
 				B1EAA330000000000000006 /* TerraformConfigurationContextHelpView.swift */,
 				E8A1CB43A70346349C859ABE /* ConfigurationPage.swift */,
 				8A926B5B2649007800FDBA5C /* BlankSlate.swift */,
@@ -274,6 +306,7 @@
 			packageProductDependencies = (
 				8AF2133C263A0448009F97C2 /* SwiftyJSON */,
 				AA5310000000000000000004 /* MarkdownUI */,
+				AC6030000000000000000003 /* MCP */,
 			);
 			productName = Habitable;
 			productReference = 8AF213212639E8BC009F97C2 /* Habitable.app */;
@@ -305,6 +338,7 @@
 			packageReferences = (
 				8AF2133B263A0448009F97C2 /* XCRemoteSwiftPackageReference "SwiftyJSON" */,
 				AA5310000000000000000005 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				AC6030000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */,
 			);
 			productRefGroup = 8AF213222639E8BC009F97C2 /* Products */;
 			projectDirPath = "";
@@ -346,6 +380,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				903CDE668045415297D22E75 /* HCPWorkspaceViewerPage.swift in Sources */,
+				4C2E594417E941249EC613A0 /* AgentsSettingsPage.swift in Sources */,
+				B91637601B374FF8AA9B4158 /* HabitableMCPHTTPListener.swift in Sources */,
+				158D8262F98F4EB5BD230CFD /* HabitableAgentAccess.swift in Sources */,
+				10EB50EF4A344B63AFAA76D2 /* DescriptionDraftControls.swift in Sources */,
+				446DA802D11D4AA1A2DC4ADB /* WorkspaceDescriptionDraft.swift in Sources */,
+				3076C7E851FF428685F6D9C0 /* HabitableMCPServer.swift in Sources */,
+				9FAD8170AED748C9A2B5CD98 /* HabitableMCPRequestPolicy.swift in Sources */,
+				A197D33D0FB54E668F84EAEE /* HCPWorkspaceViewer.swift in Sources */,
+				D5AD53BC239E4A7F8F41D736 /* AgentConnectionModel.swift in Sources */,
 				AA6030000000000000000001 /* CopyButton.swift in Sources */,
 				2978C5D792C1476EACA795F2 /* TerraformConfigurationInspector.swift in Sources */,
 				B1EAA330000000000000001 /* TerraformProviderSchema.swift in Sources */,
@@ -604,6 +648,7 @@
 			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui.git";
 			requirement = { kind = exactVersion; version = 2.4.1; };
 		};
+		AC6030000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */ = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/modelcontextprotocol/swift-sdk.git"; requirement = { kind = exactVersion; version = 0.12.1; }; };
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -617,6 +662,7 @@
 			package = AA5310000000000000000005 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
 		};
+		AC6030000000000000000003 /* MCP */ = {isa = XCSwiftPackageProductDependency; package = AC6030000000000000000002 /* XCRemoteSwiftPackageReference "swift-sdk" */; productName = MCP; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8AF213192639E8BC009F97C2 /* Project object */;

@@ -17,9 +17,9 @@ struct OutputPageView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 10) {
                     GridRow(alignment: .top) {
-                    Text("Name").foregroundStyle(.secondary)
+                        Text("Name").foregroundStyle(.secondary)
                         HStack(alignment: .top) {
-                            Text(output.key).textSelection(.enabled)
+                            Text(output.key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                             SafeCopyButton(value: output.key, label: "Copy output name \(output.key)")
                         }
@@ -48,7 +48,7 @@ struct OutputPageView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding()
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

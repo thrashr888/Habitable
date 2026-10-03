@@ -48,20 +48,18 @@ struct WorkspacePage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 6) {
                     if let directory = workspace.workingDirectory {
                         HStack {
                             Text(directory.path)
-                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .font(.callout.monospaced()).foregroundStyle(.secondary)
                                 .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                             SafeCopyButton(value: directory.path, label: "workspace path")
                         }
                         ExternalEditorPicker(file: directory, targetLabel: "workspace folder")
                     }
-                    Text(workspace.executionContextDisplay)
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .textSelection(.enabled)
                 }
 
                 if !workspace.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -70,7 +68,7 @@ struct WorkspacePage: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                WorkspaceCard("Readiness") {
+                WorkspaceSection("Status") {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(readiness.title, systemImage: readiness.action == "Plan" || readiness.action == "Plan and apply automatically" ? "checkmark.circle.fill" : "exclamationmark.circle")
                             .font(.headline)
@@ -96,20 +94,15 @@ struct WorkspacePage: View {
                                 default: workspace.validateAndQueueRun(onCreated: onReviewRun)
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.borderless)
+                            .font(.body.weight(.medium))
                             .disabled(workspace.locked || workspace.isInspectingInputs)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                HStack(spacing: 20) {
-                    Label("\(workspace.state?.resources.count ?? 0) resources", systemImage: "cube")
-                    Label("\(workspace.state?.outputs.count ?? 0) outputs", systemImage: "arrow.up.right.square")
-                }
-                .font(.callout).foregroundStyle(.secondary)
-
-                WorkspaceCard("Latest run") {
+                WorkspaceSection("Latest run") {
                     if let run = latestRun {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
@@ -138,7 +131,7 @@ struct WorkspacePage: View {
                 }
 
                 if let git = workspace.currentGitContext {
-                    WorkspaceCard("Current Git source") {
+                    WorkspaceSection("Current Git source") {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("\(git.branch ?? "Detached HEAD") · \(git.shortCommit)")
@@ -158,11 +151,10 @@ struct WorkspacePage: View {
                     }
                 }
 
-                WorkspaceCard("Terraform context") {
+                WorkspaceSection("Terraform") {
                     Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 10) {
                         GridRow { Text("Version").foregroundStyle(.secondary); Text(workspace.terraformVersion) }
                         GridRow { Text("State backend").foregroundStyle(.secondary); Text(workspace.backendIdentity) }
-                        GridRow { Text("Terraform CLI").foregroundStyle(.secondary); Text("This Mac") }
                         GridRow {
                             Text("Execution").foregroundStyle(.secondary)
                             Text(workspace.backendIdentity == "local" ? "This Mac" : "Determined by Terraform configuration")
@@ -170,6 +162,21 @@ struct WorkspacePage: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 20) {
+                        Label("\(workspace.state?.resources.count ?? 0) resources", systemImage: "cube")
+                        Label("\(workspace.state?.outputs.count ?? 0) outputs", systemImage: "arrow.up.right.square")
+                    }
+                    .font(.callout).foregroundStyle(.secondary)
+                    DisclosureGroup("Checks") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            CheckView(label: "Initialized", check: workspace.isInitialized)
+                            CheckView(label: "Configuration is valid", check: workspace.isValid)
+                            CheckView(label: "State available", check: workspace.hasState, failureIsError: false)
+                            CheckView(label: "Configuration inputs discovered", check: workspace.hasVariables, failureIsError: false)
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.callout)
                 }
 
                 DisclosureGroup("Getting started with Terraform") {
@@ -202,22 +209,6 @@ struct WorkspacePage: View {
                     .padding(.top, 12)
                 }
 
-                WorkspaceCard("Checks") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        CheckView(label: "Initialized", check: workspace.isInitialized)
-                        CheckView(label: "Configuration is valid", check: workspace.isValid)
-                        CheckView(label: "State available", check: workspace.hasState, failureIsError: false)
-                        CheckView(label: "Configuration inputs discovered", check: workspace.hasVariables, failureIsError: false)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if workspace.isInitialized {
-                    Button("Reinitialize Terraform…", action: workspace.initialize)
-                        .disabled(workspace.locked)
-                        .help("Reinitialize the backend and provider dependencies for this folder.")
-                }
-
                 if let error = workspace.workspaceOpenError { ErrorView(message: error) }
                 if let error = workspace.rememberedInputsError { ErrorView(message: error) }
                 if let error = workspace.errorMessage { ErrorView(message: error) }
@@ -233,7 +224,7 @@ struct WorkspacePage: View {
                 }
             }
             .frame(maxWidth: 760, alignment: .leading)
-            .padding()
+            .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
 
@@ -242,14 +233,14 @@ struct WorkspacePage: View {
         }
         .toolbar {
             QuietToolbar {
-                ToolbarItem(placement: .automatic) {
+                ToolbarItem(placement: .primaryAction) {
                     Button(action: { workspace.initialize() }) {
                         Label(workspace.isInitialized ? "Reinitialize" : "Initialize", systemImage: "shippingbox")
                     }
                     .help(workspace.isInitialized ? "Reinitialize backend and provider dependencies" : "Initialize Terraform in this folder")
                     .disabled(workspace.locked || workspace.workingDirectory == nil)
                 }
-                ToolbarItem(placement: .automatic) {
+                ToolbarItem(placement: .primaryAction) {
                     Button(action: { workspace.validate() }) {
                         Label("Validate", systemImage: "checkmark.seal")
                     }
@@ -261,8 +252,8 @@ struct WorkspacePage: View {
     }
 }
 
-/// Room for the content inside each native card, independent of page gutters.
-private struct WorkspaceCard<Content: View>: View {
+/// Sections share a leading edge; separators establish hierarchy without cards.
+private struct WorkspaceSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
 
@@ -272,7 +263,9 @@ private struct WorkspaceCard<Content: View>: View {
     }
 
     var body: some View {
-        GroupBox(title) {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+            Text(title).font(.headline)
             content().frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -285,14 +278,26 @@ struct WorkspaceReadmePage: View {
 
     var body: some View {
         ScrollView {
-            GroupBox {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    if presentation.matches(directory: directory), let document = presentation.prepared?.document {
+                        Text(document.file.lastPathComponent)
+                            .font(.callout).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(document.file.path)
+                        Spacer()
+                        ExternalEditorPicker(file: document.file, targetLabel: "README")
+                    }
+                    Button { refreshID = UUID() } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.plain)
+                        .help("Refresh README")
+                        .accessibilityLabel("Refresh README")
+                }
+                Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     if presentation.loading || !presentation.matches(directory: directory) {
                         ProgressView("Reading README…")
                     } else if let document = presentation.prepared?.document {
-                        Text(document.file.path)
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .textSelection(.enabled)
                         if let markdown = presentation.prepared?.markdown {
                             Markdown(markdown, baseURL: document.file.deletingLastPathComponent())
                                 .markdownImageProvider(ReadmeImageLinks())
@@ -311,18 +316,6 @@ struct WorkspaceReadmePage: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            } label: {
-                HStack {
-                    Text("README").font(.headline)
-                    Spacer()
-                    if presentation.matches(directory: directory), let document = presentation.prepared?.document {
-                        ExternalEditorPicker(file: document.file, targetLabel: "README")
-                    }
-                    Button { refreshID = UUID() } label: { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.plain)
-                        .help("Refresh README")
-                        .accessibilityLabel("Refresh README")
-                }
             }
             .frame(maxWidth: 900, alignment: .leading)
             .padding(24)

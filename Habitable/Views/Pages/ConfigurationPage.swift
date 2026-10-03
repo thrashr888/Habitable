@@ -307,18 +307,12 @@ struct ConfigurationPage: View {
     private var fileSidebar: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("FILES").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text("Files").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 Button { model.refreshFiles() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Refresh configuration files")
                     .help("Refresh files")
-            }
-            if let directory = workspace.workingDirectory {
-                HStack {
-                    Text(directory.lastPathComponent).font(.headline).lineLimit(1)
-                    SafeCopyButton(value: directory.path, label: "Copy workspace path")
-                }
             }
             List(selection: Binding(get: { model.selectedFile?.id }, set: { value in
                 guard let file = model.files.first(where: { $0.id == value }), file != model.selectedFile else { return }
@@ -328,11 +322,12 @@ struct ConfigurationPage: View {
                 ForEach(model.files) { file in
                     HStack {
                         Label(file.displayPath, systemImage: "doc.text")
-                            .tag(file.id)
-                            .lineLimit(1)
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(file.displayPath)
                         Spacer(minLength: 0)
                         SafeCopyButton(value: file.url.path, label: "Copy configuration path for \(file.displayPath)")
                     }
+                    .tag(file.id)
                 }
             }
             .listStyle(.sidebar)
@@ -345,7 +340,6 @@ struct ConfigurationPage: View {
         }
         .padding(12)
         .frame(minWidth: 210, idealWidth: 240, maxWidth: 280, maxHeight: .infinity, alignment: .topLeading)
-        .background(.quaternary.opacity(0.15))
     }
 
     private var compactFilePicker: some View {
@@ -363,55 +357,58 @@ struct ConfigurationPage: View {
                 .labelsHidden()
                 .accessibilityLabel("Configuration file")
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            if model.selectedFile != nil {
+                if model.hasUnsavedChanges {
+                    Image(systemName: "pencil.circle").foregroundStyle(.orange)
+                        .accessibilityLabel("Unsaved changes").help("Unsaved changes")
+                }
+                Button { model.save() } label: { Image(systemName: "square.and.arrow.down") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Save configuration")
+                    .help("Save configuration")
+                    .disabled(!model.hasUnsavedChanges || model.hasConflict || workspace.locked || !model.canSaveInCurrentWorkspace)
+                Menu {
+                    if let file = model.selectedFile {
+                        SafeCopyButton(value: file.url.path, label: "Copy configuration path", showsTitle: true, title: "Copy path")
+                        Divider()
+                    }
+                    editorActions
+                } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel("Configuration actions")
+            }
             Button { model.refreshFiles() } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Refresh configuration files")
                 .help("Refresh files")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.quaternary.opacity(0.15))
     }
 
     private func editor(compact: Bool) -> some View {
         VStack(spacing: 0) {
             if let file = model.selectedFile {
-                if compact {
-                    HStack(spacing: 8) {
+                if !compact {
+                    HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(file.displayPath).font(.headline).lineLimit(1)
-                            if model.hasUnsavedChanges {
-                                Label("Unsaved changes", systemImage: "pencil.circle").font(.caption).foregroundStyle(.orange)
-                            }
+                            Text(file.displayPath).font(.headline)
+                                .lineLimit(1).truncationMode(.middle)
+                                .help(file.url.path)
                         }
-                        Spacer(minLength: 4)
                         SafeCopyButton(value: file.url.path, label: "Copy configuration path")
-                        Button { model.save() } label: { Image(systemName: "square.and.arrow.down") }
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityLabel("Save configuration")
-                            .disabled(!model.hasUnsavedChanges || model.hasConflict || workspace.locked || !model.canSaveInCurrentWorkspace)
-                        Menu { editorActions } label: { Image(systemName: "ellipsis.circle") }
-                            .accessibilityLabel("Configuration actions")
+                        if model.hasUnsavedChanges {
+                            Label("Unsaved changes", systemImage: "pencil.circle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) { editorActions }
+                            Menu("Actions") { editorActions }
+                        }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 9)
-                } else {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(file.displayPath).font(.headline)
-                        Text(file.url.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    SafeCopyButton(value: file.url.path, label: "Copy configuration path")
-                    if model.hasUnsavedChanges {
-                        Label("Unsaved changes", systemImage: "pencil.circle")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                    Spacer()
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { editorActions }
-                        Menu("Actions") { editorActions }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 11)
                 }
                 Divider()
 
@@ -492,7 +489,8 @@ struct ConfigurationPage: View {
             .help(model.selectedFile?.name.hasSuffix(".tf.json") == true ? "Terraform fmt formats HCL files. JSON configuration can still be edited, saved, and validated." : "Format and save this configuration file")
             .disabled(model.isFormatting || workspace.locked || model.hasConflict || !model.canSaveInCurrentWorkspace || model.selectedFile?.name.hasSuffix(".tf.json") == true)
         Button { model.save() } label: { Label("Save", systemImage: "square.and.arrow.down") }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.borderless)
+            .font(.body.weight(.semibold))
             .disabled(!model.hasUnsavedChanges || model.hasConflict || workspace.locked || !model.canSaveInCurrentWorkspace)
     }
     private var resultsPanel: some View {
@@ -592,13 +590,14 @@ struct ConfigurationPage: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
             }
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color(nsColor: .textBackgroundColor))
             HStack {
                 Text("Creating this file will make an explicit change in the selected folder.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Create main.tf") { createStarter() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderless)
+                    .font(.body.weight(.semibold))
                     .disabled(workspace.workingDirectory == nil || starterCreated)
             }
             if starterCreated { Label("main.tf created", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }

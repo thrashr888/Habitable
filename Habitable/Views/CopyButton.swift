@@ -5,12 +5,13 @@ struct SafeCopyButton: View {
     let value: String
     let label: String
     var showsTitle = false
+    var title = "Copy"
     @State private var copied = false
 
     var body: some View {
         Button(action: copy) {
             if showsTitle {
-                Label(copied ? "Copied" : label,
+                Label(copied ? "Copied" : title,
                       systemImage: copied ? "checkmark" : "doc.on.doc")
             } else {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")

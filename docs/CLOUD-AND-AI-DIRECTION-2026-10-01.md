@@ -1,6 +1,6 @@
 # Habitable: cloud and on-device AI direction
 
-Research date: October 1, 2026. This is a proposal; the features below are not yet implemented. Implementation scope lives in Beads: Habitable-gze (description drafting), Habitable-upt (HCP viewer), and Habitable-et3 (real remote-backend QA).
+Research date: October 1, 2026. Updated October 3: the development candidate now implements the read-only workspace/run viewer and availability-gated description drafting. The broader ideas below remain direction, not a claim that all integrations are complete. Implementation scope lives in Beads: Habitable-gze (description drafting), Habitable-upt (HCP viewer), and Habitable-et3 (real remote-backend QA).
 
 ## Product direction
 
@@ -29,3 +29,8 @@ The current workspace description is only an in-memory Published property bound 
 After description quality is evaluated, add plain-language plan summaries grounded in the existing structured diff, short run messages, and diagnostic explanations with links to the actual events. Keep Terraform-computed counts, replacement markers, and reviewed artifact identity authoritative. AI-generated text is editable supporting context. Evaluate synthetic fixtures for omissions, invented purpose, secret inclusion, malformed output, latency, unavailable models, and asynchronous races before expanding scope.
 
 Recommended implementation order: description persistence and drafting, the read-only HCP viewer, then remote actions backed by a disposable real-backend QA workflow. Keep authentication, remote writes, and model-assisted infrastructure changes out of the first description feature's scope.
+
+
+## October 3 implementation boundary
+
+The candidate uses a native URLSession client, explicit CLI credential import into Keychain, separate remote IDs, paginated workspace/run lists, bounded log retrieval and HCP review links. Account writes, remote plan/apply/cancel actions, structured remote JSON plan rendering, policy/cost/drift panels and tfctl runtime wrapping remain future work. Description suggestions use only bounded declaration identifiers; users review and explicitly accept them. A deterministic fallback preserves the same workflow without Apple Intelligence. Native acceptance and release approval remain open in the shared page review and Beads.

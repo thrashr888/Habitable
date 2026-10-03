@@ -136,7 +136,7 @@ struct ResourceListPage: View {
             }
             .controlSize(.small)
         }
-        .padding(10)
+        .padding(12)
     }
 
     private func filterPicker(_ title: String, selection: Binding<String>, options: [String]) -> some View {
@@ -166,21 +166,18 @@ struct ResourceListPage: View {
         List(selection: $selection) {
             ForEach(visibleRows) { row in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(row.address).font(.system(.callout, design: .monospaced)).lineLimit(2)
-                    HStack(spacing: 5) {
-                        Text(row.record.mode == "data" ? "Data source" : "Managed")
-                        Text("·")
-                        Text(row.type)
-                        if row.provider != "—" { Text("·"); Text(row.provider).lineLimit(1) }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text(row.address).font(.system(.callout, design: .monospaced)).lineLimit(2).help(row.address)
+                    Text([row.record.mode == "data" ? "Data source" : "Managed", row.type,
+                          row.provider == "—" ? nil : row.provider].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(2)
+
                 }
-                .padding(.vertical, 3)
+                .padding(.vertical, 6)
                 .tag(row.id)
             }
         }
-        .listStyle(.plain)
+        .listStyle(.inset)
     }
 
     private var statusView: some View {

@@ -10,13 +10,15 @@ import SwiftUI
 struct OutputSummaryView: View {
     var output: Output
     var body: some View {
-        VStack(alignment: .leading) {
-            Text("\(output.key)")
+        VStack(alignment: .leading, spacing: 4) {
+            Text(output.key).font(.system(.body, design: .monospaced).weight(.medium))
+                .lineLimit(2)
             if output.sensitive {
                 Label("Sensitive value hidden", systemImage: "lock.fill")
-                    .foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.secondary)
             } else if let value = output.value {
                 Text("\(value)")
+                    .font(.callout)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .truncationMode(.tail)
@@ -47,23 +49,28 @@ struct OutputsListPage: View {
     }
 
     var body: some View {
-        List(selection: $selection) {
-            if workspace.state == nil {
-                statusView
-            } else if filteredOutputs.isEmpty && !searchText.isEmpty {
-                emptyMessage("No matching outputs", detail: "Try a different search.", symbol: "magnifyingglass")
-            } else if filteredOutputs.isEmpty {
-                emptyMessage("No outputs", detail: "This state has no outputs.", symbol: "chevron.right.square")
-            } else {
-                ForEach(filteredOutputs) { output in
-                    OutputSummaryView(output: output)
-                        .accessibilityElement(children: .combine)
-                        .tag(output.key)
+        VStack(spacing: 0) {
+            SearchField(search: $searchText, accessibilityLabel: "Search outputs")
+                .padding(12)
+            Divider()
+            List(selection: $selection) {
+                if workspace.state == nil {
+                    statusView
+                } else if filteredOutputs.isEmpty && !searchText.isEmpty {
+                    emptyMessage("No matching outputs", detail: "Try a different search.", symbol: "magnifyingglass")
+                } else if filteredOutputs.isEmpty {
+                    emptyMessage("No outputs", detail: "This state has no outputs.", symbol: "chevron.right.square")
+                } else {
+                    ForEach(filteredOutputs) { output in
+                        OutputSummaryView(output: output)
+                            .accessibilityElement(children: .combine)
+                            .tag(output.key)
+                            .padding(.vertical, 6)
+                    }
                 }
             }
+            .listStyle(.inset)
         }
-
-//        .navigationSubtitle("\(outputs.count) outputs")
         .toolbar {
             QuietToolbar {
                 ToolbarItem(placement: .primaryAction) {
@@ -73,10 +80,6 @@ struct OutputsListPage: View {
                     }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(workspace.locked)
-                }
-                ToolbarItem {
-                    SearchField(search: $searchText, accessibilityLabel: "Search outputs")
-                        .frame(minWidth: 100, idealWidth: 200, maxWidth: .infinity)
                 }
             }
         }

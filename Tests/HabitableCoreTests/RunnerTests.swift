@@ -111,17 +111,20 @@ final class RunnerTests: XCTestCase {
     func testStreamsCompleteUTF8LinesOnMainQueue() async throws {
         let executable = try fakeCLI("printf '\\342'; sleep 0.05; printf '\\202\\254 done'; printf '\\nlast line'")
         let runner = Runner(executableURL: executable)
+        var streamed = ""
         let (output, error) = await withCheckedContinuation { continuation in
             runner.validate(workingDirectory: directory, onOutput: { stream, chunk in
                 XCTAssertTrue(Thread.isMainThread)
                 XCTAssertEqual(stream, .stdout)
-                XCTAssertTrue(chunk.hasSuffix("\n") || chunk == "last line")
+                XCTAssertTrue(chunk.hasSuffix("\n") || chunk.hasSuffix("last line"))
+                streamed += chunk
             }, completion: { output, error in
                 continuation.resume(returning: (output, error))
             })
         }
         XCTAssertNil(error)
         XCTAssertEqual(output, "€ done\nlast line")
+        XCTAssertEqual(streamed, output)
     }
 
     func testOutputCaptureIsBoundedAndFailsClosed() async throws {

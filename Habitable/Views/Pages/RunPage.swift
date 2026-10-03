@@ -94,51 +94,60 @@ struct RunPageView: View {
             Section {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Run #\(run.number)").font(.title2.weight(.semibold))
+                        Text("Run #\(run.number)").font(.title3.weight(.semibold))
                         if let message = run.message {
                             Text(message).lineLimit(2)
                         }
                         Text("\(run.createdAt, formatter: Self.taskDateFormat)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        if let duration = run.planDuration {
-                            Text("Plan duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        if let duration = run.applyDuration {
-                            Text("Apply duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                         if let commit = run.gitCommit {
                             HStack(spacing: 6) {
                                 Text("\(run.gitBranch ?? "Detached HEAD") · \(commit.prefix(8))")
                                     .font(.caption.monospaced()).foregroundStyle(.secondary)
+                                    .lineLimit(2)
                                     .help(commit)
                                 SafeCopyButton(value: commit, label: "Copy full commit SHA", showsTitle: true)
                             }
                         }
-                        if let source = run.triggerSource {
-                            Text("Trigger: \(source)").font(.caption).foregroundStyle(.secondary)
+                        DisclosureGroup("Run details") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let duration = run.planDuration {
+                                    Text("Plan duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let duration = run.applyDuration {
+                                    Text("Apply duration: \(duration.formatted(.number.precision(.fractionLength(1)))) seconds")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let source = run.triggerSource {
+                                    Text("Trigger: \(source)").font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let subject = run.gitSubject {
+                                    Text("Commit: \(subject)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                if let dirty = run.gitDirty {
+                                    Text("Captured source: \(dirty ? "Dirty" : "Clean")")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    Text("Git working-tree status unavailable")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let remote = run.gitRemoteURL {
+                                    SafeCopyButton(value: remote, label: "Copy Git remote URL", showsTitle: true, title: "Copy repository URL")
+                                }
+                                Text(run.executionContextDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if let subject = run.gitSubject {
-                            Text("Commit: \(subject)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        }
-                        if let dirty = run.gitDirty {
-                            Text("Captured source: \(dirty ? "Dirty" : "Clean")")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Text("Git working-tree status unavailable")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        if let remote = run.gitRemoteURL {
-                            SafeCopyButton(value: remote, label: "Copy Git remote URL", showsTitle: true)
-                        }
-                        Text(run.executionContextDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .font(.callout)
                     }
                     Spacer()
                     Label(run.status.rawValue.localizedCapitalized, systemImage: statusSymbol)
+                        .fixedSize()
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -203,7 +212,8 @@ struct RunPageView: View {
                                     phaseSelection.receive(error == nil ? .apply : .errors)
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.borderless)
+                            .font(.body.weight(.semibold))
                         }
                     }
                     .controlSize(.regular)
@@ -342,13 +352,13 @@ private struct PlanReviewSections: View {
             if diff != nil {
                 Section {
                     let totals = counts
-                    HStack(spacing: 18) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 60), alignment: .leading)],
+                              alignment: .leading, spacing: 12) {
                         planCount("Create", value: totals.add, color: .green)
                         planCount("Update", value: totals.change, color: .blue)
                         planCount("Replace", value: totals.replace, color: .orange)
                         planCount("Destroy", value: totals.destroy, color: .red)
                         if totals.read > 0 { planCount("Read", value: totals.read, color: .secondary) }
-                        Spacer(minLength: 0)
                     }
                     .padding(.vertical, 4)
                 } header: { Text("Planned actions") }
@@ -371,7 +381,9 @@ private struct PlanReviewSections: View {
                                 Text(operationLabel(operation)).tag(operation)
                             }
                         }
-                        .frame(width: 130)
+                        .labelsHidden()
+                        .frame(width: 110)
+                        .accessibilityLabel("Filter resource changes by operation")
                     }
                 } header: { Text("Resource changes · \(visibleChanges.count) of \(diff.resourceChanges.filter { $0.action != "no-op" || $0.originalAddress != nil || $0.importingID != nil }.count)") }
                 ForEach(visibleChanges) { change in
@@ -448,10 +460,13 @@ private struct PlanReviewSections: View {
                         } label: {
                             HStack {
                                 Text(change.address)
-                                Spacer()
+                                    .font(.system(.body, design: .monospaced))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
                                 Text(change.action == "no-op"
                                      ? (change.importingID != nil ? "Import" : "Move")
                                      : change.action.capitalized).foregroundStyle(.secondary)
+                                    .font(.callout).fixedSize()
                             }
                         }
                     }
@@ -481,8 +496,11 @@ private struct PlanReviewSections: View {
                         } label: {
                             HStack {
                                 Text("Output: \(output.name)")
-                                Spacer()
-                                Text(output.action.capitalized).foregroundStyle(.secondary)
+                                    .font(.system(.body, design: .monospaced))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                Text(output.action.capitalized).font(.callout).foregroundStyle(.secondary)
+                                    .fixedSize()
                             }
                         }
                     }
