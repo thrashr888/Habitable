@@ -156,6 +156,14 @@ struct PlanConsequences: Equatable, Sendable {
     }
 }
 
+func planResourceChangesEmptyMessage(hasVisibleChanges: Bool, hasAddressFilter: Bool,
+                                     hasOperationFilter: Bool) -> String? {
+    guard !hasVisibleChanges else { return nil }
+    return hasAddressFilter || hasOperationFilter
+        ? "No resources match this filter."
+        : "No resource changes in this plan."
+}
+
 func transformPlan(_ source: JSON) -> TerraformPlan {
     let log = redactEchoedPlanValues(source)
     return TerraformPlan(

@@ -337,7 +337,7 @@ private struct TerraformVariableEditor: View {
         Form {
             Section(header: Text("Save a Terraform variable").font(.headline)) {
                 Text("Key").font(.caption).foregroundColor(.secondary)
-                TextField("Variable key", text: $variable.key).labelsHidden().accessibilityLabel("Variable key").multilineTextAlignment(.leading)
+                TextField("Variable key", text: $variable.key).labelsHidden().accessibilityLabel("Terraform variable key").multilineTextAlignment(.leading)
                 if let type = variable.declaration?.type {
                     LabeledContent("Terraform type", value: type)
                 }
@@ -356,13 +356,13 @@ private struct TerraformVariableEditor: View {
                             Text("False").tag("false")
                         }.pickerStyle(.segmented)
                     } else if editorMode == .number {
-                        TextField("Number value", text: $variable.value).multilineTextAlignment(.leading)
+                        TextField("Number value", text: $variable.value).accessibilityLabel("Number value").multilineTextAlignment(.leading)
                     } else if editorMode == .string {
-                        if variable.sensitive { SecureField("String value", text: $variable.value) }
-                        else { TextEditor(text: $variable.value).frame(minHeight: 72).multilineTextAlignment(.leading) }
+                        if variable.sensitive { SecureField("String value", text: $variable.value).accessibilityLabel("Sensitive string value") }
+                        else { TextEditor(text: $variable.value).accessibilityLabel("String value").frame(minHeight: 72).multilineTextAlignment(.leading) }
                     } else {
-                        if variable.sensitive { SecureField("JSON value", text: $variable.value) }
-                        else { TextEditor(text: $variable.value).frame(minHeight: 110).multilineTextAlignment(.leading) }
+                        if variable.sensitive { SecureField("JSON value", text: $variable.value).accessibilityLabel("Sensitive JSON value") }
+                        else { TextEditor(text: $variable.value).accessibilityLabel("JSON value").frame(minHeight: 110).multilineTextAlignment(.leading) }
                     }
                 }
                 if editorMode == .rawJSON {
@@ -375,7 +375,7 @@ private struct TerraformVariableEditor: View {
                 Text("Hides this value and redacts matching input values from Habitable run logs and reviews. Also mark it sensitive in your Terraform configuration for Terraform’s own output.")
                     .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 Text("Description").font(.caption).foregroundColor(.secondary)
-                TextField("Optional description", text: $variable.description).labelsHidden().accessibilityLabel("Optional description")
+                TextField("Optional description", text: $variable.description).labelsHidden().accessibilityLabel("Terraform variable description")
                     .multilineTextAlignment(.leading)
                 if (didEditKey || didAttemptSave), let validationError = editorValidationError {
                     Text(validationError).foregroundColor(.red)

@@ -124,7 +124,7 @@ struct ContentView: View {
 
     private var configuredWindowContent: some View {
         windowContent
-        .background(WorkspaceWindowIdentity(title: "\((selection ?? .workspace).title) — \(workspaceName)"))
+        .background(WorkspaceWindowIdentity(title: workspaceName))
         .environmentObject(workspace)
         .environmentObject(editors)
         .buttonStyle(.borderless)

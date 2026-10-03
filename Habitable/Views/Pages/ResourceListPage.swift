@@ -77,12 +77,17 @@ struct ResourceListPage: View {
     @State private var modeFilter = "All types"
     @State private var providerFilter = "All providers"
     @State private var moduleFilter = "All modules"
+    @State private var resourceRows: [ResourceBrowserRow] = []
     @State private var sortOrder: [KeyPathComparator<ResourceBrowserRow>] = [
         KeyPathComparator(\.address, order: .forward)
     ]
 
     private var resources: [ResourceBrowserRow] {
-        (workspace.state?.root_module.resources ?? []).map(ResourceBrowserRow.init)
+        resourceRows
+    }
+
+    private func rebuildResourceRows() {
+        resourceRows = (workspace.state?.root_module.resources ?? []).map(ResourceBrowserRow.init)
     }
 
     private var providers: [String] { Array(Set(resources.map(\.provider))).filter { $0 != "—" }.sorted() }
@@ -141,7 +146,9 @@ struct ResourceListPage: View {
         .onChange(of: filteredResources.map(\.id)) { addresses in
             if let selection, !addresses.contains(selection) { self.selection = nil }
         }
+        .onAppear(perform: rebuildResourceRows)
         .onChange(of: workspace.state?.id) { _ in
+            rebuildResourceRows()
             if let selection, !resources.contains(where: { $0.id == selection }) { self.selection = nil }
         }
     }

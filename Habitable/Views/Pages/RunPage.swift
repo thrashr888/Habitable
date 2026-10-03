@@ -308,9 +308,12 @@ private struct PlanReviewSections: View {
                 } header: { Text("Planned actions") }
             }
             if let diff {
-                if visibleChanges.isEmpty && diff.outputChanges.allSatisfy({ $0.action == "no-op" }) {
-                    Text(addressFilter.isEmpty && operationFilter == "All"
-                         ? "No changes in this plan." : "No resources match this filter.")
+                if let emptyMessage = planResourceChangesEmptyMessage(
+                    hasVisibleChanges: !visibleChanges.isEmpty,
+                    hasAddressFilter: !addressFilter.isEmpty,
+                    hasOperationFilter: operationFilter != "All"
+                ) {
+                    Text(emptyMessage)
                         .foregroundStyle(.secondary)
                 }
                 Section {
