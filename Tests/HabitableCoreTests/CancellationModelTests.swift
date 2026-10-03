@@ -179,6 +179,7 @@ final class CancellationModelTests: XCTestCase {
               printf '{"type":"log","@message":"filler-%05d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}\n' "$i"
               i=$((i + 1))
             done
+            printf '[Earlier live output omitted; consult the completed run events]\n'
             printf '{"type":"diagnostic","diagnostic":{"severity":"error","summary":"Late overflow failure","detail":"This event follows the bounded capture."}}\n'
             printf '\033[31mprovider stderr stream-secret after overflow\033[0m\n' >&2
             exit 1
@@ -229,6 +230,7 @@ final class CancellationModelTests: XCTestCase {
         let persisted = try history.readPersistedRecord(id: run.id, workspace: root)
         XCTAssertNotNil(persisted.planOutput)
         XCTAssertTrue(persisted.planHistoryOutput?.contains("Late overflow failure") == true)
+        XCTAssertTrue(persisted.planHistoryOutput?.contains("Earlier live output omitted; consult the completed run events") == true)
         XCTAssertTrue(persisted.planHistoryOutput?.contains("provider stderr (sensitive) after overflow") == true)
         XCTAssertFalse(persisted.planHistoryOutput?.contains("stream-secret") == true)
         XCTAssertEqual(persisted.planHistoryOutputTruncated, true)
