@@ -16,6 +16,20 @@ final class RunPresentationTests: XCTestCase {
         XCTAssertEqual(outputOnly.summary, "No resource changes · 1 output to change")
     }
 
+    func testResourceChangeReviewExplainsOutputOnlyAndFilteredEmptyPlans() {
+        XCTAssertEqual(planResourceChangesEmptyMessage(hasVisibleChanges: false,
+                                                       hasAddressFilter: false,
+                                                       hasOperationFilter: false),
+                       "No resource changes in this plan.")
+        XCTAssertEqual(planResourceChangesEmptyMessage(hasVisibleChanges: false,
+                                                       hasAddressFilter: true,
+                                                       hasOperationFilter: false),
+                       "No resources match this filter.")
+        XCTAssertNil(planResourceChangesEmptyMessage(hasVisibleChanges: true,
+                                                     hasAddressFilter: true,
+                                                     hasOperationFilter: true))
+    }
+
     func testFollowingRunKeepsApplyVisibleAtCompletionAndShowsFailures() {
         XCTAssertEqual(RunDisplayPhase.current(status: .planning, hasApply: false, hasError: false), .plan)
         XCTAssertEqual(RunDisplayPhase.current(status: .confirmed, hasApply: false, hasError: false), .apply)

@@ -10,6 +10,7 @@ import CoreFoundation
 
 enum VariableInputError: LocalizedError, Equatable {
     case invalidKey(String)
+    case invalidEnvironmentKey(String)
     case duplicateKey(String)
     case invalidJSON(String)
     case invalidEnvironmentValue(String)
@@ -17,6 +18,7 @@ enum VariableInputError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .invalidKey(let key): return "Variable key '\(key)' must use a Terraform identifier (letters, numbers, and underscores; it cannot start with a number)."
+        case .invalidEnvironmentKey(let key): return "Environment variable key '\(key)' must be non-empty and cannot contain '=' or a null character."
         case .duplicateKey(let key): return "Variable key '\(key)' is listed more than once."
         case .invalidJSON(let key): return "Value for '\(key)' must be a valid JSON string, number, boolean, list, map, or null."
         case .invalidEnvironmentValue(let key): return "Environment variable '\(key)' contains a null character."
@@ -143,7 +145,7 @@ class EnvironmentVariable: ObservableObject {
 
     func validate() throws {
         guard !key.isEmpty, !key.contains("="), !key.contains("\0") else {
-            throw VariableInputError.invalidKey(key)
+            throw VariableInputError.invalidEnvironmentKey(key)
         }
         guard !value.contains("\0") else { throw VariableInputError.invalidEnvironmentValue(key) }
     }

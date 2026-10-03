@@ -99,7 +99,27 @@ final class VariableInputsTests: XCTestCase {
         XCTAssertTrue(variable.sensitive)
 
         variable.key = "BAD=KEY"
-        XCTAssertThrowsError(try variable.validate())
+        XCTAssertThrowsError(try variable.validate()) { error in
+            XCTAssertEqual((error as? VariableInputError)?.errorDescription,
+                           "Environment variable key 'BAD=KEY' must be non-empty and cannot contain '=' or a null character.")
+        }
+    }
+
+    func testEnvironmentVariableRejectsEmptyKeyAndNullValuesWithEnvironmentSpecificMessages() {
+        let variable = EnvironmentVariable()
+        XCTAssertTrue(variable.validationError?.contains("Environment variable key") == true)
+        variable.key = "APP_TOKEN"
+        variable.value = "bad\0value"
+        XCTAssertEqual(variable.validationError, "Environment variable 'APP_TOKEN' contains a null character.")
+    }
+
+    func testRawJSONNullRemainsTerraformNull() throws {
+        let variable = TerraformVariable()
+        variable.key = "optional_value"
+        variable.value = "null"
+        variable.hcl = true
+
+        XCTAssertTrue(try variable.terraformJSONValue() is NSNull)
     }
 
     func testSensitiveInputRedactorProtectsStringsEnvironmentAndNestedJSON() throws {

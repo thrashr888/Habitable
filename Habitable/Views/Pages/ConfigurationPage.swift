@@ -33,6 +33,7 @@ private struct TerraformSourceEditor: NSViewRepresentable {
         editor.isAutomaticQuoteSubstitutionEnabled = false
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.isAutomaticTextReplacementEnabled = false
+        editor.setAccessibilityLabel("Terraform source editor")
         editor.textContainerInset = NSSize(width: 12, height: 12)
         editor.minSize = NSSize(width: 0, height: 0)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
