@@ -246,6 +246,12 @@ final class Runner: Sendable {
                 onOutput: onOutput, completion: completion)
     }
 
+    /// Reads the selected backend, including non-default Terraform workspaces.
+    @discardableResult
+    func pullState(workingDirectory: URL, completion: @escaping Completion) -> TerraformCommandHandle {
+        execute(["state", "pull"], workingDirectory: workingDirectory, completion: completion)
+    }
+
     @discardableResult
     private func execute(_ arguments: [String], workingDirectory: URL,
                          environmentOverrides: [String: String] = [:],
@@ -271,7 +277,7 @@ final class Runner: Sendable {
                 return
             }
 
-            let retainsFullOutput = arguments.first == "show"
+            let retainsFullOutput = arguments.first == "show" || arguments == ["state", "pull"]
             let process = Process()
             do {
                 try FileManager.default.createDirectory(at: self.planDirectory, withIntermediateDirectories: true,

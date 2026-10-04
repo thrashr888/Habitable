@@ -33,6 +33,71 @@ final class WorkspaceModelTests: XCTestCase {
         return executable
     }
 
+    func testMapDemoAccountsForResourcesAndRedactsSecrets() throws {
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.loadMapDemo()
+        XCTAssertTrue(workspace.isMapDemo)
+        XCTAssertNil(workspace.workingDirectory, "The sample must never be runnable infrastructure")
+        XCTAssertEqual(workspace.resourceMap?.tiles.flatMap(\.resources).count, 10)
+        XCTAssertFalse(workspace.resourceMap?.connections.isEmpty ?? true)
+        let database = try XCTUnwrap(workspace.state?.resources.first { $0.type == "aws_db_instance" })
+        XCTAssertFalse(database.displayAttributes.contains { $0.value.contains("SAMPLE_SECRET") })
+        XCTAssertTrue(database.displayAttributes.contains { $0.value == "(sensitive value)" })
+        workspace.state = nil
+        XCTAssertNil(workspace.resourceMap)
+        XCTAssertNil(workspace.mapNotice)
+    }
+
+    func testMapRefreshPullsBackendDependenciesAndFoldsHelpers() async throws {
+        let show = #"{"values":{"root_module":{"resources":[{"address":"aws_lambda_function.web","mode":"managed","type":"aws_lambda_function","name":"web"},{"address":"aws_iam_role.web","mode":"managed","type":"aws_iam_role","name":"web"}]}}}"#
+        let raw = #"{"version":4,"resources":[{"mode":"managed","type":"aws_lambda_function","name":"web","instances":[{"dependencies":["aws_iam_role.web"]}]},{"mode":"managed","type":"aws_iam_role","name":"web","instances":[{}]}]}"#
+        let executable = try fakeTerraform("""
+        case "$1" in
+          version) echo '{"terraform_version":"1.16.4"}' ;;
+          show) echo '\(show)' ;;
+          state) echo '\(raw)' ;;
+        esac
+        """)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.runner = Runner(executableURL: executable)
+        workspace.workingDirectory = directory
+        workspace.refreshResources()
+        try await waitUntil { !workspace.locked }
+        XCTAssertEqual(workspace.resourceMap?.tiles.count, 1)
+        XCTAssertEqual(workspace.resourceMap?.tiles.first?.resources.count, 2)
+        XCTAssertNil(workspace.mapNotice)
+        XCTAssertNil(workspace.errorMessage)
+    }
+
+    func testMapPullFailurePreservesInventoryWithoutLeakingStderr() async throws {
+        let executable = try fakeTerraform("""
+        case "$1" in
+          version) echo '{"terraform_version":"1.16.4"}' ;;
+          show) echo '{"values":{"root_module":{"resources":[{"address":"aws_s3_bucket.uploads","mode":"managed","type":"aws_s3_bucket","name":"uploads"}]}}}' ;;
+          state) echo 'SECRET_BACKEND_ERROR' >&2; exit 1 ;;
+        esac
+        """)
+        let workspace = Workspace(restoreLastDirectory: false, defaults: testDefaults,
+                                  commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        workspace.runner = Runner(executableURL: executable)
+        workspace.workingDirectory = directory
+        workspace.refreshResources()
+        try await waitUntil { !workspace.locked }
+        XCTAssertEqual(workspace.resourceMap?.tiles.count, 1)
+        XCTAssertTrue(workspace.mapNotice?.contains("Connections unavailable") == true)
+        XCTAssertFalse(workspace.mapNotice?.contains("SECRET") == true)
+        XCTAssertNil(workspace.errorMessage)
+    }
+
+    func testMapInventoryRejectsMismatchedSnapshots() {
+        let current = MapResource(address: "aws_s3_bucket.current", type: "aws_s3_bucket", name: "current")
+        let changed = MapResource(address: "aws_s3_bucket.changed", type: "aws_s3_bucket", name: "changed")
+        XCTAssertFalse(Workspace.mapInventoryMatches([current], [changed]))
+        XCTAssertTrue(Workspace.mapInventoryMatches([current], [current]))
+    }
+
     @MainActor
     func testSuccessfulValidateRecognizesProviderFreeInitAfterReopen() async throws {
         let executable = try fakeTerraform("""

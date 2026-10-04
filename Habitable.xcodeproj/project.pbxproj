@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA6040000000000000000030 /* ResourceMapSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000031 /* ResourceMapSample.swift */; };
+		AA6040000000000000000020 /* ResourceMapPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000021 /* ResourceMapPage.swift */; };
 		AA6040000000000000000010 /* ResourceMapCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000011 /* ResourceMapCategories.swift */; };
 		AA6040000000000000000000 /* ResourceMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000001 /* ResourceMap.swift */; };
 		AA6030000000000000000010 /* ResourceBrowserIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000011 /* ResourceBrowserIndex.swift */; };
@@ -80,6 +82,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AA6040000000000000000031 /* ResourceMapSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapSample.swift; sourceTree = "<group>"; };
+		AA6040000000000000000021 /* ResourceMapPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapPage.swift; sourceTree = "<group>"; };
 		AA6040000000000000000011 /* ResourceMapCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapCategories.swift; sourceTree = "<group>"; };
 		AA6040000000000000000001 /* ResourceMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMap.swift; sourceTree = "<group>"; };
 		AA6030000000000000000011 /* ResourceBrowserIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceBrowserIndex.swift; sourceTree = "<group>"; };
@@ -192,6 +196,7 @@
 				B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */,
 				550D972CC34B47978D05B9F9 /* RunGitContext.swift */,
 				0EEE1ABBAF394D628B436560 /* ConfigurationModel.swift */,
+				AA6040000000000000000031 /* ResourceMapSample.swift */,
 				AA6040000000000000000001 /* ResourceMap.swift */,
 				AA6040000000000000000011 /* ResourceMapCategories.swift */,
 				AA6030000000000000000011 /* ResourceBrowserIndex.swift */,
@@ -241,6 +246,7 @@
 				8AA12B152642614F0048A4A9 /* WorkspacePage.swift */,
 				8AA12B0D264260570048A4A9 /* RunListPage.swift */,
 				8A926B65264E4A5500FDBA5C /* RunPage.swift */,
+				AA6040000000000000000021 /* ResourceMapPage.swift */,
 				8AA12B0F264260820048A4A9 /* ResourceListPage.swift */,
 				8A926B74264FA12400FDBA5C /* ResourcePage.swift */,
 				8A926B76264FA29C00FDBA5C /* OutputsListPage.swift */,
@@ -404,6 +410,7 @@
 				587D4C19FB214DC5A16904A8 /* ConfigurationPage.swift in Sources */,
 				093095698F3E40D39EF8EB1B /* RunGitContext.swift in Sources */,
 				45C6675D39CF46A2A199AD8B /* ConfigurationModel.swift in Sources */,
+				AA6040000000000000000030 /* ResourceMapSample.swift in Sources */,
 				AA6040000000000000000000 /* ResourceMap.swift in Sources */,
 				AA6040000000000000000010 /* ResourceMapCategories.swift in Sources */,
 				AA6030000000000000000010 /* ResourceBrowserIndex.swift in Sources */,
@@ -415,6 +422,7 @@
 				8A926B69264E524C00FDBA5C /* ChangeSummary.swift in Sources */,
 				8AA12B0C26425FB00048A4A9 /* WorkspaceModel.swift in Sources */,
 				8A926B582648C48E00FDBA5C /* ndjson.swift in Sources */,
+				AA6040000000000000000020 /* ResourceMapPage.swift in Sources */,
 				8AA12B10264260820048A4A9 /* ResourceListPage.swift in Sources */,
 				8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */,
 				8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */,
