@@ -264,7 +264,10 @@ struct HCPAPIClient: Sendable {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         do {
-            let (data, response) = try await boundedData(for: request, limit: 32 * 1024 * 1024)
+            let delegate: (any URLSessionTaskDelegate)? =
+                Self.normalizedHostname(hostname) == "app.terraform.io" && url.host == "app.terraform.io"
+                && url.path.hasPrefix("/api/state-versions/") ? HCPStateArtifactRedirectPolicy() : nil
+            let (data, response) = try await boundedData(for: request, limit: 32 * 1024 * 1024, delegate: delegate)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 throw HCPViewerError.transport("Could not download the selected state version. Refresh to try again.")
             }
@@ -316,8 +319,8 @@ struct HCPAPIClient: Sendable {
         return url
     }
 
-    private func boundedData(for request: URLRequest, limit: Int) async throws -> (Data, URLResponse) {
-        let (bytes, response) = try await session.bytes(for: request)
+    private func boundedData(for request: URLRequest, limit: Int, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request, delegate: delegate)
         let expected = response.expectedContentLength
         guard expected < 0 || expected <= Int64(limit) else {
             bytes.task.cancel()
@@ -440,6 +443,32 @@ struct HCPAPIClient: Sendable {
         guard let encoded = try? JSONSerialization.data(withJSONObject: scrub(value), options: [.fragmentsAllowed, .sortedKeys]),
               let sanitized = String(data: encoded, encoding: .utf8) else { return line }
         return sanitized
+    }
+}
+
+/// HCP's authenticated state endpoint redirects to its Archivist service.
+/// Scope this exception to that exact endpoint and destination; never forward
+/// API credentials, cookies, or a request body to the artifact service.
+final class HCPStateArtifactRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let source = task.originalRequest?.url,
+              source.scheme == "https", source.host == "app.terraform.io", (source.port ?? 443) == 443,
+              source.path.hasPrefix("/api/state-versions/"), source.user == nil, source.password == nil,
+              task.originalRequest?.httpMethod == "GET",
+              let target = request.url, target.scheme == "https",
+              target.host == "archivist.terraform.io", (target.port ?? 443) == 443,
+              target.user == nil, target.password == nil else {
+            completionHandler(nil)
+            return
+        }
+        var sanitized = URLRequest(url: target)
+        sanitized.httpMethod = "GET"
+        sanitized.timeoutInterval = request.timeoutInterval
+        sanitized.httpShouldHandleCookies = false
+        completionHandler(sanitized)
     }
 }
 

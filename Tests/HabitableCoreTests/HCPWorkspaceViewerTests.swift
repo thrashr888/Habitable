@@ -109,6 +109,115 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         XCTAssertEqual(sameOriginRedirect?.url?.path, "/api/v2/next")
     }
 
+    func testStateArtifactRedirectPolicyStripsCredentialsAcrossRedirectChain() throws {
+        let session = URLSession(configuration: .ephemeral)
+        let sourceURL = URL(string: "https://app.terraform.io/api/state-versions/sv-1/hosted_state")!
+        var source = URLRequest(url: sourceURL)
+        source.setValue("Bearer state-token", forHTTPHeaderField: "Authorization")
+        source.setValue("session-cookie=private", forHTTPHeaderField: "Cookie")
+        source.setValue("Proxy private", forHTTPHeaderField: "Proxy-Authorization")
+        let task = session.dataTask(with: source)
+        let policy = HCPStateArtifactRedirectPolicy()
+
+        func redirected(_ responseURL: URL, to target: URL, carrying credentials: Bool) throws -> URLRequest? {
+            var request = URLRequest(url: target)
+            if credentials {
+                request.setValue("Bearer state-token", forHTTPHeaderField: "Authorization")
+                request.setValue("session-cookie=private", forHTTPHeaderField: "Cookie")
+                request.setValue("Proxy private", forHTTPHeaderField: "Proxy-Authorization")
+            }
+            let response = try XCTUnwrap(HTTPURLResponse(url: responseURL, statusCode: 302,
+                                                         httpVersion: "HTTP/1.1", headerFields: nil))
+            var result: URLRequest?
+            policy.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: request) {
+                result = $0
+            }
+            return result
+        }
+
+        let signedStorageURL = URL(string: "https://archivist.terraform.io/v1/object/state?signature=keep-this")!
+        let firstHop = try XCTUnwrap(redirected(sourceURL, to: signedStorageURL, carrying: true))
+        XCTAssertEqual(firstHop.url?.query, "signature=keep-this")
+        XCTAssertNil(firstHop.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertNil(firstHop.value(forHTTPHeaderField: "Cookie"))
+        XCTAssertNil(firstHop.value(forHTTPHeaderField: "Proxy-Authorization"))
+
+        let secondArchivistURL = URL(string: "https://archivist.terraform.io/v1/object/final?signature=keep-this")!
+        let secondHop = try XCTUnwrap(redirected(try XCTUnwrap(firstHop.url), to: secondArchivistURL, carrying: false))
+        XCTAssertEqual(secondHop.url?.query, "signature=keep-this")
+        XCTAssertNil(secondHop.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertNil(secondHop.value(forHTTPHeaderField: "Cookie"))
+        XCTAssertNil(secondHop.value(forHTTPHeaderField: "Proxy-Authorization"))
+
+        let otherHost = URL(string: "https://storage.example.net/object/state?signature=keep-this")!
+        XCTAssertNil(try redirected(try XCTUnwrap(secondHop.url), to: otherHost, carrying: false))
+    }
+
+    func testStateArtifactRedirectPolicyRejectsHTTPAndUserInfoTargets() throws {
+        let session = URLSession(configuration: .ephemeral)
+        let sourceURL = URL(string: "https://app.terraform.io/api/state-versions/sv-1/hosted_state")!
+        let task = session.dataTask(with: URLRequest(url: sourceURL))
+        let response = try XCTUnwrap(HTTPURLResponse(url: sourceURL, statusCode: 302,
+                                                    httpVersion: "HTTP/1.1", headerFields: nil))
+        let policy = HCPStateArtifactRedirectPolicy()
+
+        for target in [URL(string: "http://archivist.terraform.io/object/state?signature=keep")!,
+                       URL(string: "https://user:password@archivist.terraform.io/object/state?signature=keep")!,
+                       URL(string: "https://archivist.terraform.io.example.net/object/state?signature=keep")!,
+                       URL(string: "https://archivist.terraform.io:444/object/state?signature=keep")!] {
+            var result: URLRequest?
+            policy.urlSession(session, task: task, willPerformHTTPRedirection: response,
+                              newRequest: URLRequest(url: target)) { result = $0 }
+            XCTAssertNil(result, "Unsafe artifact redirect should be rejected: \(target.host ?? "unknown")")
+        }
+    }
+
+    func testStateArtifactRedirectPolicyRejectsUnexpectedOriginalRequest() throws {
+        let session = URLSession(configuration: .ephemeral)
+        let target = URL(string: "https://archivist.terraform.io/v1/object/state?signature=keep")!
+        let policy = HCPStateArtifactRedirectPolicy()
+        let unexpectedSources: [(String, String)] = [
+            ("https://enterprise.example.test/api/state-versions/sv-1/hosted_state", "GET"),
+            ("https://app.terraform.io/api/v2/state-versions/sv-1/hosted_state", "GET"),
+            ("https://app.terraform.io/api/state-versions/sv-1/hosted_state", "POST")
+        ]
+
+        for (sourceString, method) in unexpectedSources {
+            var sourceRequest = URLRequest(url: try XCTUnwrap(URL(string: sourceString)))
+            sourceRequest.httpMethod = method
+            sourceRequest.setValue("Bearer state-token", forHTTPHeaderField: "Authorization")
+            let task = session.dataTask(with: sourceRequest)
+            let response = try XCTUnwrap(HTTPURLResponse(url: try XCTUnwrap(sourceRequest.url), statusCode: 302,
+                                                         httpVersion: "HTTP/1.1", headerFields: nil))
+            var result: URLRequest?
+            policy.urlSession(session, task: task, willPerformHTTPRedirection: response,
+                              newRequest: URLRequest(url: target)) { result = $0 }
+            XCTAssertNil(result, "Unexpected source should not receive the state artifact redirect exception")
+        }
+    }
+
+    func testStateArtifactRedirectPolicyDoesNotForwardBodyOrCustomHeaders() throws {
+        let session = URLSession(configuration: .ephemeral)
+        let sourceURL = URL(string: "https://app.terraform.io/api/state-versions/sv-1/hosted_state")!
+        let targetURL = URL(string: "https://archivist.terraform.io/v1/object/state?signature=keep")!
+        let task = session.dataTask(with: URLRequest(url: sourceURL))
+        let response = try XCTUnwrap(HTTPURLResponse(url: sourceURL, statusCode: 302,
+                                                    httpVersion: "HTTP/1.1", headerFields: nil))
+        var redirectedRequest = URLRequest(url: targetURL)
+        redirectedRequest.httpMethod = "POST"
+        redirectedRequest.httpBody = Data("private request body".utf8)
+        redirectedRequest.setValue("private custom value", forHTTPHeaderField: "X-Custom-Secret")
+
+        var result: URLRequest?
+        HCPStateArtifactRedirectPolicy().urlSession(session, task: task, willPerformHTTPRedirection: response,
+                                                    newRequest: redirectedRequest) { result = $0 }
+        let sanitized = try XCTUnwrap(result)
+        XCTAssertEqual(sanitized.httpMethod, "GET")
+        XCTAssertNil(sanitized.httpBody)
+        XCTAssertNil(sanitized.value(forHTTPHeaderField: "X-Custom-Secret"))
+        XCTAssertEqual(sanitized.url?.query, "signature=keep")
+    }
+
     func testOversizedAPIResponseIsRejectedFromHeadersBeforeBodyRead() async throws {
         HCPURLProtocolStub.contentLengths = ["/api/v2/organizations": 9 * 1024 * 1024]
         HCPURLProtocolStub.responses = ["/api/v2/organizations": Data("{}".utf8)]

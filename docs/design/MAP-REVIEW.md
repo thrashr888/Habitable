@@ -1,6 +1,6 @@
 # Map page review
 
-Open `/tmp/Habitable Map Page.app`. It starts with offline sample infrastructure.
+Open `/tmp/Habitable Map Cloud Review.app`. It starts with offline sample infrastructure.
 No cloud credentials are needed for these checks.
 
 | Check | Expected behavior |
@@ -20,6 +20,6 @@ For local state checks, use File → Open on the folders under
 `/tmp/Habitable Map Playground` has 26 managed resources plus one data source.
 Opening these fixtures only reads their existing state; no apply is needed.
 
-Real-account HCP workspace listing works, but the restored workspace failed to load its Map. Private-state diagnosis awaits explicit workspace approval; this is an open blocker for the cloud Map.
+Real-account HCP loading, refresh, and card selection passed on the approved workspace (17 groups, 57 managed resources). Its download redirect bug is fixed: the authenticated HCP state endpoint can redirect only to Archivist over HTTPS, with no credentials, cookies, or request body forwarded. Other HCP regions and Enterprise deployments have not been live-tested.
 Broader provider-state grouping and dense-graph route improvements remain tracked
 separately. This review build is not a release.
