@@ -27,8 +27,8 @@ plist = target / 'Contents/Info.plist'
 with plist.open('rb') as file:
     info = plistlib.load(file)
 info.update(CFBundleIdentifier='com.thrashr888.Habitable.map-preview',
-            CFBundleName='Habitable Preview', CFBundleDisplayName='Habitable Preview',
-            HabitableMapDemo=True)
+            CFBundleName='Habitable Preview', CFBundleDisplayName='Habitable Preview')
+info.pop('HabitableMapDemo', None)
 with plist.open('wb') as file:
     plistlib.dump(info, file)
 PY

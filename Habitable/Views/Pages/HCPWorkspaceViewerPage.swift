@@ -5,7 +5,6 @@ struct HCPWorkspaceViewer: View {
     @State private var workspaceSearch = ""
     @State private var showingMap = true
     @State private var inspectorRequest: HCPMapInspectorRequest?
-    @State private var showingSample = false
 
     init(model: HCPWorkspaceViewerModel) { self.model = model }
 
@@ -17,26 +16,14 @@ struct HCPWorkspaceViewer: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !model.isSample { connectionPanel }
+            connectionPanel
             if model.isConnected {
-                if !model.isSample {
                 Picker("Workspace view", selection: $showingMap) {
                     Text("Map").tag(true)
                     Text("Runs").tag(false)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 180).padding(.bottom, 8)
-                }
                 if showingMap {
-                    if model.isSample {
-                        HStack {
-                            Picker("Sample", selection: workspaceSelection) {
-                                ForEach(model.workspaces) { workspace in
-                                    Text(workspace.name).tag(Optional(workspace.id))
-                                }
-                            }.frame(maxWidth: 340)
-                            Spacer()
-                            Text("Offline · no account connected").font(.caption).foregroundStyle(.secondary)
-                        }.padding(.horizontal, 12).padding(.vertical, 8)
-                    } else { compactSelection }
+                    compactSelection
                     Divider()
                     cloudMap
                 } else {
@@ -67,9 +54,6 @@ struct HCPWorkspaceViewer: View {
         .sheet(item: $inspectorRequest) { request in
             HCPMapResourceSheet(resources: model.mapSnapshot?.resources ?? [],
                                 title: model.selectedWorkspace?.name ?? "Workspace", selectedAddress: request.address)
-        }
-        .sheet(isPresented: $showingSample) {
-            HCPSampleMapSheet()
         }
         .alert("HCP Terraform", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.clearError() } })) {
             Button("OK", role: .cancel) { model.clearError() }
@@ -234,7 +218,7 @@ struct HCPWorkspaceViewer: View {
         ResourceMapContent(title: model.selectedWorkspace?.name ?? "Choose a workspace",
             identity: model.mapRequestKey + "|" + (model.mapSnapshot?.versionID ?? ""),
             map: model.mapSnapshot?.map, resources: model.mapSnapshot?.resources ?? [],
-            notice: model.mapSnapshot?.notice ?? (model.mapSnapshot == nil ? nil : (model.isSample ? "Offline sample · no account connected" : "HCP Terraform · current state · read-only")),
+            notice: model.mapSnapshot?.notice ?? (model.mapSnapshot == nil ? nil : "HCP Terraform · current state · read-only"),
             errorMessage: model.mapError,
             isLoading: model.isLoadingMap, canRefresh: model.selectedWorkspace != nil && !model.isLoadingMap,
             refresh: { Task { await model.refreshMap() } },
@@ -254,7 +238,6 @@ struct HCPWorkspaceViewer: View {
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
             if let error = model.errorMessage { Text(error).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480) }
             if model.isLoading { ProgressView().controlSize(.small) }
-            Button("Explore a sample cloud map") { showingSample = true }.buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -393,17 +376,6 @@ struct HCPWorkspaceViewer: View {
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 .padding(12).background(Color(nsColor: .textBackgroundColor))
         }
-    }
-}
-
-private struct HCPSampleMapSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var model = HCPWorkspaceViewerModel(isSample: true)
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(12)
-            HCPWorkspaceViewer(model: model)
-        }.frame(minWidth: 1000, idealWidth: 1100, minHeight: 800)
     }
 }
 

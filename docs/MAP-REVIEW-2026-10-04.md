@@ -29,8 +29,14 @@ Live native inspection verified the Map reference sample at 75% zoom, stacked Be
 
 ## User test route
 
-Open Habitable Preview → HCP Terraform → Explore a sample cloud map → choose Map reference. Inspect groups and stacked members, follow purple reference pills, search, toggle connections, and switch between reference, Acme, empty, and unavailable samples. Then use the existing HCP connection to inspect a real workspace. No plan or apply is needed.
+Open Habitable Preview and select an existing local workspace, or open HCP Terraform and connect to the saved organization. Select a real workspace and inspect its Map, resource details, search, and dependency connections. No plan or apply is needed. Sample exploration and demo startup have been removed from the app; new workspaces use the existing creation workflow.
 
 ## Readability correction after user review
 
 The user correctly rejected the small, low-contrast text at 75% zoom. The earlier visual check missed this usability defect. The minimum/default zoom is now 100%, with 125% and 150% enlargement available. Card titles are 15 points, category labels 13 points, summaries/band labels/badges at least 12 points. Summaries and empty-band messages use secondary instead of tertiary contrast. Cards are 264 by 120 points to accommodate readable text. The rebuilt stable preview was visually inspected at 100% in the native sample sheet; user interaction was observed, so further navigation was stopped. Native build and all 18 Map model/layout tests passed. Overall visual acceptance remains pending.
+
+## Real-workspace product flow
+
+Following user feedback, the sample cloud entry point and sheet are removed. Preview startup now restores the real workspace through the normal app flow; neither a launch argument nor a bundle flag substitutes demo data. Synthetic models remain available to automated tests only. The stable preview identifier and signing workflow are unchanged. Native build passes.
+
+Live verification after removal: normal startup restored the prior local directory; the HCP disconnected screen contains no sample CTA. Connecting through the saved credential loaded the selected real workspace, cool-website in pthrasher_v2, showing 2 groups, 8 managed resources and 4 data sources. No infrastructure mutations were performed.
