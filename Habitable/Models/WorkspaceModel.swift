@@ -1100,13 +1100,7 @@ class Workspace: ObservableObject {
         isMapDemo = true
         let raw = ResourceMapSample.rawState
         let json = JSON(raw)
-        let shown: [[String: Any]] = (raw["resources"] as? [[String: Any]] ?? []).map { resource in
-            let instance = (resource["instances"] as? [[String: Any]])!.first!
-            return ["address": "\(resource["type"]!).\(resource["name"]!)", "type": resource["type"]!,
-                    "name": resource["name"]!, "mode": "managed", "provider_name": "registry.terraform.io/hashicorp/aws",
-                    "values": instance["attributes"]!, "sensitive_values": instance["sample_sensitive"] ?? [:]]
-        }
-        state = transformShow(JSON(["values": ["root_module": ["resources": shown]]]))
+        state = transformShow(JSON(ResourceMapSample.shownState))
         if let data = try? json.rawData(), let resources = try? ResourceMapStateReader.read(data) {
             resourceMap = try? ResourceMapClassifier().classify(resources)
         }

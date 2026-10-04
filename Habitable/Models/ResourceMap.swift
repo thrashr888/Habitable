@@ -104,6 +104,9 @@ enum ResourceMapStateReader {
             }
             if let value = values["root_module"], !(value is [String: Any]) { throw ResourceMapError.invalidState }
             if let module = values["root_module"] as? [String: Any] { try walk(module) }
+        } else if root["format_version"] is String,
+                  root.keys.allSatisfy({ ["format_version", "terraform_version"].contains($0) }) {
+            // Terraform emits metadata alone before the first state exists.
         } else {
             throw ResourceMapError.invalidState
         }

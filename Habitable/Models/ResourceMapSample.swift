@@ -1,6 +1,16 @@
 import Foundation
 
 enum ResourceMapSample {
+    static var shownState: [String: Any] {
+        let resources = (rawState["resources"] as? [[String: Any]] ?? []).map { resource -> [String: Any] in
+            let instance = (resource["instances"] as? [[String: Any]])!.first!
+            return ["address": "\(resource["type"]!).\(resource["name"]!)", "type": resource["type"]!,
+                    "name": resource["name"]!, "mode": "managed", "provider_name": "registry.terraform.io/hashicorp/aws",
+                    "values": instance["attributes"]!, "sensitive_values": instance["sample_sensitive"] ?? [:]]
+        }
+        return ["format_version": "1.0", "values": ["root_module": ["resources": resources]]]
+    }
+
     static var rawState: [String: Any] {
         func resource(_ type: String, _ name: String, _ attributes: [String: Any],
                       _ dependencies: [String] = [], sensitive: [String: Any] = [:]) -> [String: Any] {

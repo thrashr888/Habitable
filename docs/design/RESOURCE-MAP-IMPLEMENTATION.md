@@ -73,10 +73,49 @@ Local refresh runs `show -json` followed by `state pull` under one existing comm
 lease. It uses the selected backend and workspace, keeps raw state in memory only,
 and retains a clearly labeled inventory-only map if dependencies cannot be loaded
 or resource identities differ between the two snapshots. Clearing state or changing
-workspace clears the map and selection. Direct HCP API workspace maps remain pending.
+workspace clears the map and selection. Direct HCP API workspace maps are implemented in the follow-up below.
 
 Validation: 233 model tests executed, 8 optional tests skipped, zero failures;
 native Debug build passed. Live UI verified sample selection, dependency navigation,
 search, List, masked password, and switching from sample to the provider-free
 playground (26 managed resources plus one data source). Empty/malformed behavior is
 covered by model tests; the complete live fixture matrix remains unverified.
+
+## HCP Map and Inspector
+
+The HCP workspace viewer now defaults to Map, with Runs available in a segmented
+control. It fetches the current immutable state version and downloads its raw and
+stable JSON artifacts. Raw state supplies dependencies; stable JSON supplies the
+sensitivity masks. Resource inventories must agree before combining them. If an
+older version has no stable JSON artifact, topology remains available with no raw
+attribute values exposed. Each artifact is limited to 32 MiB and kept in memory;
+only redacted display strings enter the shared inspector presentation.
+
+Signed storage downloads receive no API bearer token. Terraform Enterprise's
+same-origin `/api/state-versions/` downloads may receive the token, with the existing
+redirect policy still enforced. No write API or local Terraform execution is used
+by the HCP Map. Missing state and missing state permissions are presented as
+unavailable state rather than an empty workspace. Workspace/host/organization
+changes and disconnects invalidate map requests; late responses are discarded.
+
+HCP Terraform → Explore a sample cloud map opens a separate offline viewer with
+populated, empty, and unavailable-state workspaces. It does not read credentials,
+make network requests, or persist account selections. List and Full inspector
+use the same already-redacted resource records as the map.
+
+Validation: 242 model tests executed, 8 optional skips, zero failures. The native
+Debug app and packaged preview build successfully. Request tests cover signed
+artifact authentication boundaries, Enterprise authentication, nested/repeated
+secret redaction, malformed/mismatched artifacts, size limits, late responses,
+disconnect, missing state/access, metadata-only empty state, and offline isolation.
+
+Live checks passed for the cloud sample's tile selection, dependencies, redaction,
+empty workspace switching, and unavailable-state message; local output-only,
+empty, and malformed-state Maps also behaved correctly. The expanded cloud
+inspector initially failed to update its selected resource. It now owns its
+selection in a dedicated sheet and compiles, but the computer-control connection
+failed before the final click-through could be repeated. That verification and a
+real-account HCP smoke test remain outstanding under Habitable-q7i. No real HCP
+state was accessed during this implementation.
+
+API contract: https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions

@@ -3,6 +3,9 @@ import SwiftUI
 struct HCPWorkspaceViewer: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
     @State private var workspaceSearch = ""
+    @State private var showingMap = true
+    @State private var inspectorRequest: HCPMapInspectorRequest?
+    @State private var showingSample = false
 
     init(model: HCPWorkspaceViewerModel) { self.model = model }
 
@@ -14,8 +17,20 @@ struct HCPWorkspaceViewer: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            connectionPanel
+            if model.isSample {
+                Label("HCP Map sample · offline · no account connected", systemImage: "cloud")
+                    .foregroundStyle(.secondary).padding(.bottom, 12)
+            } else { connectionPanel }
             if model.isConnected {
+                Picker("Workspace view", selection: $showingMap) {
+                    Text("Map").tag(true)
+                    Text("Runs").tag(false)
+                }.pickerStyle(.segmented).frame(width: 180).padding(.bottom, 8)
+                if showingMap {
+                    compactSelection
+                    Divider()
+                    cloudMap
+                } else {
                 GeometryReader { geometry in
                     if geometry.size.width >= 960 {
                         HSplitView {
@@ -31,6 +46,7 @@ struct HCPWorkspaceViewer: View {
                         }
                     }
                 }
+                }
             } else {
                 disconnectedState
             }
@@ -38,6 +54,14 @@ struct HCPWorkspaceViewer: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: model.mapRequestKey) { _ in inspectorRequest = nil }
+        .sheet(item: $inspectorRequest) { request in
+            HCPMapResourceSheet(resources: model.mapSnapshot?.resources ?? [],
+                                title: model.selectedWorkspace?.name ?? "Workspace", selectedAddress: request.address)
+        }
+        .sheet(isPresented: $showingSample) {
+            HCPSampleMapSheet()
+        }
         .alert("HCP Terraform", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.clearError() } })) {
             Button("OK", role: .cancel) { model.clearError() }
         } message: { Text(model.errorMessage ?? "") }
@@ -163,6 +187,7 @@ struct HCPWorkspaceViewer: View {
                     }
                 }
             }
+            if !showingMap {
             HStack(spacing: 12) {
                 Picker("Run", selection: runSelection) {
                     Text(model.runs.isEmpty ? "No remote runs loaded" : "Choose a run").tag(nil as String?)
@@ -186,9 +211,29 @@ struct HCPWorkspaceViewer: View {
                     .help("Refresh run history").accessibilityLabel("Refresh remote run history")
                     .disabled(model.isLoading || model.selectedWorkspaceID == nil)
             }
+            }
         }
         .buttonStyle(.borderless)
         .padding(.vertical, 12)
+    }
+
+    @ViewBuilder private var cloudMap: some View {
+        if model.selectedWorkspace == nil {
+            Text("Choose a workspace to view its resource map.")
+                .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+        ResourceMapContent(title: model.selectedWorkspace?.name ?? "Choose a workspace",
+            identity: model.mapRequestKey + "|" + (model.mapSnapshot?.versionID ?? ""),
+            map: model.mapSnapshot?.map, resources: model.mapSnapshot?.resources ?? [],
+            notice: model.mapSnapshot?.notice ?? (model.mapSnapshot == nil ? nil : (model.isSample ? "Offline sample · no account connected" : "HCP Terraform · current state · read-only")),
+            errorMessage: model.mapError,
+            isLoading: model.isLoadingMap, canRefresh: model.selectedWorkspace != nil && !model.isLoadingMap,
+            refresh: { Task { await model.refreshMap() } },
+            onShowList: { inspectorRequest = HCPMapInspectorRequest(address: nil) },
+            onOpenResource: { address in inspectorRequest = HCPMapInspectorRequest(address: address) },
+            emptyDetail: "This workspace has no managed resources in its current state. Data sources remain available in List; remote run history is available in Runs.")
+        .task(id: model.mapRequestKey) { await model.refreshMap() }
+        }
     }
 
     private var disconnectedState: some View {
@@ -200,6 +245,7 @@ struct HCPWorkspaceViewer: View {
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
             if let error = model.errorMessage { Text(error).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480) }
             if model.isLoading { ProgressView().controlSize(.small) }
+            Button("Explore a sample cloud map") { showingSample = true }.buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -339,4 +385,70 @@ struct HCPWorkspaceViewer: View {
                 .padding(12).background(Color(nsColor: .textBackgroundColor))
         }
     }
+}
+
+private struct HCPSampleMapSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var model = HCPWorkspaceViewerModel(isSample: true)
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(12)
+            HCPWorkspaceViewer(model: model)
+        }.frame(minWidth: 850, idealWidth: 1000, minHeight: 650)
+    }
+}
+
+private struct HCPMapInspectorRequest: Identifiable {
+    let id = UUID()
+    let address: String?
+}
+
+private struct HCPMapResourceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let resources: [MapDisplayResource]
+    let title: String
+    @State private var selectedMapResource: String?
+
+    init(resources: [MapDisplayResource], title: String, selectedAddress: String?) {
+        self.resources = resources
+        self.title = title
+        _selectedMapResource = State(initialValue: selectedAddress)
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(title) · Resources").font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(16)
+            Divider()
+            HSplitView {
+                List(selection: $selectedMapResource) {
+                    ForEach(resources, id: \.address) { resource in
+                        Text(resource.address).font(.system(.callout, design: .monospaced)).tag(resource.address)
+                    }
+                }.frame(minWidth: 260, idealWidth: 340)
+                ScrollView {
+                    if let resource = resources.first(where: { $0.address == selectedMapResource }) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(resource.address).font(.headline).textSelection(.enabled)
+                            Text(resource.type).foregroundStyle(.secondary)
+                            if resource.displayAttributes.isEmpty {
+                                Text("Attribute details are unavailable for this state version.").foregroundStyle(.secondary)
+                            }
+                            ForEach(resource.displayAttributes) { attribute in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(attribute.path).font(.caption).foregroundStyle(.secondary)
+                                    Text(attribute.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                }
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                    } else {
+                        Text("Select a resource to inspect its details.").foregroundStyle(.secondary).padding(24)
+                    }
+                }.frame(minWidth: 300, maxWidth: .infinity)
+            }
+        }.frame(minWidth: 700, idealWidth: 850, minHeight: 500)
+    }
+
 }
