@@ -1,8 +1,8 @@
 # Release verification gates
 
-## Current release hold — October 3, 2026
+## October 3, 2026 release authorization
 
-**Do not release the current candidate as-is.** The user rejected the latest native titlebar/layout in the 9:38 screenshot and explicitly postponed appearance work until a broader macOS design review. Tracking: Habitable-rt3.57, labeled `release-blocker` and deferred for that review. Do not package or publish a new distribution release, or update the Homebrew tap to this candidate, until the replacement design passes the broader review and user visual acceptance. Successful builds, tests and code reviews do not lift this hold. Functional development may continue.
+The user explicitly requested a release of the current progress after running the latest candidate, superseding the earlier appearance hold for version 0.5.0. This authorizes packaging, publishing, and updating the Homebrew tap; it does not establish visual or accessibility acceptance. Broader design review remains tracked in Habitable-rt3.57 and native acceptance in Habitable-rt3.21.
 
 The `Core and universal release gates` workflow runs on pull requests, pushes to `main`, and manual dispatch. It uses GitHub's `xcode-27` public-preview runner, runs the Swift package suite with a checksum-verified Terraform 1.15.5 binary for the local plan/apply integration tests, and enables the app's official Terraform release download test. It then builds a universal macOS Release app and checks that the executable contains both `arm64` and `x86_64`. The runner is a preview image, so CI can be delayed or change as GitHub updates its image; a missing Xcode 27 toolchain fails visibly.
 
