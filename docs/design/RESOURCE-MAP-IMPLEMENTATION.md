@@ -135,3 +135,36 @@ automation timed out on both the prior and new preview, so visual verification
 of arrows at different widths, scrolling, and search remains under Habitable-cbk.
 This first renderer shares routes for dense graphs; crossing minimization remains
 part of Habitable-fee.
+
+## Map page review, October 4
+
+Live native automation recovered. Verified selected outgoing and incoming arrows,
+scrolling, narrow and maximized layouts, dependency navigation, search and clearing
+search. Filtering out a selected tile now clears its inspector, filtered counts
+show matching versus total groups, and no-results offers a Clear search action.
+Unavailable state no longer claims to be an empty current state. A new local
+folder without state is labeled No recorded state.
+
+The cloud sample's expanded inspector correctly preselects the requested resource
+and updates its visible heading and attributes when another resource is selected.
+Populated-to-empty and unavailable cloud sample switching clear prior selection.
+Local malformed, empty, output-only, and populated provider-free playground states
+were exercised in the native app. The playground loaded 26 managed resources in
+19 groups plus one data source. Narrow and wide screenshots were inspected.
+
+All 242 model tests pass (8 optional skips). Native Debug builds and signed preview
+verification pass. Preview builds may set HABITABLE_PREVIEW_BUNDLE_ID to keep app
+identity separate from older running previews. The Map review uses
+com.thrashr888.Habitable.map-review at /tmp/Habitable Map Page.app.
+
+Real-account HCP smoke testing still awaits a chosen workspace (Habitable-q7i).
+Production corpus/topology refinements remain Habitable-fee. Lazy-grid connections
+are drawn for laid-out endpoints; the inspector lists all dependencies, including
+offscreen groups. Dense routes may overlap in the gutter.
+
+The final No recorded state label was verified in the rebuilt app. The existing
+HCP connection subsequently listed workspaces successfully, but its restored
+workspace returned the fixed Map-loading error. Diagnosis requires private state
+inspection and is awaiting explicit workspace approval; automatic approval review
+blocked the proposed diagnostic request. No diagnostic state payload was retrieved.
+This replaces the earlier assumption that only a routine HCP smoke test remained.
