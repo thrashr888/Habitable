@@ -242,6 +242,162 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         Data(#"{"data":{"id":"run-active","type":"runs","attributes":{"status":"planning","message":"active","operation":"plan_and_apply","created-at":"2026-10-03T12:00:00.000Z","is-destroy":false},"relationships":{}}}"#.utf8)
     }
 
+    @MainActor
+    func testOfflineMapSampleNeverRequestsOrPersistsAccountData() async {
+        let store = HCPMemorySelectionStore()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: store,
+                                           client: makeClient(), isSample: true)
+        await model.refreshMap()
+        XCTAssertEqual(model.mapSnapshot?.resources.count, 10)
+        model.selectedWorkspaceID = "sample-empty"
+        await model.refreshMap()
+        XCTAssertEqual(model.mapSnapshot?.resources.count, 0)
+        model.selectedWorkspaceID = "sample-unavailable"
+        await model.refreshMap()
+        XCTAssertNil(model.mapSnapshot)
+        XCTAssertNotNil(model.mapError)
+        await model.connect()
+        await model.refreshRuns()
+        XCTAssertTrue(HCPURLProtocolStub.requests.isEmpty)
+        XCTAssertNil(store.load())
+    }
+
+    func testEmptyCloudStateAcceptsMetadataOnlyJSON() throws {
+        let snapshot = try HCPMapSnapshot.decode(versionID: "sv-empty",
+            raw: Data(#"{"version":4,"resources":[]}"#.utf8),
+            shown: Data(#"{"format_version":"1.0"}"#.utf8))
+        XCTAssertTrue(snapshot.map.tiles.isEmpty)
+        XCTAssertTrue(snapshot.resources.isEmpty)
+    }
+
+    private var mapRaw: Data {
+        Data(#"{"version":4,"resources":[{"mode":"managed","type":"aws_db_instance","name":"orders","instances":[{"attributes":{"password":"NEVER_DISPLAY_THIS"}}]}]}"#.utf8)
+    }
+
+    private var mapShown: Data {
+        Data(#"{"format_version":"1.0","values":{"root_module":{"resources":[{"address":"aws_db_instance.orders","mode":"managed","type":"aws_db_instance","name":"orders","values":{"engine":"postgres","nested":{"password":"NEVER_DISPLAY_THIS"},"url":"db://NEVER_DISPLAY_THIS@host"},"sensitive_values":{"nested":{"password":true}}}]}}}"#.utf8)
+    }
+
+    private func installMapResponses(workspaceID: String = "ws-1", json: Bool = true) throws {
+        var attrs: [String: Any] = ["hosted-state-download-url": "https://archivist.terraform.io/map/raw?signature=private"]
+        if json { attrs["hosted-json-state-download-url"] = "https://archivist.terraform.io/map/show?signature=private" }
+        HCPURLProtocolStub.responses["/api/v2/workspaces/\(workspaceID)/current-state-version"] = try JSONSerialization.data(withJSONObject:
+            ["data": ["id": "sv-\(workspaceID)", "type": "state-versions", "attributes": attrs,
+                      "relationships": ["workspace": ["data": ["id": workspaceID]]]]])
+        HCPURLProtocolStub.responses["/map/raw"] = mapRaw
+        HCPURLProtocolStub.responses["/map/show"] = mapShown
+    }
+
+    func testCurrentMapUsesOneVersionAndRedactsNestedAndRepeatedSecrets() async throws {
+        try installMapResponses()
+        let result = try await makeClient().currentMap(hostname: "app.terraform.io", workspaceID: "ws-1", token: "api-secret")
+        XCTAssertEqual(result.versionID, "sv-ws-1")
+        XCTAssertEqual(result.map.tiles.count, 1)
+        XCTAssertNil(result.notice)
+        XCTAssertFalse(String(describing: result).contains("NEVER_DISPLAY_THIS"))
+        XCTAssertFalse(String(describing: result).contains("signature="))
+        XCTAssertTrue(result.resources[0].displayAttributes.contains { $0.value == "postgres" })
+        XCTAssertTrue(result.resources[0].displayAttributes.contains { $0.value == "(sensitive value)" })
+        for request in HCPURLProtocolStub.requests where request.url?.host == "archivist.terraform.io" {
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            XCTAssertEqual(request.httpMethod, "GET")
+        }
+        XCTAssertEqual(HCPURLProtocolStub.requests.count, 3)
+    }
+
+    func testOlderStateWithoutJSONKeepsMapButNeverExposesRawAttributes() async throws {
+        try installMapResponses(json: false)
+        let result = try await makeClient().currentMap(hostname: "app.terraform.io", workspaceID: "ws-1", token: "test")
+        XCTAssertEqual(result.resources.count, 1)
+        XCTAssertTrue(result.resources[0].displayAttributes.isEmpty)
+        XCTAssertNotNil(result.notice)
+        XCTAssertFalse(String(describing: result).contains("NEVER_DISPLAY_THIS"))
+    }
+
+    func testCurrentMapRejectsMismatchedOrMalformedArtifacts() async throws {
+        try installMapResponses()
+        for shown in [Data(#"{"format_version":"1.0","values":{"outputs":{}}}"#.utf8), Data("not json".utf8)] {
+            HCPURLProtocolStub.responses["/map/show"] = shown
+            do {
+                _ = try await makeClient().currentMap(hostname: "app.terraform.io", workspaceID: "ws-1", token: "test")
+                XCTFail("Invalid artifacts must not become a map")
+            } catch { XCTAssertEqual(error as? HCPViewerError, .invalidResponse) }
+        }
+    }
+
+    func testCurrentMapRejectsOversizedStateAndInsecureURLs() async throws {
+        try installMapResponses()
+        HCPURLProtocolStub.contentLengths["/map/raw"] = 33 * 1024 * 1024
+        do {
+            _ = try await makeClient().currentMap(hostname: "app.terraform.io", workspaceID: "ws-1", token: "test")
+            XCTFail("Oversized state must fail")
+        } catch { XCTAssertEqual(error as? HCPViewerError, .responseTooLarge) }
+        HCPURLProtocolStub.contentLengths = [:]
+        HCPURLProtocolStub.requests = []
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/current-state-version"] = Data(#"{"data":{"id":"sv-1","type":"state-versions","attributes":{"hosted-state-download-url":"http://example.test/raw"}}}"#.utf8)
+        do {
+            _ = try await makeClient().currentMap(hostname: "app.terraform.io", workspaceID: "ws-1", token: "test")
+            XCTFail("Insecure URL must fail")
+        } catch { XCTAssertEqual(error as? HCPViewerError, .invalidResponse) }
+        XCTAssertEqual(HCPURLProtocolStub.requests.count, 1)
+    }
+
+    func testEnterpriseStateAuthenticationStaysOnExactAPIOrigin() async throws {
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/current-state-version"] = Data(#"{"data":{"id":"sv-1","type":"state-versions","attributes":{"hosted-state-download-url":"https://enterprise.example.test/api/state-versions/sv-1/hosted_state"}}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/state-versions/sv-1/hosted_state"] = mapRaw
+        _ = try await makeClient().currentMap(hostname: "enterprise.example.test", workspaceID: "ws-1", token: "test-token")
+        XCTAssertEqual(HCPURLProtocolStub.requests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+    }
+
+    @MainActor
+    func testMapWorkspaceSwitchAndDisconnectRejectLateResponses() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage([
+            workspaceRecord(id: "ws-1", name: "first"), workspaceRecord(id: "ws-2", name: "second")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-2/runs"] = emptyRunPage()
+        try installMapResponses()
+        try installMapResponses(workspaceID: "ws-2")
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        await model.refreshMap()
+        XCTAssertEqual(model.mapSnapshot?.versionID, "sv-ws-1")
+        HCPURLProtocolStub.delays["/api/v2/workspaces/ws-1/current-state-version"] = 0.15
+        let oldRequest = Task { await model.refreshMap() }
+        for _ in 0..<100 where !model.isLoadingMap { try await Task.sleep(for: .milliseconds(1)) }
+        model.selectedWorkspaceID = "ws-2"
+        XCTAssertNil(model.mapSnapshot)
+        await model.refreshMap()
+        await oldRequest.value
+        XCTAssertEqual(model.mapSnapshot?.versionID, "sv-ws-2")
+        HCPURLProtocolStub.delays["/api/v2/workspaces/ws-2/current-state-version"] = 0.15
+        let disconnected = Task { await model.refreshMap() }
+        for _ in 0..<100 where !model.isLoadingMap { try await Task.sleep(for: .milliseconds(1)) }
+        model.disconnect()
+        await disconnected.value
+        XCTAssertNil(model.mapSnapshot)
+        XCTAssertFalse(model.isLoadingMap)
+        XCTAssertNil(model.mapError)
+    }
+
+    @MainActor
+    func testMapMissingStateAndAccessFailuresAreNotReportedAsEmptyInfrastructure() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage([workspaceRecord(id: "ws-1", name: "first")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        try installMapResponses()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        for status in [403, 404, 500] {
+            HCPURLProtocolStub.statusCode = status
+            await model.refreshMap()
+            XCTAssertNil(model.mapSnapshot)
+            XCTAssertNotNil(model.mapError)
+            XCTAssertFalse(model.isLoadingMap)
+            XCTAssertFalse(model.mapError?.contains("signature") == true)
+        }
+    }
+
     private func makeClient() -> HCPAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HCPURLProtocolStub.self]

@@ -231,6 +231,48 @@ struct HCPAPIClient: Sendable {
                              planReviewURL: planReview, runURL: freshRun.htmlURL)
     }
 
+    /// Both artifacts belong to the same immutable state version. Signed storage
+    /// requests never inherit the API credential; Enterprise API paths may need it.
+    func currentMap(hostname: String, workspaceID: String, token: String) async throws -> HCPMapSnapshot {
+        let object = try await get(path: "/api/v2/workspaces/\(pathComponent(workspaceID))/current-state-version",
+                                   hostname: hostname, token: token)
+        guard let row = object["data"] as? [String: Any], let id = row["id"] as? String,
+              row["type"] as? String == "state-versions",
+              let attributes = row["attributes"] as? [String: Any],
+              let rawURLString = attributes["hosted-state-download-url"] as? String,
+              let rawURL = secureArtifactURL(rawURLString) else { throw HCPViewerError.invalidResponse }
+        if let relationships = row["relationships"] as? [String: Any],
+           let related = relationshipID(relationships["workspace"]), related != workspaceID {
+            throw HCPViewerError.invalidResponse
+        }
+        let raw = try await fetchStateArtifact(rawURL, hostname: hostname, token: token)
+        var shown: Data?
+        if let value = attributes["hosted-json-state-download-url"] as? String {
+            guard let url = secureArtifactURL(value) else { throw HCPViewerError.invalidResponse }
+            shown = try await fetchStateArtifact(url, hostname: hostname, token: token)
+        }
+        do { return try HCPMapSnapshot.decode(versionID: id, raw: raw, shown: shown) }
+        catch { throw HCPViewerError.invalidResponse }
+    }
+
+    private func fetchStateArtifact(_ url: URL, hostname: String, token: String) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 25
+        if url.host?.lowercased() == Self.normalizedHostname(hostname), (url.port ?? 443) == 443,
+           url.path.hasPrefix("/api/state-versions/") {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (data, response) = try await boundedData(for: request, limit: 32 * 1024 * 1024)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw HCPViewerError.transport("Could not download the selected state version. Refresh to try again.")
+            }
+            return data
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not download the selected state version. Refresh to try again.") }
+    }
+
     private func get(path: String, hostname: String, token: String, query: [URLQueryItem] = []) async throws -> [String: Any] {
         guard let host = Self.normalizedHostname(hostname), let base = URL(string: "https://\(host)"),
               var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false) else {
@@ -433,14 +475,77 @@ final class HCPRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Send
 
 @MainActor
 final class HCPWorkspaceViewerModel: ObservableObject {
+    let isSample: Bool
     @Published private(set) var identity: HCPConnectionIdentity
     @Published private(set) var organizations: [HCPOrganization] = []
     @Published private(set) var workspaces: [HCPWorkspace] = []
     @Published private(set) var runs: [HCPRun] = []
     @Published private(set) var selectedRunDetails: HCPRunDetails?
+    @Published private(set) var mapSnapshot: HCPMapSnapshot?
+    @Published private(set) var isLoadingMap = false
+    @Published private(set) var mapError: String?
+    private var mapOperation = UUID()
+
+    var mapRequestKey: String {
+        "\(isConnected)|\(hostname)|\(selectedOrganization)|\(selectedWorkspaceID ?? "")"
+    }
+
+    private func invalidateMap() {
+        mapOperation = UUID()
+        mapSnapshot = nil
+        mapError = nil
+        isLoadingMap = false
+    }
+
+    func refreshMap() async {
+        if isSample {
+            mapSnapshot = nil
+            mapError = nil
+            if selectedWorkspaceID == "sample-unavailable" {
+                mapError = "No state is available, or your credential cannot read this workspace’s state."
+            } else if selectedWorkspaceID == "sample-empty" {
+                mapSnapshot = HCPMapSnapshot(versionID: "sample-empty", map: ResourceMap(tiles: [], connections: [], dataSources: []), resources: [], notice: "Offline sample · empty workspace")
+            } else {
+                let raw = try? JSONSerialization.data(withJSONObject: ResourceMapSample.rawState)
+                let shown = try? JSONSerialization.data(withJSONObject: ResourceMapSample.shownState)
+                if let raw { mapSnapshot = try? HCPMapSnapshot.decode(versionID: "sample-production", raw: raw, shown: shown) }
+            }
+            return
+        }
+        guard isConnected, let workspace = selectedWorkspace else { return }
+        let operation = UUID()
+        mapOperation = operation
+        let host = hostname, organization = selectedOrganization
+        mapSnapshot = nil
+        mapError = nil
+        isLoadingMap = false
+        guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {
+            mapError = "Your HCP credential is unavailable. Reconnect to load this workspace’s map."
+            return
+        }
+        isLoadingMap = true
+        defer { if mapOperation == operation { isLoadingMap = false } }
+        do {
+            let snapshot = try await client.currentMap(hostname: host, workspaceID: workspace.id, token: token)
+            guard !Task.isCancelled, mapOperation == operation, isConnected,
+                  hostname == host, selectedOrganization == organization, selectedWorkspaceID == workspace.id else { return }
+            mapSnapshot = snapshot
+        } catch {
+            guard !Task.isCancelled, mapOperation == operation, isConnected else { return }
+            if case HCPViewerError.response(status: 404, message: _) = error {
+                mapError = "No state is available, or your credential cannot read this workspace’s state."
+            } else if case HCPViewerError.response(status: 403, message: _) = error {
+                mapError = "Your credential cannot read this workspace’s state."
+            } else {
+                // Error payloads can contain signed URLs or backend data; expose a bounded, fixed message.
+                mapError = "Couldn’t load this workspace’s map. Check state access and refresh to try again."
+            }
+        }
+    }
     @Published var selectedWorkspaceID: String? {
         didSet {
             guard oldValue != selectedWorkspaceID else { return }
+            invalidateMap()
             currentOperation = UUID()
             isLoading = false
             runRefreshTime = .distantPast
@@ -500,18 +605,28 @@ final class HCPWorkspaceViewerModel: ObservableObject {
 
     init(tokenStore: HCPTokenStore = KeychainHCPTokenStore(),
          selectionStore: HCPSelectionStore = UserDefaultsHCPSelectionStore(),
-         client: HCPAPIClient = HCPAPIClient()) {
+         client: HCPAPIClient = HCPAPIClient(), isSample: Bool = false) {
+        self.isSample = isSample
         self.tokenStore = tokenStore
         self.selectionStore = selectionStore
         self.client = client
-        let saved = selectionStore.load()
-        let base = saved?.identity ?? .app
+        let saved = isSample ? nil : selectionStore.load()
+        let base = isSample ? HCPConnectionIdentity(hostname: "app.terraform.io", organization: "Example") : (saved?.identity ?? .app)
         identity = base
         hostname = base.hostname
         selectedOrganization = base.organization
         selectedWorkspaceID = saved?.selectedWorkspaceID ?? base.workspaceID
         selectedRunID = saved?.selectedRunID ?? base.runID
-        hasStoredCredential = (try? tokenStore.read(hostname: base.hostname)) != nil
+        hasStoredCredential = !isSample && (try? tokenStore.read(hostname: base.hostname)) != nil
+        if isSample {
+            workspaces = [
+                HCPWorkspace(id: "sample-production", name: "Acme production · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
+                HCPWorkspace(id: "sample-empty", name: "Empty workspace · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
+                HCPWorkspace(id: "sample-unavailable", name: "Unavailable state · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil)
+            ]
+            selectedWorkspaceID = workspaces.first?.id
+            isConnected = true
+        }
     }
 
     var connectionSummary: String { "\(selectedOrganization) · \(hostname)" }
@@ -520,6 +635,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     var isPolling: Bool { pollTask != nil }
 
     func importTerraformCredentialFile() async {
+        guard !isSample else { return }
         guard HCPAPIClient.normalizedHostname(hostname) == "app.terraform.io" else {
             errorMessage = "The Terraform CLI credentials file is only imported for app.terraform.io."
             return
@@ -547,8 +663,10 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     func connect() async {
+        guard !isSample else { return }
         guard let host = HCPAPIClient.normalizedHostname(hostname) else { errorMessage = HCPViewerError.invalidHost.localizedDescription; return }
         hostname = host
+        invalidateMap()
         cancelPolling()
         runRefreshTime = .distantPast
         currentOperation = UUID()
@@ -592,6 +710,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     func refreshWorkspaces(nextPage: Bool = false) async {
+        guard !isSample else { return }
         guard isConnected, let token = try? tokenStore.read(hostname: hostname) else { return }
         let page = nextPage ? workspacePage + 1 : 1
         guard Date().timeIntervalSince(workspaceRefreshTime) >= 2 else { return }
@@ -615,6 +734,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             workspaces = nextPage ? workspaces + pageItems : pageItems
             workspacePage = result.page; workspaceHasNextPage = result.hasNextPage; lastUpdated = Date(); errorMessage = nil
             if selectedWorkspaceID != nil, selectedWorkspace == nil {
+                invalidateMap()
                 errorMessage = "The saved workspace was not found in the first 250 workspaces. Load more to locate it."
             }
             if !hadSelectedWorkspace, selectedWorkspace != nil { await refreshRuns(force: true) }
@@ -622,6 +742,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     func refreshRuns(nextPage: Bool = false, force: Bool = false) async {
+        guard !isSample else { return }
         guard isConnected, let workspace = selectedWorkspace,
               let token = try? tokenStore.read(hostname: hostname) else { return }
         _ = force
@@ -678,6 +799,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     func disconnect() {
+        invalidateMap()
         cancelPolling(); currentOperation = UUID()
         isLoading = false
         isConnected = false; organizations = []; workspaces = []; runs = []; selectedRunDetails = nil
@@ -693,12 +815,14 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             if isConnected && runs.contains(where: \.isActive) { startPollingIfNeeded() }
         } else {
             cancelPolling()
+            invalidateMap()
             currentOperation = UUID()
             isLoading = false
         }
     }
 
     private func persistSelection() {
+        guard !isSample else { return }
         guard !hostname.isEmpty else { return }
         identity.hostname = hostname; identity.organization = selectedOrganization
         identity.workspaceID = selectedWorkspaceID; identity.runID = selectedRunID

@@ -40,15 +40,44 @@ struct ResourceMapPage: View {
     @EnvironmentObject private var workspace: Workspace
     let onShowList: () -> Void
     let onOpenResource: (String) -> Void
+
+    var body: some View {
+        ResourceMapContent(
+            title: workspace.isMapDemo ? "Acme · Sample workspace" : (workspace.workingDirectory?.lastPathComponent ?? "Infrastructure"),
+            identity: "\(workspace.workingDirectory?.path ?? "sample")|\(workspace.state?.id.uuidString ?? "")",
+            map: workspace.resourceMap,
+            resources: (workspace.state?.resources ?? []).compactMap { resource in
+                guard let address = resource.address, let type = resource.type else { return nil }
+                return MapDisplayResource(address: address, type: type, displayAttributes: resource.displayAttributes)
+            },
+            notice: workspace.mapNotice, errorMessage: workspace.errorMessage,
+            isLoading: workspace.locked, canRefresh: !workspace.locked && !workspace.isMapDemo,
+            refresh: workspace.refreshResources, onShowList: onShowList, onOpenResource: onOpenResource)
+    }
+}
+
+/// Shared presentation has no local runner or cloud credentials.
+struct ResourceMapContent: View {
+    let title: String
+    let identity: String
+    let map: ResourceMap?
+    let resources: [MapDisplayResource]
+    let notice: String?
+    let errorMessage: String?
+    let isLoading: Bool
+    let canRefresh: Bool
+    let refresh: () -> Void
+    let onShowList: () -> Void
+    let onOpenResource: (String) -> Void
+    var emptyDetail = "Resources appear here after they are recorded in Terraform state. You can still inspect configuration, inputs, and outputs in the sidebar."
     @State private var selectedTileID: String?
     @State private var selectedMember: String?
     @State private var search = ""
 
-    private var map: ResourceMap? { workspace.resourceMap }
     private var tiles: [MapTile] { map?.tiles ?? [] }
     private var selectedTile: MapTile? { tiles.first { $0.id == selectedTileID } }
-    private var selectedResource: ShowResource? {
-        workspace.state?.resources.first { $0.address == selectedMember }
+    private var selectedResource: MapDisplayResource? {
+        resources.first { $0.address == selectedMember }
     }
     private var visibleTiles: [MapTile] {
         guard !search.isEmpty else { return tiles }
@@ -76,8 +105,7 @@ struct ResourceMapPage: View {
             }
             .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 10)
         }
-        .onChange(of: workspace.state?.id) { _ in selectedTileID = nil; selectedMember = nil }
-        .onChange(of: workspace.workingDirectory) { _ in search = ""; selectedTileID = nil; selectedMember = nil }
+        .onChange(of: identity) { _ in search = ""; selectedTileID = nil; selectedMember = nil }
         .onChange(of: map) { _ in
             if let tile = selectedTile {
                 if !tile.resources.contains(selectedMember ?? "") { selectedMember = tile.anchors.first ?? tile.resources.first }
@@ -89,7 +117,7 @@ struct ResourceMapPage: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(workspace.isMapDemo ? "Acme · Sample workspace" : (workspace.workingDirectory?.lastPathComponent ?? "Infrastructure"))
+                    Text(title)
                         .font(.title2.weight(.semibold)).lineLimit(1)
                     Label("Resource map", systemImage: "square.grid.3x3")
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -97,8 +125,8 @@ struct ResourceMapPage: View {
                 Spacer()
                 Button(action: onShowList) { Label("List", systemImage: "list.bullet") }
                     .buttonStyle(.bordered).help("Open the resource list")
-                Button { workspace.refreshResources() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.bordered).disabled(workspace.locked || workspace.isMapDemo)
+                Button(action: refresh) { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.bordered).disabled(!canRefresh)
                     .accessibilityLabel("Refresh map").help("Refresh map from Terraform state")
             }
             HStack {
@@ -111,7 +139,7 @@ struct ResourceMapPage: View {
                 }
             }
             .padding(8).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-            if let notice = workspace.mapNotice {
+            if let notice {
                 Label(notice, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -121,13 +149,13 @@ struct ResourceMapPage: View {
     private var canvas: some View {
         ScrollViewReader { proxy in
         ScrollView {
-            if let error = workspace.errorMessage, map == nil {
+            if let error = errorMessage, map == nil {
                 empty("Couldn’t read this workspace", detail: error, symbol: "exclamationmark.triangle")
-            } else if workspace.locked && map == nil {
+            } else if isLoading && map == nil {
                 VStack(spacing: 12) { ProgressView(); Text("Reading your infrastructure…").foregroundStyle(.secondary) }
                     .frame(maxWidth: .infinity).padding(.top, 100)
             } else if tiles.isEmpty {
-                empty("No managed resources yet", detail: "Resources appear here after they are recorded in Terraform state. You can still inspect configuration, inputs, and outputs in the sidebar.", symbol: "square.dashed")
+                empty("No managed resources yet", detail: emptyDetail, symbol: "square.dashed")
             } else if visibleTiles.isEmpty {
                 empty("No matching resources", detail: "Try a group name, resource type, or Terraform address.", symbol: "magnifyingglass")
             } else {
@@ -182,7 +210,7 @@ struct ResourceMapPage: View {
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selectedTileID == tile.id ? Color.accentColor : Color.primary.opacity(0.09), lineWidth: selectedTileID == tile.id ? 2 : 1))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(tile.title), \(tile.resources.count) resources, \(tile.kind.title)")
+        .accessibilityLabel("\(tile.title), \(tile.resources.count) \(tile.resources.count == 1 ? "resource" : "resources"), \(tile.kind.title)")
         .accessibilityAddTraits(selectedTileID == tile.id ? [.isSelected] : [])
         .help(tile.resources.joined(separator: "\n"))
     }
@@ -198,7 +226,7 @@ struct ResourceMapPage: View {
                             Text(tile.kind.title).font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Text("\(tile.resources.count) resources make up this group.").foregroundStyle(.secondary).font(.callout)
+                    Text(tile.resources.count == 1 ? "1 resource makes up this group." : "\(tile.resources.count) resources make up this group.").foregroundStyle(.secondary).font(.callout)
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Resources").font(.headline)
@@ -223,7 +251,7 @@ struct ResourceMapPage: View {
                             Spacer()
                             Button("Full inspector") { onOpenResource(selectedMember!) }.buttonStyle(.link)
                         }
-                        Text(resource.type ?? "Resource").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(resource.type).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         ForEach(Array(resource.displayAttributes.prefix(14))) { attribute in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(attribute.path).font(.caption).foregroundStyle(.secondary)
@@ -240,6 +268,7 @@ struct ResourceMapPage: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .id(selectedMember)
     }
 
     @ViewBuilder private func connections(for tile: MapTile) -> some View {
@@ -272,9 +301,8 @@ struct ResourceMapPage: View {
         selectedMember = tile.anchors.first ?? tile.resources.first
     }
     private func category(for tile: MapTile) -> String {
-        guard let resource = workspace.state?.resources.first(where: { $0.address == (tile.anchors.first ?? tile.id) }),
-              let type = resource.type else { return tile.kind.title }
-        return ResourceMapCategories.values[type] ?? type
+        guard let resource = resources.first(where: { $0.address == (tile.anchors.first ?? tile.id) }) else { return tile.kind.title }
+        return ResourceMapCategories.values[resource.type] ?? resource.type
     }
     private func empty(_ title: String, detail: String, symbol: String) -> some View {
         VStack(spacing: 12) {
