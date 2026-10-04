@@ -352,12 +352,38 @@ final class HCPWorkspaceViewerTests: XCTestCase {
     }
 
     @MainActor
-    func testOfflineMapSampleNeverRequestsOrPersistsAccountData() async {
+    func testOfflineMapSampleNeverRequestsOrPersistsAccountData() async throws {
         let store = HCPMemorySelectionStore()
         let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: store,
                                            client: makeClient(), isSample: true)
         await model.refreshMap()
         XCTAssertEqual(model.mapSnapshot?.resources.count, 10)
+        XCTAssertTrue(model.workspaces.contains { $0.id == "sample-reference" && $0.name == "Map reference · sample" })
+        model.selectedWorkspaceID = "sample-reference"
+        await model.refreshMap()
+        let reference = try XCTUnwrap(model.mapSnapshot)
+        XCTAssertEqual(reference.versionID, "sample-reference")
+        XCTAssertEqual(reference.resources.count, 17)
+        XCTAssertEqual(reference.map.dataSources.count, 3)
+        XCTAssertEqual(reference.resources.filter { $0.type == "aws_bedrock_model_invocation_logging_configuration" }.count, 2)
+        XCTAssertEqual(reference.resources.filter { $0.type == "aws_cloudwatch_event_rule" }.count, 2)
+        XCTAssertEqual(reference.resources.filter { $0.type == "aws_sns_topic" }.count, 2)
+        XCTAssertTrue(reference.resources.contains { $0.address == "aws_bedrock_model_invocation_logging_configuration.bedrock_logging[0]" })
+        XCTAssertTrue(reference.resources.contains { $0.address == "aws_bedrock_model_invocation_logging_configuration.bedrock_logging[1]" })
+        XCTAssertEqual(reference.map.workspaceReferences.map(\.address), [
+            "data.terraform_remote_state.cluster", "data.terraform_remote_state.root_dns",
+            "data.terraform_remote_state.vpc"
+        ])
+        let tileIDs = Set(reference.map.tiles.map(\.id))
+        XCTAssertTrue(reference.map.workspaceReferences.allSatisfy {
+            !$0.consumers.isEmpty && Set($0.consumers).isSubset(of: tileIDs)
+        })
+        XCTAssertEqual(reference.map.tiles.filter { $0.kind == .messaging }.count, 3)
+        for type in ["aws_cloudwatch_event_rule", "aws_sns_topic", "aws_chatbot_slack_channel_configuration"] {
+            let addresses = Set(reference.resources.filter { $0.type == type }.map(\.address))
+            XCTAssertTrue(reference.map.tiles.contains { $0.kind == .messaging && !addresses.isDisjoint(with: $0.resources) })
+        }
+        XCTAssertFalse(reference.map.tiles.contains { $0.kind == .frontDoor || $0.kind == .network })
         model.selectedWorkspaceID = "sample-empty"
         await model.refreshMap()
         XCTAssertEqual(model.mapSnapshot?.resources.count, 0)

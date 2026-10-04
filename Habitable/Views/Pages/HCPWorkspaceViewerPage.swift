@@ -17,17 +17,26 @@ struct HCPWorkspaceViewer: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.isSample {
-                Label("HCP Map sample · offline · no account connected", systemImage: "cloud")
-                    .foregroundStyle(.secondary).padding(.bottom, 12)
-            } else { connectionPanel }
+            if !model.isSample { connectionPanel }
             if model.isConnected {
+                if !model.isSample {
                 Picker("Workspace view", selection: $showingMap) {
                     Text("Map").tag(true)
                     Text("Runs").tag(false)
-                }.pickerStyle(.segmented).frame(width: 180).padding(.bottom, 8)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 180).padding(.bottom, 8)
+                }
                 if showingMap {
-                    compactSelection
+                    if model.isSample {
+                        HStack {
+                            Picker("Sample", selection: workspaceSelection) {
+                                ForEach(model.workspaces) { workspace in
+                                    Text(workspace.name).tag(Optional(workspace.id))
+                                }
+                            }.frame(maxWidth: 340)
+                            Spacer()
+                            Text("Offline · no account connected").font(.caption).foregroundStyle(.secondary)
+                        }.padding(.horizontal, 12).padding(.vertical, 8)
+                    } else { compactSelection }
                     Divider()
                     cloudMap
                 } else {
@@ -394,7 +403,7 @@ private struct HCPSampleMapSheet: View {
         VStack(spacing: 0) {
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(12)
             HCPWorkspaceViewer(model: model)
-        }.frame(minWidth: 850, idealWidth: 1000, minHeight: 650)
+        }.frame(minWidth: 1000, idealWidth: 1100, minHeight: 800)
     }
 }
 

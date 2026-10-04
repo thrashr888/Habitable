@@ -39,10 +39,116 @@ struct MapConnection: Equatable, Hashable, Sendable {
     let target: String
 }
 
+struct MapWorkspaceReference: Equatable, Sendable {
+    let address: String
+    /// The Terraform data-source alias, not a verified remote workspace name.
+    let name: String
+    let consumers: [String]
+}
+
 struct ResourceMap: Equatable, Sendable {
     let tiles: [MapTile]
     let connections: [MapConnection]
     let dataSources: [String]
+    var workspaceReferences: [MapWorkspaceReference] = []
+}
+
+struct MapCanvasBand: Equatable, Sendable {
+    let kind: MapKind
+    let y: Double
+    let height: Double
+}
+
+struct MapCanvasTile: Equatable, Sendable {
+    let id: String
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+struct MapCanvasLayout: Equatable, Sendable {
+    let width: Double
+    let height: Double
+    let bands: [MapCanvasBand]
+    let tiles: [MapCanvasTile]
+
+    init(map: ResourceMap, width requestedWidth: Double) {
+        let minimumWidth = 680.0
+        let tileWidth = 224.0
+        let tileHeight = 106.0
+        let horizontalInset = 28.0
+        let tileGap = 70.0
+        let rowGap = 26.0
+        let topPadding = 38.0
+        let bottomPadding = 20.0
+        let bandGap = 12.0
+
+        width = max(minimumWidth, requestedWidth)
+        let availableWidth = width - 2 * horizontalInset
+        let columns = max(1, Int((availableWidth + tileGap) / (tileWidth + tileGap)))
+        let groupedTiles = Dictionary(grouping: map.tiles, by: \.kind)
+        var y = 0.0
+        var bands: [MapCanvasBand] = []
+        var positionedTiles: [MapCanvasTile] = []
+
+        let kinds = MapKind.allCases.filter { $0 != .other || !(groupedTiles[.other] ?? []).isEmpty }
+        for (bandIndex, kind) in kinds.enumerated() {
+            let orderedTiles = Self.orderedTiles(groupedTiles[kind] ?? [], connections: map.connections)
+            let rowCount = (orderedTiles.count + columns - 1) / columns
+            let bandHeight = orderedTiles.isEmpty
+                ? 54.0
+                : topPadding + Double(rowCount) * tileHeight + Double(max(0, rowCount - 1)) * rowGap + bottomPadding
+            bands.append(MapCanvasBand(kind: kind, y: y, height: bandHeight))
+
+            for (index, tile) in orderedTiles.enumerated() {
+                let column = index % columns
+                let row = index / columns
+                positionedTiles.append(MapCanvasTile(
+                    id: tile.id,
+                    x: horizontalInset + Double(column) * (tileWidth + tileGap),
+                    y: y + topPadding + Double(row) * (tileHeight + rowGap),
+                    width: tileWidth,
+                    height: tileHeight
+                ))
+            }
+            y += bandHeight
+            if bandIndex < kinds.count - 1 { y += bandGap }
+        }
+
+        self.height = y
+        self.bands = bands
+        self.tiles = positionedTiles
+    }
+
+    private static func orderedTiles(_ tiles: [MapTile], connections: [MapConnection]) -> [MapTile] {
+        let byID = Dictionary(uniqueKeysWithValues: tiles.map { ($0.id, $0) })
+        var outgoing: [String: Set<String>] = [:]
+        var indegree = Dictionary(uniqueKeysWithValues: tiles.map { ($0.id, 0) })
+        for connection in connections where byID[connection.source] != nil && byID[connection.target] != nil {
+            guard outgoing[connection.source, default: []].insert(connection.target).inserted else { continue }
+            indegree[connection.target, default: 0] += 1
+        }
+
+        var ready = indegree.filter { $0.value == 0 }.map(\.key).sorted()
+        var orderedIDs: [String] = []
+        while !ready.isEmpty {
+            let id = ready.removeFirst()
+            orderedIDs.append(id)
+            for target in (outgoing[id] ?? []).sorted() {
+                indegree[target, default: 0] -= 1
+                if indegree[target] == 0 {
+                    let insertionIndex = ready.firstIndex(where: { $0 > target }) ?? ready.endIndex
+                    ready.insert(target, at: insertionIndex)
+                }
+            }
+        }
+        if orderedIDs.count < tiles.count {
+            let placed = Set(orderedIDs)
+            orderedIDs.append(contentsOf: tiles.map(\.id).filter { !placed.contains($0) }.sorted())
+        }
+        return orderedIDs.compactMap { byID[$0] }
+    }
 }
 
 enum ResourceMapError: Error, Equatable {
@@ -128,6 +234,7 @@ struct ResourceMapClassifier {
     var categories: [String: String] = ResourceMapCategories.values
 
     func kind(for type: String) -> MapKind {
+        if type.hasPrefix("aws_cloudwatch_event_") || type.hasPrefix("aws_chatbot_") { return .messaging }
         if type.hasPrefix("kubernetes_") || type.hasPrefix("helm_") { return .appsAndAI }
         if type.range(of: #"^google_compute_(url_map|target_https?_proxy|global_forwarding_rule|forwarding_rule|backend_service|ssl_certificate|managed_ssl)"#, options: .regularExpression) != nil { return .frontDoor }
         if type.range(of: #"^google_compute_(network|subnetwork|firewall|router|route|global_address|address)|^aws_(security_group|network_acl|vpc_endpoint)"#, options: .regularExpression) != nil { return .network }
@@ -273,8 +380,32 @@ struct ResourceMapClassifier {
                 }
             }
         }
+        let workspaceData = all.filter {
+            $0.isData && ["terraform_remote_state", "tfe_outputs"].contains($0.type)
+        }
+        func workspaceBlock(_ resource: MapResource) -> String {
+            (resource.module.isEmpty ? "" : resource.module + ".") + "data." + resource.type + "." + resource.name
+        }
+        let workspaceByAddress = Dictionary(uniqueKeysWithValues: workspaceData.map { ($0.address, $0) })
+        let workspaceByBlock = Dictionary(grouping: workspaceData, by: workspaceBlock)
+        var consumersByWorkspace: [String: Set<String>] = [:]
+        for resource in resources {
+            guard let consumerTile = tileForResource[resource.address] else { continue }
+            for dependency in resource.dependencies {
+                var matches: [MapResource] = []
+                if let exact = workspaceByAddress[dependency] { matches.append(exact) }
+                matches.append(contentsOf: workspaceByBlock[dependency] ?? [])
+                for match in matches {
+                    consumersByWorkspace[match.address, default: []].insert(consumerTile)
+                }
+            }
+        }
+        let workspaceReferences = workspaceData.map { resource in
+            MapWorkspaceReference(address: resource.address, name: resource.name,
+                                  consumers: (consumersByWorkspace[resource.address] ?? []).sorted())
+        }.sorted { $0.address < $1.address }
         return ResourceMap(tiles: tiles, connections: connections.sorted {
             $0.source == $1.source ? $0.target < $1.target : $0.source < $1.source
-        }, dataSources: all.filter(\.isData).map(\.address))
+        }, dataSources: all.filter(\.isData).map(\.address), workspaceReferences: workspaceReferences)
     }
 }
