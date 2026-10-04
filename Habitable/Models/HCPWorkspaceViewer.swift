@@ -534,6 +534,10 @@ final class HCPWorkspaceViewerModel: ObservableObject {
                 mapError = "No state is available, or your credential cannot read this workspace’s state."
             } else if selectedWorkspaceID == "sample-empty" {
                 mapSnapshot = HCPMapSnapshot(versionID: "sample-empty", map: ResourceMap(tiles: [], connections: [], dataSources: []), resources: [], notice: "Offline sample · empty workspace")
+            } else if selectedWorkspaceID == "sample-reference" {
+                let raw = try? JSONSerialization.data(withJSONObject: ResourceMapSample.referenceRawState)
+                let shown = try? JSONSerialization.data(withJSONObject: ResourceMapSample.referenceShownState)
+                if let raw { mapSnapshot = try? HCPMapSnapshot.decode(versionID: "sample-reference", raw: raw, shown: shown) }
             } else {
                 let raw = try? JSONSerialization.data(withJSONObject: ResourceMapSample.rawState)
                 let shown = try? JSONSerialization.data(withJSONObject: ResourceMapSample.shownState)
@@ -650,6 +654,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         if isSample {
             workspaces = [
                 HCPWorkspace(id: "sample-production", name: "Acme production · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
+                HCPWorkspace(id: "sample-reference", name: "Map reference · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
                 HCPWorkspace(id: "sample-empty", name: "Empty workspace · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
                 HCPWorkspace(id: "sample-unavailable", name: "Unavailable state · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil)
             ]

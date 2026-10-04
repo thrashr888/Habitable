@@ -123,4 +123,137 @@ final class ResourceMapTests: XCTestCase {
         XCTAssertEqual(map, try classifier.classify(resources.reversed()))
         XCTAssertEqual(Set(map.tiles.flatMap(\.resources)).count, 1000)
     }
+
+    func testCanvasLayoutContainsTilesWithoutOverlapAndWrapsRows() {
+        let tiles = (0..<9).map { index in
+            MapTile(id: "tile-\(index)", title: "Tile \(index)", kind: .data,
+                    anchors: [], resources: [])
+        }
+        let layout = MapCanvasLayout(map: ResourceMap(tiles: tiles, connections: [], dataSources: []), width: 680)
+
+        XCTAssertEqual(layout.width, 680)
+        XCTAssertGreaterThan(layout.height, 0)
+        XCTAssertEqual(layout.tiles.count, tiles.count)
+        for tile in layout.tiles {
+            XCTAssertGreaterThanOrEqual(tile.x, 28)
+            XCTAssertGreaterThanOrEqual(tile.y, 0)
+            XCTAssertLessThanOrEqual(tile.x + tile.width, layout.width - 28)
+            XCTAssertLessThanOrEqual(tile.y + tile.height, layout.height)
+            XCTAssertTrue(layout.bands.contains {
+                $0.kind == .data && tile.y >= $0.y && tile.y + tile.height <= $0.y + $0.height
+            })
+        }
+        for (index, first) in layout.tiles.enumerated() {
+            for second in layout.tiles.dropFirst(index + 1) {
+                let overlapsHorizontally = first.x < second.x + second.width && second.x < first.x + first.width
+                let overlapsVertically = first.y < second.y + second.height && second.y < first.y + first.height
+                XCTAssertFalse(overlapsHorizontally && overlapsVertically, "\(first.id) overlaps \(second.id)")
+            }
+        }
+        XCTAssertEqual(Set(layout.tiles.map(\.y)).count, 5)
+    }
+
+    func testCanvasLayoutIsDeterministicForPermutedTilesAndConnections() {
+        let tiles = [
+            MapTile(id: "a", title: "A", kind: .appsAndAI, anchors: [], resources: []),
+            MapTile(id: "b", title: "B", kind: .appsAndAI, anchors: [], resources: []),
+            MapTile(id: "c", title: "C", kind: .data, anchors: [], resources: []),
+            MapTile(id: "d", title: "D", kind: .other, anchors: [], resources: [])
+        ]
+        let connections = [MapConnection(source: "a", target: "b"), MapConnection(source: "c", target: "a")]
+        let first = MapCanvasLayout(map: ResourceMap(tiles: tiles, connections: connections, dataSources: []), width: 920)
+        let permuted = MapCanvasLayout(map: ResourceMap(tiles: tiles.reversed(), connections: connections.reversed(), dataSources: []), width: 920)
+        XCTAssertEqual(first, permuted)
+        let idsByBand = Dictionary(grouping: first.tiles, by: { $0.y }).values.map { $0.map(\.id) }
+        XCTAssertEqual(idsByBand.first(where: { $0.contains("a") }), ["a", "b"])
+    }
+
+    func testCanvasLayoutOrdersDependenciesAndFallsBackLexicallyForCycles() {
+        let tiles = ["z", "b", "a", "c"].map {
+            MapTile(id: $0, title: $0, kind: .data, anchors: [], resources: [])
+        }
+        let map = ResourceMap(tiles: tiles,
+                              connections: [MapConnection(source: "b", target: "a"),
+                                             MapConnection(source: "a", target: "b"),
+                                             MapConnection(source: "c", target: "z")],
+                              dataSources: [])
+        let layout = MapCanvasLayout(map: map, width: 1000)
+        XCTAssertEqual(layout.tiles.map(\.id), ["c", "z", "a", "b"])
+    }
+
+    func testCanvasLayoutKeepsSixEmptyBandsAndOmitsEmptyOtherBand() {
+        let layout = MapCanvasLayout(map: ResourceMap(tiles: [], connections: [], dataSources: []), width: 300)
+        XCTAssertEqual(layout.width, 680)
+        XCTAssertEqual(layout.bands.map(\.kind), Array(MapKind.allCases.dropLast()))
+        XCTAssertTrue(layout.bands.allSatisfy { $0.height == 54 })
+        XCTAssertEqual(layout.height, 6 * 54 + 5 * 12)
+        for pair in zip(layout.bands, layout.bands.dropFirst()) {
+            XCTAssertEqual(pair.1.y - pair.0.y - pair.0.height, 12)
+        }
+        XCTAssertTrue(layout.tiles.isEmpty)
+
+        let withOther = MapCanvasLayout(
+            map: ResourceMap(tiles: [MapTile(id: "mystery", title: "Mystery", kind: .other, anchors: [], resources: [])],
+                             connections: [], dataSources: []),
+            width: 680
+        )
+        XCTAssertEqual(withOther.bands.map(\.kind), MapKind.allCases)
+        XCTAssertEqual(withOther.bands.last?.height, 164)
+    }
+
+    func testWorkspaceReferencesUseOnlyExplicitRemoteStateDependencies() throws {
+        let west = MapResource(address: #"data.terraform_remote_state.shared["west"]"#,
+                               type: "terraform_remote_state", name: "shared", isData: true)
+        let east = MapResource(address: #"data.terraform_remote_state.shared["east"]"#,
+                               type: "terraform_remote_state", name: "shared", isData: true)
+        let unused = MapResource(address: "data.tfe_outputs.unused", type: "tfe_outputs",
+                                 name: "unused", isData: true)
+        let unrelated = MapResource(address: "data.aws_region.current", type: "aws_region",
+                                    name: "current", isData: true)
+        let direct = r("aws_lambda_function", "direct", deps: [west.address])
+        let block = r("aws_lambda_function", "block", deps: ["data.terraform_remote_state.shared"])
+        let input = [west, east, unused, unrelated, direct, block]
+
+        let map = try classifier.classify(input)
+        let tileForName: [String: String] = Dictionary(uniqueKeysWithValues: map.tiles.flatMap { tile in
+            tile.resources.compactMap { address -> (String, String)? in
+                guard address == direct.address || address == block.address else { return nil }
+                return (address, tile.id)
+            }
+        })
+        XCTAssertEqual(map.workspaceReferences, [
+            MapWorkspaceReference(address: #"data.terraform_remote_state.shared["east"]"#,
+                                  name: "shared", consumers: [tileForName[block.address]!]),
+            MapWorkspaceReference(address: #"data.terraform_remote_state.shared["west"]"#,
+                                  name: "shared", consumers: [tileForName[block.address]!, tileForName[direct.address]!].sorted()),
+            MapWorkspaceReference(address: "data.tfe_outputs.unused", name: "unused", consumers: [])
+        ])
+        XCTAssertFalse(map.workspaceReferences.contains { $0.address == unrelated.address })
+
+        let permuted = try classifier.classify(input.reversed())
+        XCTAssertEqual(map.workspaceReferences, permuted.workspaceReferences)
+    }
+
+    func testWorkspaceReferencesRespectModuleQualifiedDataBlocksAndDoNotInventConsumers() throws {
+        let source = MapResource(address: #"module.shared.data.terraform_remote_state.base[0]"#,
+                                 type: "terraform_remote_state", name: "base",
+                                 module: "module.shared", isData: true)
+        let wrongModule = MapResource(address: "module.other.data.terraform_remote_state.base[0]",
+                                      type: "terraform_remote_state", name: "base",
+                                      module: "module.other", isData: true)
+        let consumer = r("aws_s3_bucket", "app", module: "module.shared",
+                         deps: ["module.shared.data.terraform_remote_state.base"])
+        let unrelated = r("aws_lambda_function", "unrelated")
+        let map = try classifier.classify([wrongModule, unrelated, consumer, source])
+        let consumerTile = try XCTUnwrap(map.tiles.first { $0.resources.contains(consumer.address) }?.id)
+        let unrelatedTile = try XCTUnwrap(map.tiles.first { $0.resources.contains(unrelated.address) }?.id)
+
+        XCTAssertEqual(map.workspaceReferences, [
+            MapWorkspaceReference(address: "module.other.data.terraform_remote_state.base[0]",
+                                  name: "base", consumers: []),
+            MapWorkspaceReference(address: #"module.shared.data.terraform_remote_state.base[0]"#,
+                                  name: "base", consumers: [consumerTile])
+        ])
+        XCTAssertFalse(map.workspaceReferences.contains { $0.consumers.contains(unrelatedTile) })
+    }
 }
