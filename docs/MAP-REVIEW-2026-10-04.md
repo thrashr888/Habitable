@@ -30,3 +30,7 @@ Live native inspection verified the Map reference sample at 75% zoom, stacked Be
 ## User test route
 
 Open Habitable Preview → HCP Terraform → Explore a sample cloud map → choose Map reference. Inspect groups and stacked members, follow purple reference pills, search, toggle connections, and switch between reference, Acme, empty, and unavailable samples. Then use the existing HCP connection to inspect a real workspace. No plan or apply is needed.
+
+## Readability correction after user review
+
+The user correctly rejected the small, low-contrast text at 75% zoom. The earlier visual check missed this usability defect. The minimum/default zoom is now 100%, with 125% and 150% enlargement available. Card titles are 15 points, category labels 13 points, summaries/band labels/badges at least 12 points. Summaries and empty-band messages use secondary instead of tertiary contrast. Cards are 264 by 120 points to accommodate readable text. The rebuilt stable preview was visually inspected at 100% in the native sample sheet; user interaction was observed, so further navigation was stopped. Native build and all 18 Map model/layout tests passed. Overall visual acceptance remains pending.
