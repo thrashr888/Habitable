@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA6040000000000000000010 /* ResourceMapCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000011 /* ResourceMapCategories.swift */; };
+		AA6040000000000000000000 /* ResourceMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000001 /* ResourceMap.swift */; };
 		AA6030000000000000000010 /* ResourceBrowserIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000011 /* ResourceBrowserIndex.swift */; };
 		AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000013 /* TerraformDiagnosticSource.swift */; };
 		AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5310000000000000000002 /* WorkspaceReadme.swift */; };
@@ -78,6 +80,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AA6040000000000000000011 /* ResourceMapCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapCategories.swift; sourceTree = "<group>"; };
+		AA6040000000000000000001 /* ResourceMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMap.swift; sourceTree = "<group>"; };
 		AA6030000000000000000011 /* ResourceBrowserIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceBrowserIndex.swift; sourceTree = "<group>"; };
 		AA6030000000000000000013 /* TerraformDiagnosticSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformDiagnosticSource.swift; sourceTree = "<group>"; };
 		AA5310000000000000000002 /* WorkspaceReadme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceReadme.swift; sourceTree = "<group>"; };
@@ -188,6 +192,8 @@
 				B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */,
 				550D972CC34B47978D05B9F9 /* RunGitContext.swift */,
 				0EEE1ABBAF394D628B436560 /* ConfigurationModel.swift */,
+				AA6040000000000000000001 /* ResourceMap.swift */,
+				AA6040000000000000000011 /* ResourceMapCategories.swift */,
 				AA6030000000000000000011 /* ResourceBrowserIndex.swift */,
 				AA6030000000000000000013 /* TerraformDiagnosticSource.swift */,
 				AA5310000000000000000002 /* WorkspaceReadme.swift */,
@@ -398,6 +404,8 @@
 				587D4C19FB214DC5A16904A8 /* ConfigurationPage.swift in Sources */,
 				093095698F3E40D39EF8EB1B /* RunGitContext.swift in Sources */,
 				45C6675D39CF46A2A199AD8B /* ConfigurationModel.swift in Sources */,
+				AA6040000000000000000000 /* ResourceMap.swift in Sources */,
+				AA6040000000000000000010 /* ResourceMapCategories.swift in Sources */,
 				AA6030000000000000000010 /* ResourceBrowserIndex.swift in Sources */,
 				AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */,
 				AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */,
