@@ -1,0 +1,419 @@
+<title>Habitable Map Research</title>
+<style>
+/* Layout: research memo column at 70ch, with full-width canvas exhibits scaled to fit. Exhibits share one tile vocabulary. */
+:root{
+  --page:#f5f5f7; --ink:#1d1d1f; --ink2:#6e6e73; --ink3:#a1a1a6; --rule:#d2d2d7; --win:#ffffff; --side:#ececf0; --hair:rgba(0,0,0,.09);
+  --canvas:#fbfbfd; --dot:rgba(0,0,0,.07); --tile:#ffffff; --tileline:rgba(0,0,0,.09);
+  --accent:#7b42bc; --add:#1f9d55; --chg:#d98a00; --del:#d63a2f;
+  --k-front:#0a84ff; --k-app:#ff9f0a; --k-msg:#e0569b; --k-data:#30b0c7; --k-net:#34c759; --k-id:#8e8e93;
+  --frame:rgba(123,66,188,.035); --frameline:rgba(0,0,0,.06); --port:#7b42bc;
+  --shadow:0 24px 50px -22px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.16);
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --page:#0b0b0d; --ink:#f5f5f7; --ink2:#a1a1a6; --ink3:#6e6e73; --rule:#2c2c2e; --win:#1e1e20; --side:#2a2a2d; --hair:rgba(255,255,255,.09);
+  --canvas:#19191b; --dot:rgba(255,255,255,.06); --tile:#2a2a2d; --tileline:rgba(255,255,255,.09);
+  --accent:#a067da; --add:#30d158; --chg:#ffb340; --del:#ff6961; --frame:rgba(160,103,218,.06); --frameline:rgba(255,255,255,.07); --port:#a067da;
+  --shadow:0 24px 50px -22px rgba(0,0,0,.7),0 0 0 .5px rgba(255,255,255,.14); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --page:#0b0b0d; --ink:#f5f5f7; --ink2:#a1a1a6; --ink3:#6e6e73; --rule:#2c2c2e; --win:#1e1e20; --side:#2a2a2d; --hair:rgba(255,255,255,.09);
+  --canvas:#19191b; --dot:rgba(255,255,255,.06); --tile:#2a2a2d; --tileline:rgba(255,255,255,.09);
+  --accent:#a067da; --add:#30d158; --chg:#ffb340; --del:#ff6961; --frame:rgba(160,103,218,.06); --frameline:rgba(255,255,255,.07); --port:#a067da;
+  --shadow:0 24px 50px -22px rgba(0,0,0,.7),0 0 0 .5px rgba(255,255,255,.14); color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;padding-inline:20px;padding-block:0 80px;-webkit-font-smoothing:antialiased}
+.col{max-width:720px;margin:0 auto}
+.wide{max-width:1100px;margin:0 auto}
+header{padding-block:64px 24px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:600}
+h1{font-family:var(--display);font-size:clamp(36px,6vw,60px);line-height:1.04;letter-spacing:-.035em;margin:.25em 0 .35em;text-wrap:balance}
+h2{font-family:var(--display);font-size:clamp(26px,3.6vw,36px);letter-spacing:-.025em;line-height:1.12;margin:0 0 .4em;text-wrap:balance}
+h3{font-size:17px;margin:0 0 .3em;letter-spacing:-.01em}
+p{margin:0 0 1em}
+.lede{font-size:clamp(18px,2.1vw,20px);line-height:1.5;color:var(--ink2)}
+.muted{color:var(--ink2)}
+section{padding-block:52px 4px}
+code{font-family:var(--mono);font-size:.88em;background:var(--side);padding:1px 5px;border-radius:4px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.answer{background:var(--win);border-radius:16px;padding:20px 22px;box-shadow:0 0 0 .5px var(--hair);margin-top:8px}
+.answer p:last-child{margin:0}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:20px 24px;margin:26px 0 8px}
+.stats div{min-width:0}
+.stats b{display:block;font-family:var(--display);font-size:34px;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.stats span{display:block;font-size:13px;color:var(--ink2);margin-top:6px}
+
+.tablewrap{overflow-x:auto;margin-top:18px}
+table.sig{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+table.sig th{text-align:left;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);font-weight:600;padding:8px 14px 8px 0;border-bottom:.5px solid var(--rule)}
+table.sig td{padding:11px 14px 11px 0;border-bottom:.5px solid var(--rule);vertical-align:top}
+table.sig td:first-child{font-weight:600}
+.meter{display:inline-flex;gap:3px;vertical-align:middle}
+.meter i{width:9px;height:9px;border-radius:2px;background:var(--side);display:block}
+.meter i.on{background:var(--accent)}
+
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:20px}
+.steps div{background:var(--win);border-radius:14px;padding:14px 16px;box-shadow:0 0 0 .5px var(--hair);min-width:0}
+.steps b{display:block;font-size:22px;font-family:var(--display);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.steps small{display:block;color:var(--ink2);font-size:12.5px}
+.steps .n{font-size:11px;font-weight:600;color:var(--ink3);letter-spacing:.05em;text-transform:uppercase}
+
+/* Exhibits */
+.ex{margin-top:26px}
+.ex .lbl{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;max-width:1000px;margin:0 auto 10px}
+.ex .lbl b{font-size:16px}
+.ex .lbl span{color:var(--ink2);font-size:13.5px}
+.stage{position:relative;width:100%}
+.scaler{position:absolute;left:0;top:0;transform-origin:0 0}
+.cv{width:1000px;position:relative;background-color:var(--canvas);background-image:radial-gradient(var(--dot) 1px,transparent 1.2px);background-size:18px 18px;border-radius:14px;box-shadow:var(--shadow);overflow:hidden;font-size:12px;line-height:1.3}
+.cv .links{position:absolute;inset:0;pointer-events:none;z-index:1}
+.cv .links path{fill:none;stroke:var(--ink3);stroke-width:1.4;opacity:.7}
+.cv .links path.port{stroke:var(--port);stroke-dasharray:4 4;opacity:.8}
+.cv .links marker path{fill:var(--ink3);stroke:none}
+.row-lbl{position:absolute;left:18px;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.band{position:absolute;left:12px;right:12px;border-radius:16px;background:var(--frame);box-shadow:inset 0 0 0 1px var(--frameline)}
+.t{position:absolute;width:200px;min-height:60px;background:var(--tile);border-radius:13px;box-shadow:0 0 0 .5px var(--tileline),0 1px 2px rgba(0,0,0,.05),0 6px 14px -6px rgba(0,0,0,.12);display:flex;gap:10px;padding:10px 12px;z-index:2}
+.t .sq{width:32px;height:32px;border-radius:9px;flex:none;display:grid;place-items:center;color:#fff;font-weight:700;font-size:11px}
+.t .sq svg{width:18px;height:18px}
+.t b{display:block;font-size:12.5px;font-weight:600}
+.t small{display:block;color:var(--ink2);font-size:11px}
+.t .fold{display:block;color:var(--ink3);font-size:10.5px;margin-top:3px;font-variant-numeric:tabular-nums}
+.t .tx{min-width:0}
+.t.stack{box-shadow:0 0 0 .5px var(--tileline),4px 4px 0 -1px var(--tile),4px 4px 0 -.5px var(--tileline),0 6px 14px -6px rgba(0,0,0,.12)}
+.t.sm{width:170px}
+.badge{position:absolute;top:-8px;right:-8px;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:9px;background:var(--ink);color:var(--page)}
+.port{position:absolute;z-index:2;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--port);background:color-mix(in srgb,var(--port) 10%,var(--canvas));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--port) 45%,transparent);border-radius:99px;padding:4px 10px 4px 8px;white-space:nowrap}
+.port svg{width:12px;height:12px}
+.shelf{position:absolute;left:12px;right:12px;bottom:12px;height:52px;border-radius:12px;background:var(--side);display:flex;align-items:center;gap:10px;padding:0 14px;font-size:11.5px;color:var(--ink2);z-index:2}
+.shelf b{color:var(--ink);font-size:11.5px}
+.chipk{display:inline-flex;align-items:center;gap:5px;background:var(--tile);border-radius:7px;padding:3px 8px;box-shadow:0 0 0 .5px var(--tileline)}
+.chipk i{width:8px;height:8px;border-radius:2px;display:block}
+
+/* raw chips */
+.files{position:absolute;inset:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-content:start}
+.file{background:var(--frame);border-radius:12px;box-shadow:inset 0 0 0 1px var(--frameline);padding:9px 10px;min-width:0}
+.file h6{margin:0 0 6px;font-size:11px;font-family:var(--mono);color:var(--ink2);font-weight:600}
+.rc{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;background:var(--tile);border-radius:6px;padding:3px 6px;margin-top:3px;box-shadow:0 0 0 .5px var(--tileline);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rc i{width:8px;height:8px;border-radius:2px;flex:none;display:block}
+
+/* system map */
+.ws{position:absolute;z-index:2;background:var(--tile);border-radius:10px;box-shadow:0 0 0 .5px var(--tileline),0 4px 10px -6px rgba(0,0,0,.18);padding:6px 10px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.ws small{font-weight:400;color:var(--ink2);margin-left:5px;font-variant-numeric:tabular-nums}
+.ws.hl{box-shadow:0 0 0 2px var(--accent)}
+.ws.big{font-size:12.5px;padding:8px 12px}
+
+.cap{max-width:1000px;margin:12px auto 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 26px;font-size:13.5px;color:var(--ink2)}
+.cap div{min-width:0}
+.cap b{color:var(--ink)}
+.verdict{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:99px;margin-left:4px}
+.v-good{background:color-mix(in srgb,var(--add) 15%,transparent);color:var(--add)}
+.v-meh{background:color-mix(in srgb,var(--chg) 18%,transparent);color:var(--chg)}
+.v-bad{background:color-mix(in srgb,var(--del) 15%,transparent);color:var(--del)}
+ul.tight{padding-left:20px;margin:0}
+ul.tight li{margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:12.5px;color:var(--ink2);margin-top:14px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;display:block}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="g-db" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></g></symbol>
+<symbol id="g-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z" fill="currentColor"/></symbol>
+<symbol id="g-bell" viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0112 0v6l1.5 2h-15zM10 21h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+<symbol id="g-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+<symbol id="g-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+<symbol id="g-spark" viewBox="0 0 24 24"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" fill="currentColor"/></symbol>
+<symbol id="g-split" viewBox="0 0 24 24"><path d="M4 12h6l4-6h6M10 12l4 6h6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="g-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v6c0 4.6-3.2 8-7.5 9-4.3-1-7.5-4.4-7.5-9V6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+<symbol id="g-box" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></g></symbol>
+<symbol id="g-queue" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="6" width="5" height="12" rx="1.5"/><rect x="10" y="6" width="5" height="12" rx="1.5"/><rect x="17" y="6" width="4" height="12" rx="1.5"/></g></symbol>
+<symbol id="g-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+<symbol id="g-link" viewBox="0 0 24 24"><path d="M10 14l4-4M8 16l-1.5 1.5a3.5 3.5 0 01-5-5L5 9M16 8l1.5-1.5a3.5 3.5 0 015 5L19 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+</defs></svg>
+
+<div class="col">
+<header>
+  <div class="eyebrow">Habitable · Map research · October 2026</div>
+  <h1>Can real Terraform draw a map?</h1>
+  <p class="lede">I measured 3,449 resources from real production repos to find out what the app can actually know about a resource: what kind of thing it is, what it belongs to, and where it sits relative to everything else.</p>
+  <div class="answer">
+    <p><b>Short answer: yes, with resource types doing most of the work.</b> Name prefixes help, but with a different job than you'd expect. The resource type, looked up in the provider's own docs, tells you what kind of thing something is. Shared name stems tell you which resources are parts of the same thing. References tell you the order. Together they fold a median workspace of 25 resources into 4 tiles.</p>
+  </div>
+</div>
+</header>
+</div>
+
+<section class="col">
+  <div class="eyebrow">The corpus</div>
+  <h2>What real configs look like</h2>
+  <p class="muted">Production infrastructure from GOV.UK (alphagov), Canada's Digital Service (GC Notify and GC Forms) and the UK Ministry of Justice cloud platform, plus HashiCorp, Google and Azure reference configs. That's 10 repos and 63 root modules with at least 10 resources each, parsed for resource blocks, references, file names and module calls.</p>
+  <div class="stats">
+    <div><b>95%</b><span>of AWS, Google and Azure resources have a category in their provider's docs</span></div>
+    <div><b>43%</b><span>are plumbing: IAM, CloudWatch, logs, secrets and keys</span></div>
+    <div><b>56%</b><span>share a two-word name stem with a resource of a different type</span></div>
+    <div><b>3%</b><span>use generic names like <code>this</code> or <code>main</code></span></div>
+    <div><b>90%</b><span>live in files other than main.tf, and the file names mean something</span></div>
+    <div><b>91%</b><span>sit within three reference hops of a root, so graphs are shallow</span></div>
+  </div>
+</section>
+
+<section class="col">
+  <div class="eyebrow">Signals</div>
+  <h2>How you'd know edge from compute from data</h2>
+  <p class="muted">Ranked by how much they help the map, with the evidence for each.</p>
+  <div class="tablewrap">
+  <table class="sig">
+    <thead><tr><th>Signal</th><th>Tells you</th><th>Strength</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Resource type → provider docs category</td><td>What kind of thing it is</td><td><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td>Every resource doc page in the AWS, Google and Azure providers has a <code>subcategory</code>: 255 for AWS, 178 for Google, 111 for Azure. For example, <code>aws_db_instance</code> → “RDS (Relational Database)”. A small table maps those to six kinds. Google's “Compute Engine” bucket also holds networks and load balancers, so about 20 type patterns override it.</td></tr>
+      <tr><td>References and state dependencies</td><td>Order, flow, and what a helper belongs to</td><td><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td>3,043 in-folder references. State files record each instance's <code>dependencies</code> exactly, across modules. A security group rule points at its group, and the group points at the Redis cluster that uses it.</td></tr>
+      <tr><td>Shared name stems</td><td>Which resources are one thing</td><td><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></td><td>In GOV.UK Chat, <code>chat_redis_cluster</code> names five resources of five types. Prefixes rarely say “edge” or “data”; the common tokens are app parts like <code>notification</code>, <code>api</code>, <code>sms</code>, <code>admin</code> and <code>celery</code>. Region suffixes (<code>_dublin</code>, <code>_london</code>) mark copies of the same thing.</td></tr>
+      <tr><td>Parent-type prefixes</td><td>Settings that belong to a parent</td><td><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></td><td>22% of resources are facets of another resource in the same folder, like <code>aws_s3_bucket_versioning</code> on <code>aws_s3_bucket</code> or <code>aws_iam_role_policy_attachment</code> on a role. These become details on the parent's tile.</td></tr>
+      <tr><td>File names</td><td>The author's own grouping</td><td><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></td><td>The most common files are secrets.tf, cloudwatch_alarms.tf, iam.tf, s3.tf, lambda.tf and rds.tf. Files usually group by service, and sometimes by feature (redis.tf, govgraphsearch.tf). Useful as a tiebreaker and as labels.</td></tr>
+      <tr><td>count / for_each</td><td>Copies to stack</td><td><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></td><td>33% of resource blocks expand to several instances. One tile with a stack and a count beats twelve identical tiles.</td></tr>
+      <tr><td>Cross-workspace outputs</td><td>What lives next door</td><td><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></td><td><code>tfe_outputs</code> and <code>terraform_remote_state</code> appear in 18 of 133 folders. In GOV.UK they wire 30 workspaces into a clear stack, from vpc up through cluster to apps.</td></tr>
+      <tr><td>Modules and tags</td><td>Ownership and environment</td><td><span class="meter"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></td><td>429 module calls and 240 files with tags. Module names are good group labels when they exist. Tags vary too much between teams to rely on, but are good filters.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="col">
+  <div class="eyebrow">The pipeline</div>
+  <h2>From 36 resources to 6 tiles</h2>
+  <p class="muted">Run on GOV.UK Chat, a real 36-resource workspace that runs the Bedrock-backed GOV.UK Chat service. Every number below came from the prototype classifier, not from hand-sorting.</p>
+  <div class="steps">
+    <div><span class="n">Parse</span><b>36</b><small>resources, plus 15 data sources that get hidden</small></div>
+    <div><span class="n">Fold helpers</span><b>9</b><small>things left after 23 IAM, security group, log group, parameter group and DNS resources fold into what they serve</small></div>
+    <div><span class="n">Merge</span><b>6</b><small>tiles after merging by shared name stem and same-service references (Dublin and London copies stack)</small></div>
+    <div><span class="n">Shelf</span><b>4</b><small>resources with no clear owner go to a supporting shelf: one IAM role with its policy and attachment, plus one alarm</small></div>
+  </div>
+  <div class="legend" aria-label="Kind colors">
+    <span><i style="background:var(--k-front)"></i>Front door</span>
+    <span><i style="background:var(--k-app)"></i>Apps &amp; AI</span>
+    <span><i style="background:var(--k-msg)"></i>Messaging &amp; events</span>
+    <span><i style="background:var(--k-data)"></i>Data</span>
+    <span><i style="background:var(--k-net)"></i>Network</span>
+    <span><i style="background:var(--k-id)"></i>Identity &amp; monitoring</span>
+  </div>
+</section>
+
+<!-- A. RAW -->
+<section class="wide">
+  <div class="col" style="margin:0 auto">
+    <div class="eyebrow">Exploration A</div>
+    <h2>Every resource, as written</h2>
+    <p class="muted">The naive map: one tile per resource block, grouped by file. This is what the app shows today, with tiles instead of rows.</p>
+  </div>
+  <div class="ex">
+    <div class="stage" data-h="470"><div class="scaler"><div class="cv" style="height:470px"><div class="files" id="files"></div></div></div></div>
+    <div class="cap">
+      <div><b>Verdict</b><span class="verdict v-bad">Not a map</span><br>22 of the 36 tiles are IAM, security groups, log groups or alarms. The one thing a person would name first, the Redis cluster, is one chip among five in redis.tf.</div>
+      <div><b>What's still useful</b><br>The file names already sketch the components: redis.tf, serverless_memcache.tf, eventbridge.tf, bedrock_logging.tf. That's a free label source when name stems disagree.</div>
+    </div>
+  </div>
+</section>
+
+<!-- B. KINDS -->
+<section class="wide">
+  <div class="col" style="margin:0 auto">
+    <div class="eyebrow">Exploration B · recommended default</div>
+    <h2>Folded into things, in kind rows</h2>
+    <p class="muted">Same workspace after the pipeline. Rows come from docs categories, ordered the way a request travels: front door at the top, data in the middle, network at the bottom. Within a row, tiles are ordered so their connections cross least. Neighbouring workspaces appear as purple ports.</p>
+  </div>
+  <div class="ex">
+    <div class="stage" data-h="560"><div class="scaler"><div class="cv" style="height:560px">
+      <div class="band" style="top:14px;height:64px"></div><span class="row-lbl" style="top:22px">Front door</span>
+      <span class="muted" style="position:absolute;left:150px;top:38px;font-size:12px">Nothing here. Chat's public entry points live in other workspaces.</span>
+
+      <div class="band" style="top:90px;height:104px"></div><span class="row-lbl" style="top:98px">Apps &amp; AI</span>
+      <div class="t stack" style="left:140px;top:112px"><span class="sq" style="background:var(--k-app)"><svg><use href="#g-spark"/></svg></span><span class="tx"><b>Bedrock logging</b><small>Dublin · London</small><span class="fold">2 configs · 2 log groups · 3 IAM</span></span><span class="badge">×2</span></div>
+      
+
+      <div class="band" style="top:206px;height:104px"></div><span class="row-lbl" style="top:214px">Messaging &amp; events</span>
+      <div class="t stack" style="left:40px;top:228px"><span class="sq" style="background:var(--k-msg)"><svg><use href="#g-pulse"/></svg></span><span class="tx"><b>Service health alerts</b><small>EventBridge rule</small><span class="fold">2 rules · 2 targets · 3 IAM</span></span><span class="badge">×2</span></div>
+      <div class="t stack" style="left:330px;top:228px"><span class="sq" style="background:var(--k-msg)"><svg><use href="#g-bell"/></svg></span><span class="tx"><b>Chat alerts</b><small>SNS topic</small><span class="fold">2 topics</span></span><span class="badge">×2</span></div>
+      <div class="t" style="left:620px;top:228px"><span class="sq" style="background:var(--k-msg)"><svg><use href="#g-chat"/></svg></span><span class="tx"><b>Slack alerts channel</b><small>AWS Chatbot</small><span class="fold">1 config · 4 IAM</span></span></div>
+
+      <div class="band" style="top:322px;height:104px"></div><span class="row-lbl" style="top:330px">Data</span>
+      <div class="t" style="left:330px;top:344px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-db"/></svg></span><span class="tx"><b>Chat Redis</b><small>ElastiCache · replication group</small><span class="fold">7 resources incl. DNS name</span></span></div>
+      <div class="t" style="left:620px;top:344px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-bolt"/></svg></span><span class="tx"><b>Chat Memcached</b><small>ElastiCache Serverless</small><span class="fold">4 resources</span></span></div>
+
+      <div class="band" style="top:438px;height:46px"></div><span class="row-lbl" style="top:446px">Network</span>
+      <div class="port" style="left:470px;top:449px"><svg><use href="#g-link"/></svg>vpc · private subnets</div><div class="port" style="left:846px;top:340px"><svg><use href="#g-link"/></svg>cluster · EKS</div><div class="port" style="left:846px;top:384px"><svg><use href="#g-link"/></svg>root-dns · zone</div>
+
+      <svg class="links" width="1000" height="560" viewBox="0 0 1000 560">
+        <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>
+        <path d="M240 258 H330" marker-end="url(#ar)"/>
+        <path d="M530 258 H620" marker-end="url(#ar)"/>
+        <path class="port" d="M846 354 H820"/>
+        <path class="port" d="M846 354 C800 330 560 320 530 360"/>
+        <path class="port" d="M846 398 C800 440 560 440 530 390"/>
+        <path class="port" d="M430 404 C430 430 520 440 540 449"/>
+        <path class="port" d="M720 404 C720 430 640 440 610 449"/>
+      </svg>
+      <div class="shelf"><b>Supporting · 4</b><span class="chipk"><i style="background:var(--k-id)"></i>Bedrock access role (assumed by the EKS cluster) · 3</span><span class="chipk"><i style="background:var(--k-id)"></i>Bedrock token alarm · 1</span><span style="margin-left:auto">15 data sources hidden</span></div>
+    </div></div></div>
+    <div class="cap">
+      <div><b>Verdict</b><span class="verdict v-good">Works</span><br>Six tiles, all named after something a person recognizes, and every resource is still accounted for in a tile, on the shelf, or in the data sources count.</div>
+      <div><b>What the rows reveal</b><br>This workspace has no front door and no network of its own. Both live next door, and the ports say so. Most real workspaces are slices like this, not whole apps.</div>
+      <div><b>Names</b><br>Tile titles come from the name stem (<code>chat_redis_cluster</code> → “Chat Redis”), subtitles from the docs category and type. Users can rename a tile; the new name is saved per workspace and never written to code.</div>
+    </div>
+  </div>
+</section>
+
+<!-- C. FLOW -->
+<section class="wide">
+  <div class="col" style="margin:0 auto">
+    <div class="eyebrow">Exploration C</div>
+    <h2>Flow, ordered by references</h2>
+    <p class="muted">No kind rows. Tiles run left to right in reference order, so the alerting pipeline reads as a sentence. Kind shows only as tile color.</p>
+  </div>
+  <div class="ex">
+    <div class="stage" data-h="360"><div class="scaler"><div class="cv" style="height:360px">
+      <div class="port" style="left:24px;top:52px"><svg><use href="#g-link"/></svg>AWS Health events</div>
+      <div class="t stack" style="left:200px;top:36px"><span class="sq" style="background:var(--k-msg)"><svg><use href="#g-pulse"/></svg></span><span class="tx"><b>Service health alerts</b><small>EventBridge rule</small></span><span class="badge">×2</span></div>
+      <div class="t stack" style="left:470px;top:36px"><span class="sq" style="background:var(--k-msg)"><svg><use href="#g-bell"/></svg></span><span class="tx"><b>Chat alerts</b><small>SNS topic</small></span><span class="badge">×2</span></div>
+      <div class="t" style="left:740px;top:36px"><span class="sq" style="background:var(--k-msg)"><svg><use href="#g-chat"/></svg></span><span class="tx"><b>Slack alerts channel</b><small>AWS Chatbot</small></span></div>
+      <div class="port" style="left:24px;top:166px"><svg><use href="#g-link"/></svg>EKS cluster</div>
+      <div class="t" style="left:200px;top:150px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-db"/></svg></span><span class="tx"><b>Chat Redis</b><small>ElastiCache</small></span></div>
+      <div class="t" style="left:470px;top:150px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-bolt"/></svg></span><span class="tx"><b>Chat Memcached</b><small>ElastiCache Serverless</small></span></div>
+      <div class="port" style="left:24px;top:280px"><svg><use href="#g-link"/></svg>Bedrock (AWS)</div>
+      <div class="t stack" style="left:200px;top:264px"><span class="sq" style="background:var(--k-app)"><svg><use href="#g-spark"/></svg></span><span class="tx"><b>Bedrock model logging</b><small>Invocation logs</small></span><span class="badge">×2</span></div>
+      <svg class="links" width="1000" height="360" viewBox="0 0 1000 360">
+        <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>
+        <path class="port" d="M170 64 H200"/><path d="M400 66 H470" marker-end="url(#ar2)"/><path d="M670 66 H740" marker-end="url(#ar2)"/>
+        <path class="port" d="M130 178 H200"/><path class="port" d="M130 178 C160 230 420 230 470 182"/>
+        <path class="port" d="M140 292 H200"/>
+      </svg>
+    </div></div></div>
+    <div class="cap">
+      <div><b>Verdict</b><span class="verdict v-meh">Great for pipelines</span><br>Event-driven workspaces (queues, topics, functions) read beautifully. Data-heavy or network workspaces collapse into a single column, since 16% of resources reference nothing nearby.</div>
+      <div><b>Use</b><br>Offer it as a layout option, and pick it automatically when most tiles are messaging or functions in a chain three or more deep.</div>
+    </div>
+  </div>
+</section>
+
+<!-- D. SCALE -->
+<section class="wide">
+  <div class="col" style="margin:0 auto">
+    <div class="eyebrow">Exploration D</div>
+    <h2>At scale: 155 resources</h2>
+    <p class="muted">GOV.UK's publishing infrastructure workspace, folded the same way. The classifier gets it to 13 tiles. Three were wrong: two target groups stayed apart from their load balancer because they connect only through a listener, and WAF logging stayed apart from its firewall. Folding through listeners and logging configs fixes them, which leaves the 10 tiles drawn here.</p>
+  </div>
+  <div class="ex">
+    <div class="stage" data-h="520"><div class="scaler"><div class="cv" style="height:520px">
+      <div class="band" style="top:14px;height:104px"></div><span class="row-lbl" style="top:22px">Front door</span>
+      <div class="t sm" style="left:110px;top:38px"><span class="sq" style="background:var(--k-front)"><svg><use href="#g-split"/></svg></span><span class="tx"><b>Search API</b><small>API Gateway + WAF</small><span class="fold">13 resources</span></span></div>
+      <div class="t sm stack" style="left:300px;top:38px"><span class="sq" style="background:var(--k-front)"><svg><use href="#g-shield"/></svg></span><span class="tx"><b>Web firewall</b><small>WAF web ACLs</small><span class="fold">13 resources</span></span><span class="badge">×3</span></div>
+      <div class="t sm" style="left:490px;top:38px"><span class="sq" style="background:var(--k-front)"><svg><use href="#g-split"/></svg></span><span class="tx"><b>Search NLB</b><small>Network LB</small><span class="fold">2 resources</span></span></div>
+      <div class="t sm" style="left:680px;top:38px"><span class="sq" style="background:var(--k-front)"><svg><use href="#g-split"/></svg></span><span class="tx"><b>Publishing MQ LB</b><small>Internal NLB</small><span class="fold">5 resources</span></span></div>
+      <div class="band" style="top:130px;height:90px"></div><span class="row-lbl" style="top:138px">Apps</span>
+      <div class="t sm" style="left:300px;top:150px"><span class="sq" style="background:var(--k-app)"><svg><use href="#g-box"/></svg></span><span class="tx"><b>Post config to MQ</b><small>Lambda</small><span class="fold">5 resources</span></span></div>
+      <div class="band" style="top:232px;height:90px"></div><span class="row-lbl" style="top:240px">Messaging</span>
+      <div class="t sm" style="left:680px;top:252px"><span class="sq" style="background:var(--k-msg)"><svg><use href="#g-queue"/></svg></span><span class="tx"><b>Publishing MQ</b><small>Amazon MQ broker</small><span class="fold">14 resources</span></span></div>
+      <div class="band" style="top:334px;height:104px"></div><span class="row-lbl" style="top:342px">Data</span>
+      <div class="t sm stack" style="left:40px;top:358px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-db"/></svg></span><span class="tx"><b>Licensify DocDB</b><small>DocumentDB + clone</small><span class="fold">15 resources</span></span><span class="badge">×2</span></div>
+      <div class="t sm" style="left:230px;top:358px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-db"/></svg></span><span class="tx"><b>Shared DocDB</b><small>DocumentDB</small><span class="fold">12 resources</span></span></div>
+      <div class="t sm" style="left:420px;top:358px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-bolt"/></svg></span><span class="tx"><b>Frontend cache</b><small>Memcached</small><span class="fold">6 resources</span></span></div>
+      <div class="t sm stack" style="left:610px;top:358px"><span class="sq" style="background:var(--k-data)"><svg><use href="#g-folder"/></svg></span><span class="tx"><b>Assets EFS</b><small>File system + mount targets</small><span class="fold">5 resources</span></span></div>
+      <div class="port" style="left:810px;top:376px"><svg><use href="#g-link"/></svg>rds · neptune</div>
+      <svg class="links" width="1000" height="520" viewBox="0 0 1000 520">
+        <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>
+        <path d="M195 98 C 195 130 400 120 400 98"/>
+        <path d="M575 98 C575 200 380 300 330 358" marker-end="url(#ar3)"/>
+        <path d="M765 98 V252" marker-end="url(#ar3)"/>
+        <path d="M470 180 C600 180 680 220 700 252" marker-end="url(#ar3)"/>
+      </svg>
+      <div class="shelf"><b>Supporting · 65</b><span class="chipk"><i style="background:var(--k-id)"></i>IAM · 50</span><span class="chipk"><i style="background:var(--k-net)"></i>Security groups &amp; rules · 12</span><span class="chipk">Other · 3</span><span style="margin-left:auto">Ports: vpc, cluster, root-dns, security, fastly logs</span></div>
+    </div></div></div>
+    <div class="cap">
+      <div><b>Verdict</b><span class="verdict v-good">Works, with a big shelf</span><br>10 tiles is readable at a glance. But 42% of the workspace is IAM and security plumbing, so the shelf needs to be a real place: click it to see roles grouped by the tile that uses them.</div>
+      <div><b>Across the corpus</b><br>Median root: 25 resources → 4 tiles. 90th percentile: 14 tiles. 6 of 63 roots produce no tiles at all because they're pure IAM, secrets or alarms.</div>
+    </div>
+  </div>
+</section>
+
+<!-- E. SYSTEM -->
+<section class="wide">
+  <div class="col" style="margin:0 auto">
+    <div class="eyebrow">Exploration E</div>
+    <h2>The system map, one level up</h2>
+    <p class="muted">Real teams split infrastructure across many workspaces: GOV.UK has 35, and GC Forms has 25 Terragrunt units. Their <code>tfe_outputs</code> links already describe a stack. This is GOV.UK's actual wiring, foundations at the bottom. It belongs in the Library, where you choose which workspace to open.</p>
+  </div>
+  <div class="ex">
+    <div class="stage" data-h="440"><div class="scaler"><div class="cv" style="height:440px" id="sys"></div></div></div>
+    <div class="cap">
+      <div><b>Verdict</b><span class="verdict v-good">Strong, and cheap</span><br>It only needs workspace names and their output links, which HCP Terraform already has. No classification needed.</div>
+      <div><b>It explains the slices</b><br>Chat's missing front door and network make sense here: root-dns and vpc sit two layers below it. Unconnected workspaces (github, ecr, search-api-v2, gcp-gov-graph and others) sit in a side tray.</div>
+    </div>
+  </div>
+</section>
+
+<section class="col">
+  <div class="eyebrow">Recommendation</div>
+  <h2>How the map should work</h2>
+  <ul class="tight">
+    <li><b>Kind comes from the type, not the name.</b> Ship a table generated at build time from provider docs subcategories (about 540 categories → 6 kinds), plus about 20 type-pattern overrides. Unknown providers fall back to type-name keywords, then to “Other”.</li>
+    <li><b>Grouping comes from names and references.</b> Fold facets and helpers into the thing they serve, then merge tiles that share a name stem or a same-service reference. Region and AZ suffixes and count/for_each become stacks.</li>
+    <li><b>Order comes from references.</b> Kind rows run front door to network, and within a row, tiles are placed to minimize crossings. Use state <code>dependencies</code> when there's state, and config references when there isn't.</li>
+    <li><b>Neighbours come from outputs.</b> <code>tfe_outputs</code> and remote state become ports on the workspace map and edges on a Library-level system map.</li>
+    <li><b>Never hide anything silently.</b> The supporting shelf and the data sources count account for every resource. List view remains the exact, complete view.</li>
+    <li><b>Let people correct it.</b> Dragging a resource into a tile, renaming a tile, or moving it to another row is saved per workspace. That turns heuristics into the user's own map without touching code.</li>
+  </ul>
+  <p class="muted" style="margin-top:18px">The prototype classifier is about 150 lines of Python over raw .tf files. In the app it would run on the state and the provider schemas Habitable already loads, which are more accurate than regex over HCL.</p>
+</section>
+
+<script>
+(function(){
+  function fit(){document.querySelectorAll('.stage').forEach(function(st){var sc=st.querySelector('.scaler');var s=Math.min(1,st.clientWidth/1000);sc.style.transform='scale('+s+')';st.style.height=(+st.dataset.h*s)+'px';});}
+  fit();window.addEventListener('resize',fit);if(window.ResizeObserver)new ResizeObserver(fit).observe(document.body);
+
+  var K={front:'var(--k-front)',app:'var(--k-app)',msg:'var(--k-msg)',data:'var(--k-data)',net:'var(--k-net)',id:'var(--k-id)'};
+  var files=[
+   ['aws_chatbot.tf',[['id','aws_iam_policy.chatbot'],['id','aws_iam_role.chatbot'],['id','aws_iam_role_policy_attachment.chatbot_q'],['id','aws_iam_role_policy_attachment.chatbot'],['msg','aws_chatbot_slack_channel_configuration.chat'],['msg','aws_sns_topic.chat_alerts_dublin'],['msg','aws_sns_topic.chat_alerts_london']]],
+   ['bedrock_iam.tf',[['id','aws_iam_role.bedrock_access'],['id','aws_iam_policy.bedrock_access'],['id','aws_iam_role_policy_attachment.bedrock_access'],['id','aws_iam_role.bedrock_cloudwatch'],['id','aws_iam_policy.bedrock_cloudwatch'],['id','aws_iam_role_policy_attachment.bedrock_cloudwatch']]],
+   ['eventbridge.tf',[['msg','aws_cloudwatch_event_rule.aws_service_health_alert_dublin'],['msg','aws_cloudwatch_event_rule.aws_service_health_alert_london'],['msg','aws_cloudwatch_event_target.aws_service_health_alert_dublin'],['msg','aws_cloudwatch_event_target.aws_service_health_alert_london'],['id','aws_iam_role.aws_service_health_alert'],['id','aws_iam_policy.aws_service_health_alert'],['id','aws_iam_role_policy_attachment.aws_service_health_alert']]],
+   ['redis.tf',[['data','aws_elasticache_subnet_group.chat_redis_cluster'],['net','aws_security_group.chat_redis_cluster'],['data','aws_elasticache_parameter_group.chat_redis_cluster'],['data','aws_elasticache_replication_group.chat_redis_cluster'],['front','aws_route53_record.chat_redis_cluster']]],
+   ['security.tf',[['net','aws_security_group_rule.chat_redis_cluster_to_any_any'],['net','aws_security_group_rule.chat_redis_cluster_from_any'],['net','aws_security_group_rule.chat_serverless_memcached_to_any_any'],['net','aws_security_group_rule.chat_serverless_memcached_from_any']]],
+   ['bedrock_logging.tf',[['app','aws_bedrock_model_invocation_logging_configuration.bedrock_logging_dublin'],['app','aws_bedrock_model_invocation_logging_configuration.bedrock_logging_london']]],
+   ['cloudwatch.tf',[['id','aws_cloudwatch_log_group.bedrock_log_group_dublin'],['id','aws_cloudwatch_log_group.bedrock_log_group_london']]],
+   ['serverless_memcache.tf',[['net','aws_security_group.chat_memcached'],['data','aws_elasticache_serverless_cache.chat_memcached']]],
+   ['cloudwatch_alarms.tf',[['id','aws_cloudwatch_metric_alarm.bedrock_token_threshold']]]
+  ];
+  var host=document.getElementById('files');
+  files.forEach(function(f){var d=document.createElement('div');d.className='file';var h='<h6>'+f[0]+'</h6>';f[1].forEach(function(r){h+='<div class="rc" title="'+r[1]+'"><i style="background:'+K[r[0]]+'"></i>'+r[1]+'</div>';});d.innerHTML=h;host.appendChild(d);});
+
+  // GOV.UK system map: real tfe_outputs wiring, foundations at bottom.
+  var L=[
+   [['govuk-publishing-infrastructure',155,1]],
+   [['chat',36,2],['chat-opensearch',15],['rds',25],['neptune',12],['elasticache',7],['cluster-services',28],['security',9],['datagovuk-infra',19],['release',7],['synthetic-test',7],['cluster-access',4],['govuk-reports',1]],
+   [['cluster-infrastructure',51,1],['csp-reporter',25]],
+   [['root-dns',4],['logging',15]],
+   [['vpc',9,1]]
+  ];
+  var deps={'govuk-publishing-infrastructure':['cluster-infrastructure','rds','neptune','root-dns','security','vpc'],'chat':['cluster-infrastructure','root-dns','vpc'],'chat-opensearch':['cluster-infrastructure','root-dns','vpc'],'rds':['cluster-infrastructure','logging','root-dns','vpc'],'neptune':['cluster-infrastructure','root-dns','vpc'],'elasticache':['cluster-infrastructure','root-dns','vpc'],'cluster-services':['cluster-infrastructure','vpc'],'security':['cluster-infrastructure','vpc'],'datagovuk-infra':['cluster-infrastructure','vpc'],'release':['cluster-infrastructure'],'synthetic-test':['cluster-infrastructure'],'cluster-access':['cluster-infrastructure'],'govuk-reports':['cluster-infrastructure'],'cluster-infrastructure':['logging','root-dns','vpc'],'csp-reporter':['root-dns'],'root-dns':['vpc'],'logging':['vpc']};
+  var sys=document.getElementById('sys'),pos={},ys=[30,118,232,318,388],W=1000;
+  var tray=document.createElement('div');tray.className='shelf';tray.style.cssText='left:auto;right:12px;bottom:auto;top:12px;width:190px;height:auto;flex-direction:column;align-items:flex-start;padding:10px 12px;gap:4px';
+  tray.innerHTML='<b>Not linked · 17</b><span>github · ecr · cloudfront</span><span>search-api-v2 · gcp-gov-graph</span><span>tfc-bootstrap · tfc-configuration</span><span>mobile-backend · sentry · …</span>';
+  sys.appendChild(tray);
+  L.forEach(function(row,ri){
+    var n=row.length, span=760, x0=20, gap=n>1?span/n:0;
+    row.forEach(function(w,i){
+      var el=document.createElement('div');el.className='ws'+(w[2]===1?' big':'')+(w[2]===2?' hl':'');el.innerHTML=w[0]+'<small>'+w[1]+'</small>';
+      el.style.top=(ri===1?ys[1]+(i%2)*40:ys[ri])+'px';
+      sys.appendChild(el);
+      var wd=el.offsetWidth||120;
+      var cx=n===1?400:x0+gap*i+gap/2;
+      el.style.left=Math.max(14,cx-wd/2)+'px';
+      pos[w[0]]={x:cx,y:parseFloat(el.style.top),h:el.offsetHeight||26};
+    });
+  });
+  var svg='<svg class="links" width="1000" height="440" viewBox="0 0 1000 440">';
+  Object.keys(deps).forEach(function(a){deps[a].forEach(function(b){var p=pos[a],q=pos[b];if(!p||!q)return;var hl=(a==='chat');svg+='<path d="M'+p.x+' '+(p.y+p.h)+' C'+p.x+' '+(p.y+p.h+40)+' '+q.x+' '+(q.y-40)+' '+q.x+' '+q.y+'" style="'+(hl?'stroke:var(--accent);opacity:1;stroke-width:2':'opacity:.35')+'"/>';});});
+  sys.insertAdjacentHTML('beforeend',svg+'</svg>');
+})();
+</script>
