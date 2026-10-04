@@ -55,10 +55,7 @@ struct ContentView: View {
     @StateObject var workspace: Workspace
 
     init() {
-        let demo = ProcessInfo.processInfo.arguments.contains("--map-demo") || Bundle.main.object(forInfoDictionaryKey: "HabitableMapDemo") as? Bool == true
-        let model = Workspace(restoreLastDirectory: !demo)
-        if demo { model.loadMapDemo() }
-        _workspace = StateObject(wrappedValue: model)
+        _workspace = StateObject(wrappedValue: Workspace())
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
@@ -161,7 +158,7 @@ struct ContentView: View {
 
     private var windowContent: some View {
         Group {
-            if workspace.workingDirectory == nil && !workspace.isMapDemo && selection != .hcpTerraform {
+            if workspace.workingDirectory == nil && selection != .hcpTerraform {
                 BlankSlateView(recentFolders: recentWorkspaces.folders,
                                onChooseFolder: openFolder,
                                onOpenRecent: openRecent,
