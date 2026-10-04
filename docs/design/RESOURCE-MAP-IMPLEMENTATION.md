@@ -168,3 +168,26 @@ workspace returned the fixed Map-loading error. Diagnosis requires private state
 inspection and is awaiting explicit workspace approval; automatic approval review
 blocked the proposed diagnostic request. No diagnostic state payload was retrieved.
 This replaces the earlier assumption that only a routine HCP smoke test remained.
+
+## HCP live-loading fix
+
+With explicit user approval, read-only diagnosis found that both state download
+endpoints return HTTP 302 to archivist.terraform.io. The ordinary API redirect
+policy correctly refused to forward a credential across origins, but that policy
+also prevented the Map from downloading the artifacts.
+
+State downloads from app.terraform.io now use a dedicated per-task redirect
+policy, restricted to GET requests from /api/state-versions/ and the exact
+archivist.terraform.io HTTPS/443 destination without URL userinfo. A fresh GET
+request preserves the artifact URL but carries no original headers, cookies, or
+body. Ordinary API redirects and Enterprise behavior remain unchanged.
+
+The approved real workspace now loads 17 groups and 57 managed resources in the
+native preview. Refresh and resource-card selection also passed. No infrastructure
+changes were made and private state values were not written to diagnostic logs.
+The prior HCP loading blocker is resolved. Other regions and Enterprise remain
+unverified live. Latest preview: /tmp/Habitable Map Cloud Review.app, isolated
+bundle ID com.thrashr888.Habitable.map-cloud-review.
+
+Final validation: 246 model tests executed, 8 optional skips, zero failures;
+native Debug and signed preview builds pass.
