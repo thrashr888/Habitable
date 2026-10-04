@@ -1,5 +1,13 @@
 import SwiftUI
 
+private struct MapTileBounds: PreferenceKey {
+    static var defaultValue: [String: Anchor<CGRect>] { [:] }
+
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
 private extension MapKind {
     var title: String {
         switch self {
@@ -85,6 +93,15 @@ struct ResourceMapContent: View {
             $0.resources.contains { $0.localizedCaseInsensitiveContains(search) } }
     }
 
+    private var selectedConnections: [MapConnection] {
+        guard let selectedTileID else { return [] }
+        let visibleIDs = Set(visibleTiles.map(\.id))
+        return (map?.connections ?? []).filter {
+            ($0.source == selectedTileID || $0.target == selectedTileID) &&
+            visibleIDs.contains($0.source) && visibleIDs.contains($0.target)
+        }.sorted { ($0.source, $0.target) < ($1.source, $1.target) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -139,6 +156,10 @@ struct ResourceMapContent: View {
                 }
             }
             .padding(8).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            if selectedTileID != nil {
+                Label("Arrows point to dependencies · Dashed lines are groups that use this one", systemImage: "arrow.turn.down.right")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let notice {
                 Label(notice, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
             }
@@ -170,18 +191,64 @@ struct ResourceMapContent: View {
                                     Text("\(row.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                                 }
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], alignment: .leading, spacing: 12) {
-                                    ForEach(row, id: \.id) { tile in tileButton(tile).id(tile.id) }
+                                    ForEach(row, id: \.id) { tile in
+                                        tileButton(tile).id(tile.id)
+                                            .anchorPreference(key: MapTileBounds.self, value: .bounds) { [tile.id: $0] }
+                                    }
                                 }
                             }
                         }
                     }
-                }.padding(24)
+                }
+                .padding(.leading, 44).padding(.trailing, 24).padding(.vertical, 24)
+                .backgroundPreferenceValue(MapTileBounds.self) { bounds in
+                    GeometryReader { geometry in
+                        connectionLines(bounds: bounds, geometry: geometry)
+                    }
+                    .allowsHitTesting(false).accessibilityHidden(true)
+                }
             }
         }
         .background(Color(nsColor: .underPageBackgroundColor))
         .onChange(of: selectedTileID) { id in
             if let id { proxy.scrollTo(id, anchor: .center) }
         }
+        }
+    }
+
+    /// Route through the space above each grid row and the reserved left gutter.
+    /// Missing lazy-grid anchors are omitted; the inspector always lists every connection.
+    private func connectionLines(bounds: [String: Anchor<CGRect>], geometry: GeometryProxy) -> some View {
+        Canvas { context, _ in
+            for (index, connection) in selectedConnections.enumerated() {
+                guard let sourceAnchor = bounds[connection.source], let targetAnchor = bounds[connection.target] else { continue }
+                let source = geometry[sourceAnchor]
+                let target = geometry[targetAnchor]
+                let start = CGPoint(x: source.midX, y: source.minY)
+                let end = CGPoint(x: target.midX, y: target.minY)
+                let sourceTrack = source.minY - 6
+                let targetTrack = target.minY - 6
+                let gutter = CGFloat(12 + (index % 6) * 4)
+                var line = Path()
+                line.move(to: start)
+                line.addLine(to: CGPoint(x: start.x, y: sourceTrack))
+                if abs(sourceTrack - targetTrack) > 1 {
+                    line.addLine(to: CGPoint(x: gutter, y: sourceTrack))
+                    line.addLine(to: CGPoint(x: gutter, y: targetTrack))
+                }
+                line.addLine(to: CGPoint(x: end.x, y: targetTrack))
+                line.addLine(to: end)
+                let isDependency = connection.source == selectedTileID
+                let color = isDependency ? Color.accentColor : Color.secondary
+                context.stroke(line, with: .color(color.opacity(0.8)),
+                               style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round,
+                                                  dash: isDependency ? [] : [4, 3]))
+                var arrow = Path()
+                arrow.move(to: CGPoint(x: end.x - 3, y: end.y - 4))
+                arrow.addLine(to: end)
+                arrow.addLine(to: CGPoint(x: end.x + 3, y: end.y - 4))
+                context.stroke(arrow, with: .color(color), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+            }
         }
     }
 
