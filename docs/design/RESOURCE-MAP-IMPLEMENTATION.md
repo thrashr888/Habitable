@@ -119,3 +119,19 @@ real-account HCP smoke test remain outstanding under Habitable-q7i. No real HCP
 state was accessed during this implementation.
 
 API contract: https://developer.hashicorp.com/terraform/cloud-docs/api-docs/state-versions
+
+## Selected-group canvas connections
+
+Selecting a group now draws arrows to its visible dependencies and dashed arrows
+from groups that use it. Arrowheads point to the dependency. Connections follow
+the space above grid rows and a reserved left gutter; native card controls retain
+keyboard navigation and the inspector remains the complete accessible connection
+list. Search omits edges to filtered groups. Lazy-grid tiles without layout anchors
+are omitted from drawing until laid out. Workspace changes clear selection.
+
+Validation: 12 Map regression tests pass; the native Debug build, preview packaging,
+and signature verification pass. Latest pre-change CI also passed. Native app
+automation timed out on both the prior and new preview, so visual verification
+of arrows at different widths, scrolling, and search remains under Habitable-cbk.
+This first renderer shares routes for dense graphs; crossing minimization remains
+part of Habitable-fee.
