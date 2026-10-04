@@ -410,3 +410,11 @@ Final combined verification: 217 core tests executed, two expected opt-in skips,
 
 
 After launch, native inspection reconnected to the actual development candidate. Its current HCP screen displayed the selected remote workspace/run, finished plan/apply phases, HCP review links and downloaded logs, with the sidebar and plain workspace title present. The user was actively changing the app selection, so inspection remained read-only and did not interrupt the session. This is limited current-screen evidence, not the full native acceptance matrix. The live logs contain Terraform NDJSON mixed with preamble/framing text: native structured HCP rendering and clearer loaded-versus-total counts were filed as follow-up, alongside portable stdio bridge and general credential-file onboarding. The release hold remains.
+
+## Progress release 0.5.0 — October 3
+
+The user explicitly requested release of the current candidate, superseding the earlier appearance hold for this version. Source tag `v0.5.0` points to `1a4d90f`. Both the Habitable repository release and the tap release `habitable-v0.5.0` publish the same Developer ID signed, Apple-notarized, stapled universal archive and checksum manifest. The tap cask was updated and Homebrew successfully upgraded the installed app from 0.4.6 to 0.5.0.
+
+Release verification: 217 tests executed with real Terraform 1.16.5 and official-release downloads enabled; zero failures, one optional navigation benchmark skipped. Universal optimized Xcode build, nested helper signing, architecture checks, Apple notarization, stapling, Gatekeeper assessment and ZIP checksum verification passed. Archive SHA-256: `468f6c24228b45f15d051fcb49399b36bf6573f935bbf05a0ba1efdab36b5eed`.
+
+Release authorization does not close the broader visual, keyboard or VoiceOver acceptance review. Remaining AppKit actor-isolation build warnings are tracked separately under Habitable-crj. HCP structured logs and agent connection follow-ups remain open.
