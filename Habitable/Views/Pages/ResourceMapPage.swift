@@ -140,9 +140,9 @@ struct ResourceMapContent: View {
                 }
                 Spacer()
                 Menu {
-                    Button("75%") { canvasZoom = 0.75 }
                     Button("100%") { canvasZoom = 1 }
                     Button("125%") { canvasZoom = 1.25 }
+                    Button("150%") { canvasZoom = 1.5 }
                 } label: { Text("\(Int(canvasZoom * 100))%") }
                 .accessibilityLabel("Map zoom")
                 Toggle(isOn: $showsConnections) { Image(systemName: "point.3.connected.trianglepath.dotted") }
@@ -200,12 +200,12 @@ struct ResourceMapContent: View {
                         ZStack(alignment: .topLeading) {
                             canvasBackground(layout)
                             if !references.isEmpty {
-                                Text("WORKSPACE REFERENCES").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                                Text("WORKSPACE REFERENCES").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                                     .offset(x: 20, y: layout.height + 16)
                                 ForEach(Array(references.enumerated()), id: \.element.address) { index, reference in
                                     Button { selectedReference = reference.address } label: {
                                         Label(reference.name.replacingOccurrences(of: "_", with: " "), systemImage: "link")
-                                            .font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                                            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
                                             .foregroundStyle(Color.accentColor).padding(.horizontal, 12).padding(.vertical, 7)
                                             .background(Color.accentColor.opacity(0.09), in: Capsule())
                                             .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.4)))
@@ -271,11 +271,11 @@ struct ResourceMapContent: View {
                     .frame(width: layout.width - 16, height: band.height)
                     .offset(x: 8, y: band.y)
                 Text(band.kind.title.uppercased())
-                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                     .offset(x: 20, y: band.y + 10)
                 if !visibleTiles.contains(where: { $0.kind == band.kind }) {
                     Text(search.isEmpty ? "No resources of this kind in this workspace." : "No matches in this row.")
-                        .font(.caption).foregroundStyle(.tertiary)
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
                         .offset(x: 210, y: band.y + 28)
                 }
             }
@@ -403,9 +403,9 @@ struct ResourceMapContent: View {
                     .foregroundStyle(.white).frame(width: 34, height: 34)
                     .background(tile.kind.color, in: RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(tile.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
-                    Text(category(for: tile)).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                    Text(composition(for: tile)).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(2)
+                    Text(tile.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                    Text(category(for: tile)).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(composition(for: tile)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 0)
             }
@@ -421,7 +421,7 @@ struct ResourceMapContent: View {
             }
             .overlay(alignment: .topTrailing) {
                 if copies > 1 {
-                    Text("×\(copies)").font(.system(size: 10, weight: .bold)).monospacedDigit()
+                    Text("×\(copies)").font(.system(size: 12, weight: .bold)).monospacedDigit()
                         .foregroundStyle(Color(nsColor: .windowBackgroundColor))
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(Color.primary, in: Capsule()).offset(x: 5, y: -7)

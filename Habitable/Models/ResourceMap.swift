@@ -75,8 +75,8 @@ struct MapCanvasLayout: Equatable, Sendable {
 
     init(map: ResourceMap, width requestedWidth: Double) {
         let minimumWidth = 680.0
-        let tileWidth = 224.0
-        let tileHeight = 106.0
+        let tileWidth = 264.0
+        let tileHeight = 120.0
         let horizontalInset = 28.0
         let tileGap = 70.0
         let rowGap = 26.0

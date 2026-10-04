@@ -198,7 +198,7 @@ final class ResourceMapTests: XCTestCase {
             width: 680
         )
         XCTAssertEqual(withOther.bands.map(\.kind), MapKind.allCases)
-        XCTAssertEqual(withOther.bands.last?.height, 164)
+        XCTAssertEqual(withOther.bands.last?.height, 178)
     }
 
     func testWorkspaceReferencesUseOnlyExplicitRemoteStateDependencies() throws {
