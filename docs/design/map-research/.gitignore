@@ -1,0 +1,5 @@
+aws/
+google/
+azurerm/
+corpus/
+__pycache__/

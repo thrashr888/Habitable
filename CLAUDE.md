@@ -68,3 +68,7 @@ _Add a brief overview of your project architecture_
 ## Conventions & Patterns
 
 _Add your project-specific conventions here_
+
+## Design Direction
+
+The app is mid design refresh. Before UI or product work, read `docs/design/DECISIONS.md` (settled decisions: Map-first, no IDE, HCP Terraform writes via GitHub PRs or the API, macOS 27 only, Terraform purple accent) and `docs/design/README.md` for the explorations and the resource map RFC.

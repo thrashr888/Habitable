@@ -1,0 +1,1098 @@
+<title>Habitable Design Refresh</title>
+<style>
+/* Layout: a long-scroll design review. Prose column at 68ch, full-bleed macOS window mockups scaled to fit, captions beneath each. */
+:root{
+  --page:#f5f5f7; --ink:#1d1d1f; --ink2:#6e6e73; --ink3:#a1a1a6; --rule:#d2d2d7;
+  --win:#ffffff; --chrome:#f6f6f8; --side:#ececf0; --sel:#7b42bc; --selbg:#ece3f7; --hair:rgba(0,0,0,.09);
+  --canvas:#fbfbfd; --dot:rgba(0,0,0,.07); --tile:#ffffff; --tileline:rgba(0,0,0,.08);
+  --accent:#7b42bc; --add:#1f9d55; --chg:#d98a00; --del:#d63a2f; --rep:#d6336c;
+  --c-edge:#0a84ff; --c-compute:#ff9f0a; --c-data:#30b0c7; --c-net:#34c759; --c-id:#bf5af2;
+  --frame:rgba(123,66,188,.035); --frameline:rgba(0,0,0,.06);
+  --shadow:0 30px 60px -20px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.18);
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --page:#0b0b0d; --ink:#f5f5f7; --ink2:#a1a1a6; --ink3:#6e6e73; --rule:#2c2c2e;
+  --win:#1e1e20; --chrome:#2a2a2d; --side:#252528; --sel:#a067da; --selbg:#3a2a52; --hair:rgba(255,255,255,.09);
+  --canvas:#19191b; --dot:rgba(255,255,255,.06); --tile:#2a2a2d; --tileline:rgba(255,255,255,.08);
+  --accent:#a067da; --add:#30d158; --chg:#ffb340; --del:#ff6961; --rep:#ff6b9a;
+  --frame:rgba(160,103,218,.05); --frameline:rgba(255,255,255,.07);
+  --shadow:0 30px 60px -20px rgba(0,0,0,.7),0 0 0 .5px rgba(255,255,255,.14);
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --page:#0b0b0d; --ink:#f5f5f7; --ink2:#a1a1a6; --ink3:#6e6e73; --rule:#2c2c2e;
+  --win:#1e1e20; --chrome:#2a2a2d; --side:#252528; --sel:#a067da; --selbg:#3a2a52; --hair:rgba(255,255,255,.09);
+  --canvas:#19191b; --dot:rgba(255,255,255,.06); --tile:#2a2a2d; --tileline:rgba(255,255,255,.08);
+  --accent:#a067da; --add:#30d158; --chg:#ffb340; --del:#ff6961; --rep:#ff6b9a;
+  --frame:rgba(160,103,218,.05); --frameline:rgba(255,255,255,.07);
+  --shadow:0 30px 60px -20px rgba(0,0,0,.7),0 0 0 .5px rgba(255,255,255,.14);
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;padding-inline:20px;padding-block:0 80px;-webkit-font-smoothing:antialiased}
+.col{max-width:720px;margin:0 auto}
+.wide{max-width:1240px;margin:0 auto}
+header.hero{padding-block:72px 40px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:600}
+h1{font-family:var(--display);font-size:clamp(40px,7vw,72px);line-height:1.02;letter-spacing:-.035em;margin:.25em 0 .3em;font-weight:700;text-wrap:balance}
+h1 span{color:var(--ink3)}
+h2{font-family:var(--display);font-size:clamp(28px,4vw,40px);letter-spacing:-.025em;line-height:1.1;margin:0 0 .4em;text-wrap:balance}
+h3{font-size:17px;margin:0 0 .3em;letter-spacing:-.01em}
+p{margin:0 0 1em;color:var(--ink)}
+.lede{font-size:clamp(18px,2.2vw,21px);line-height:1.45;color:var(--ink2);max-width:62ch}
+section{padding-block:56px 8px}
+.muted{color:var(--ink2)}
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--page) 82%,transparent);backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px);border-bottom:.5px solid var(--rule);margin-inline:-20px;padding:10px 20px;overflow-x:auto;white-space:nowrap}
+nav.toc a{color:var(--ink2);text-decoration:none;font-size:13px;margin-right:18px}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--ink)}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* Principle grid */
+.principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:28px 32px;margin-top:28px}
+.principles div{min-width:0}
+.principles b{display:block;font-size:17px;margin-bottom:4px;letter-spacing:-.01em}
+.principles p{color:var(--ink2);font-size:14.5px;margin:0}
+
+/* Mapping table */
+.tablewrap{overflow-x:auto;margin-top:20px}
+table.map{border-collapse:collapse;width:100%;font-size:14px;min-width:620px}
+table.map th{text-align:left;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);font-weight:600;padding:8px 12px 8px 0;border-bottom:.5px solid var(--rule)}
+table.map td{padding:11px 12px 11px 0;border-bottom:.5px solid var(--rule);vertical-align:top}
+table.map td:first-child{font-weight:600;white-space:nowrap}
+table.map td.arrow{color:var(--ink3);width:24px}
+.tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:99px;background:var(--side);color:var(--ink2);margin-left:6px;font-weight:500}
+
+/* Inventory list */
+.inv{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:22px}
+.inv article{background:var(--win);border-radius:14px;padding:16px 18px;box-shadow:0 0 0 .5px var(--hair);min-width:0}
+.inv h3{font-size:15px;display:flex;justify-content:space-between;gap:8px}
+.inv h3 small{font-weight:500;color:var(--ink3);font-size:12px;font-family:var(--mono)}
+.inv p{font-size:13.5px;color:var(--ink2);margin:0 0 .5em}
+.inv p.issue{color:var(--ink);font-size:13px}
+.inv p.issue::before{content:"Friction  ";color:var(--chg);font-weight:600;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:28px 24px;margin-top:26px}
+.shots.two{grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr))}
+.shots figure{margin:0;min-width:0}
+.shots img{display:block;width:100%;border-radius:10px;box-shadow:0 0 0 .5px var(--hair),0 12px 30px -14px rgba(0,0,0,.35);background:var(--side)}
+.shots.two img{max-height:520px;object-fit:cover;object-position:top}
+.shots figcaption{font-size:13.5px;color:var(--ink2);margin-top:12px;display:grid;gap:4px}
+.shots figcaption b{color:var(--ink);font-size:15px}
+.shots .issue,.shots .borrow{color:var(--ink)}
+.shots .issue::before{content:"Friction  ";color:var(--chg);font-weight:600;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.shots .borrow::before{content:"Borrow  ";color:var(--add);font-weight:600;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.steps{display:grid;gap:0}
+.st{display:grid;grid-template-columns:18px 1fr;gap:10px;position:relative;padding-bottom:10px}
+.st:not(:last-child)::after{content:"";position:absolute;left:8px;top:16px;bottom:0;width:2px;background:var(--hair)}
+.st.done:not(:last-child)::after{background:var(--add)}
+.st i{width:18px;height:18px;border-radius:50%;box-shadow:inset 0 0 0 2px var(--ink3);display:block;background:var(--win);position:relative;z-index:1}
+.st.done i{background:var(--add);box-shadow:none}
+.st.now i{box-shadow:inset 0 0 0 5px var(--accent)}
+.st b{display:block;font-size:12.5px}
+.st small{display:block;font-size:11px;color:var(--ink2)}
+.st:not(.done):not(.now) b{color:var(--ink2)}
+/* Stage + window */
+.stage{position:relative;width:100%;margin-top:28px}
+.stage .scaler{position:absolute;left:0;top:0;transform-origin:0 0}
+.cap{max-width:720px;margin:22px auto 0;font-size:14.5px;color:var(--ink2)}
+.cap b{color:var(--ink)}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px 28px;max-width:1000px;margin:26px auto 0}
+.notes div{font-size:13.5px;color:var(--ink2);min-width:0}
+.notes b{color:var(--ink);display:block;font-size:14px;margin-bottom:2px}
+
+.win{width:1200px;height:760px;background:var(--win);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;font-size:13px;line-height:1.35;color:var(--ink);position:relative}
+.tb{height:52px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px 0 18px;background:var(--chrome);border-bottom:.5px solid var(--hair)}
+.lights{display:flex;gap:8px;margin-right:12px}
+.lights i{width:12px;height:12px;border-radius:50%;display:block;background:#ff5f57;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.15)}
+.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.tbtitle{display:flex;flex-direction:column;line-height:1.15}
+.tbtitle b{font-size:13.5px}
+.tbtitle span{font-size:11px;color:var(--ink2)}
+.sp{flex:1}
+.tbbtn{height:28px;min-width:28px;padding:0 10px;border-radius:7px;display:inline-flex;align-items:center;gap:6px;color:var(--ink2);font-size:12.5px}
+.tbbtn svg{width:16px;height:16px}
+.tbbtn.prim{background:var(--accent);color:#fff;font-weight:600;padding:0 13px}
+.tbbtn.bord{box-shadow:0 0 0 .5px var(--hair);background:var(--win);color:var(--ink)}
+.seg{display:inline-flex;background:var(--side);border-radius:8px;padding:2px;gap:2px}
+.seg span{padding:4px 12px;border-radius:6px;font-size:12px;color:var(--ink2);font-weight:500}
+.seg span.on{background:var(--win);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.search{width:200px;height:28px;border-radius:7px;background:var(--side);display:flex;align-items:center;gap:6px;padding:0 9px;color:var(--ink3);font-size:12.5px}
+.search svg{width:13px;height:13px}
+.loc{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;background:var(--side);color:var(--ink2)}
+.loc svg{width:12px;height:12px}
+
+.body{flex:1;display:flex;min-height:0}
+.side{width:236px;flex:none;background:var(--side);border-right:.5px solid var(--hair);padding:10px 10px;overflow:hidden}
+.sh{font-size:11px;font-weight:600;color:var(--ink3);padding:12px 8px 5px;letter-spacing:.01em}
+.row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:13px;color:var(--ink)}
+.row .ct{margin-left:auto;color:var(--ink3);font-size:11.5px;font-variant-numeric:tabular-nums}
+.row.on{background:var(--selbg)}
+.row .ic{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;color:#fff;flex:none}
+.row .ic svg{width:12px;height:12px}
+.row .gl{width:16px;height:16px;color:var(--accent);flex:none}
+.row.sub{padding-left:22px;font-size:12.5px;color:var(--ink2)}
+.dotst{width:7px;height:7px;border-radius:50%;flex:none}
+
+/* Canvas */
+.canvas{flex:1;position:relative;background-color:var(--canvas);background-image:radial-gradient(var(--dot) 1px,transparent 1.2px);background-size:18px 18px;overflow:hidden;min-width:0}
+.frm{position:absolute;border-radius:18px;background:var(--frame);box-shadow:inset 0 0 0 1px var(--frameline)}
+.frm>label{position:absolute;top:10px;left:14px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink3)}
+.node{position:absolute;width:168px;height:58px;background:var(--tile);border-radius:13px;box-shadow:0 0 0 .5px var(--tileline),0 1px 2px rgba(0,0,0,.06),0 4px 12px -4px rgba(0,0,0,.08);display:flex;align-items:center;gap:10px;padding:0 12px;z-index:2}
+.node .sq{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:#fff;flex:none}
+.node .sq svg{width:18px;height:18px}
+.node b{display:block;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node small{display:block;font-size:11px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .txt{min-width:0;flex:1}
+.node.sel{box-shadow:0 0 0 2.5px var(--accent),0 8px 20px -6px rgba(123,66,188,.35)}
+.node .badge{position:absolute;top:-7px;right:-7px;min-width:20px;height:20px;border-radius:10px;font-size:12px;font-weight:700;color:#fff;display:grid;place-items:center;padding:0 5px;box-shadow:0 0 0 2px var(--canvas)}
+.node.add{box-shadow:0 0 0 1.5px var(--add);background:color-mix(in srgb,var(--add) 7%,var(--tile));border:none}
+.node.add.ghost{opacity:.95;outline:1.5px dashed var(--add);outline-offset:3px}
+.node.chg{box-shadow:0 0 0 1.5px var(--chg)}
+.node.rep{box-shadow:0 0 0 1.5px var(--rep)}
+.node.del{box-shadow:0 0 0 1.5px var(--del);opacity:.6}
+.node.del b{text-decoration:line-through}
+.node.dim{opacity:.38}
+.links{position:absolute;inset:0;z-index:1;pointer-events:none}
+.links path{fill:none;stroke:var(--ink3);stroke-width:1.3;opacity:.6}
+.links path.hot{stroke:var(--accent);opacity:1;stroke-width:1.8}
+.links path.newl{stroke:var(--add);stroke-dasharray:4 4;opacity:1}
+.canvasbar{position:absolute;left:14px;bottom:14px;display:flex;gap:6px;z-index:3}
+.chip{background:var(--tile);box-shadow:0 0 0 .5px var(--tileline),0 2px 6px -2px rgba(0,0,0,.12);border-radius:8px;padding:5px 10px;font-size:11.5px;color:var(--ink2);display:inline-flex;gap:6px;align-items:center}
+.chip b{color:var(--ink);font-weight:600}
+.zoom{position:absolute;right:14px;bottom:14px;z-index:3}
+
+/* Inspector */
+.insp{width:300px;flex:none;border-left:.5px solid var(--hair);background:var(--win);overflow:hidden;display:flex;flex-direction:column}
+.ihead{padding:18px 18px 14px;display:flex;gap:12px;align-items:center}
+.ihead .sq{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;color:#fff;flex:none}
+.ihead .sq svg{width:26px;height:26px}
+.ihead b{display:block;font-size:16px;letter-spacing:-.01em}
+.ihead small{display:block;font-size:11.5px;color:var(--ink2)}
+.isec{padding:10px 18px;border-top:.5px solid var(--hair)}
+.isec h4{margin:2px 0 8px;font-size:11px;color:var(--ink3);font-weight:600;letter-spacing:.02em}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:5px 10px;font-size:12.5px}
+.kv dt{color:var(--ink2)}
+.kv dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv dd.m{font-family:var(--mono);font-size:11.5px}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}
+.lnk{color:var(--accent);font-size:12.5px;display:flex;align-items:center;gap:6px;padding:3px 0}
+.lnk svg{width:13px;height:13px}
+.conn{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12.5px}
+.conn .ic{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;color:#fff}
+.conn .ic svg{width:12px;height:12px}
+.conn span.rel{margin-left:auto;color:var(--ink3);font-size:11px}
+.spark{display:flex;gap:3px;align-items:flex-end;height:26px}
+.spark i{width:6px;border-radius:2px;background:var(--side);display:block}
+
+/* Timeline */
+.tl{height:150px;flex:none;border-top:.5px solid var(--hair);background:var(--chrome);position:relative;padding:10px 18px 0}
+.tlh{display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--ink2);height:22px}
+.tlh b{color:var(--ink);font-size:12px}
+.track{position:relative;height:96px;margin-top:6px}
+.ruler{position:absolute;left:0;right:0;top:0;height:16px;font-size:10px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.ruler span{position:absolute;top:0}
+.lane{position:absolute;left:0;right:0;top:22px;height:58px;border-radius:10px;background:var(--side)}
+.clip{position:absolute;top:24px;height:54px;border-radius:9px;background:var(--tile);box-shadow:0 0 0 .5px var(--tileline),0 2px 6px -2px rgba(0,0,0,.15);padding:6px 9px;overflow:hidden;font-size:11px}
+.clip b{display:block;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clip small{color:var(--ink2);font-variant-numeric:tabular-nums}
+.clip .bar{position:absolute;left:0;right:0;bottom:0;height:4px;display:flex}
+.clip .bar i{display:block;height:100%}
+.clip.sel{box-shadow:0 0 0 2px var(--accent)}
+.playhead{position:absolute;top:14px;bottom:4px;width:2px;background:var(--del);border-radius:1px;z-index:3}
+.playhead::before{content:"";position:absolute;top:-4px;left:-5px;width:12px;height:10px;background:var(--del);clip-path:polygon(0 0,100% 0,50% 100%)}
+.drift{position:absolute;top:36px;width:24px;height:24px;transform:rotate(45deg);background:var(--chg);border-radius:5px;z-index:2;box-shadow:0 0 0 3px color-mix(in srgb,var(--chg) 25%,transparent)}
+
+/* Review bar */
+.review{height:150px;flex:none;border-top:.5px solid var(--hair);background:var(--chrome);display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:12px 20px;padding:14px 20px;align-content:center}
+.review .warn{grid-column:1 / -1;grid-row:2}
+.counts{display:flex;gap:22px}
+.counts div{display:flex;flex-direction:column}
+.counts b{font-size:26px;font-family:var(--display);letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+.counts small{font-size:11.5px;color:var(--ink2);margin-top:4px}
+.warn{flex:1;background:color-mix(in srgb,var(--rep) 10%,var(--win));border-radius:12px;padding:12px 14px;font-size:12.5px;box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--rep) 40%,transparent);min-width:0}
+.warn b{color:var(--rep)}
+.hold{position:relative;height:40px;padding:0 20px;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:8px;overflow:hidden}
+.hold .prog{position:absolute;left:0;top:0;bottom:0;width:38%;background:rgba(255,255,255,.22)}
+.hold span{position:relative}
+
+/* Diff rows */
+.diff{font-size:12.5px;display:grid;gap:8px}
+.diff .d{display:grid;gap:2px}
+.diff .d small{color:var(--ink2);font-size:11px}
+.diff .from{color:var(--ink3);text-decoration:line-through}
+.diff .to{font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;border-radius:99px;padding:2px 8px}
+
+/* Library */
+.lib{flex:1;padding:22px 26px;overflow:hidden;background:var(--win)}
+.libhead{display:flex;align-items:baseline;gap:12px;margin-bottom:16px}
+.libhead h5{font-family:var(--display);font-size:22px;margin:0;letter-spacing:-.02em}
+.attn{display:flex;gap:12px;margin-bottom:20px}
+.attn .a{flex:1;border-radius:12px;padding:11px 14px;display:flex;gap:10px;align-items:center;font-size:12.5px;background:var(--side);min-width:0}
+.attn .a svg{width:20px;height:20px;flex:none}
+.attn .a b{display:block}
+.attn .a small{color:var(--ink2)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.card{border-radius:14px;background:var(--win);box-shadow:0 0 0 .5px var(--tileline),0 2px 10px -4px rgba(0,0,0,.12);overflow:hidden}
+.thumb{height:128px;background-color:var(--canvas);background-image:radial-gradient(var(--dot) 1px,transparent 1.2px);background-size:12px 12px;position:relative}
+.thumb svg{position:absolute;inset:0;width:100%;height:100%}
+.card .meta{padding:10px 13px 12px}
+.card .meta b{font-size:13.5px;display:flex;align-items:center;gap:6px}
+.card .meta small{display:block;color:var(--ink2);font-size:11.5px;margin-top:2px}
+.card .foot{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11.5px}
+.prov{width:18px;height:18px;border-radius:5px;font-size:9px;font-weight:700;color:#fff;display:grid;place-items:center}
+.card.sel{box-shadow:0 0 0 2.5px var(--accent)}
+
+/* Sheet / chooser */
+.dim{position:absolute;inset:52px 0 0 0;background:rgba(0,0,0,.18);z-index:8}
+.sheet{position:absolute;left:50%;top:52px;transform:translateX(-50%);width:860px;height:600px;background:var(--win);border-radius:0 0 14px 14px;box-shadow:0 30px 70px -20px rgba(0,0,0,.45),0 0 0 .5px var(--hair);z-index:9;display:flex;flex-direction:column;overflow:hidden}
+.sheet .sb{display:flex;flex:1;min-height:0}
+.sheet .sl{width:200px;background:var(--side);padding:14px 10px}
+.sheet .sm{flex:1;padding:22px 24px;overflow:hidden}
+.sheet .sf{height:56px;border-top:.5px solid var(--hair);display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:0 18px}
+.tgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:14px}
+.tcard{border-radius:14px;overflow:hidden;box-shadow:0 0 0 .5px var(--tileline);background:var(--win)}
+.tcard .art{height:120px;display:grid;place-items:center;position:relative}
+.tcard .art svg{width:100%;height:100%}
+.tcard .tm{padding:9px 12px 11px}
+.tcard .tm b{font-size:13px}
+.tcard .tm small{display:block;font-size:11.5px;color:var(--ink2);line-height:1.35;margin-top:2px}
+.tcard.sel{box-shadow:0 0 0 2.5px var(--accent)}
+.cost{font-size:11px;color:var(--ink3);margin-top:6px;display:block;font-variant-numeric:tabular-nums}
+
+/* Table / palette */
+.tblv{flex:1;overflow:hidden;background:var(--win);display:flex;flex-direction:column}
+.filters{display:flex;gap:6px;padding:10px 14px;border-bottom:.5px solid var(--hair);align-items:center}
+.tok{font-size:12px;padding:3px 9px;border-radius:6px;background:var(--selbg);color:var(--accent);font-weight:500;font-family:var(--mono)}
+table.res{width:100%;border-collapse:collapse;font-size:12.5px}
+table.res th{text-align:left;font-weight:600;color:var(--ink2);font-size:11.5px;padding:7px 12px;border-bottom:.5px solid var(--hair);background:var(--chrome)}
+table.res td{padding:7px 12px;border-bottom:.5px solid var(--hair);white-space:nowrap}
+table.res tr:nth-child(even) td{background:color-mix(in srgb,var(--side) 45%,transparent)}
+table.res td.m{font-family:var(--mono);font-size:11.5px;color:var(--ink2)}
+table.res tr.on td{background:var(--sel);color:#fff}
+table.res tr.on td.m{color:rgba(255,255,255,.85)}
+.pal{position:absolute;left:50%;top:110px;transform:translateX(-50%);width:600px;background:color-mix(in srgb,var(--win) 92%,transparent);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:16px;box-shadow:0 30px 80px -20px rgba(0,0,0,.5),0 0 0 .5px var(--hair);z-index:9;overflow:hidden}
+.pal .in{height:52px;display:flex;align-items:center;gap:10px;padding:0 18px;font-size:19px;border-bottom:.5px solid var(--hair)}
+.pal .in svg{width:20px;height:20px;color:var(--ink3)}
+.pal .grp{font-size:11px;font-weight:600;color:var(--ink3);padding:10px 18px 4px}
+.pal .it{display:flex;align-items:center;gap:10px;padding:7px 18px;font-size:13.5px}
+.pal .it.on{background:var(--accent);color:#fff}
+.pal .it.on small,.pal .it.on kbd{color:rgba(255,255,255,.85)}
+.pal .it small{color:var(--ink2);font-size:12px}
+.pal kbd{margin-left:auto;font-family:var(--sans);font-size:12px;color:var(--ink3)}
+.pal .it .ic{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;color:#fff;flex:none}
+.pal .it .ic svg{width:13px;height:13px}
+
+/* Popover */
+.pop{position:absolute;z-index:10;width:280px;background:var(--win);border-radius:12px;box-shadow:0 18px 50px -12px rgba(0,0,0,.4),0 0 0 .5px var(--hair);padding:14px 16px;font-size:12.5px}
+.pop::before{content:"";position:absolute;width:14px;height:14px;background:var(--win);transform:rotate(45deg);box-shadow:-.5px -.5px 0 0 var(--hair)}
+.pop.r::before{left:-7px;top:26px;box-shadow:-.5px .5px 0 0 var(--hair)}
+.pop b{display:block;font-size:13px;margin-bottom:4px}
+.pop p{font-size:12.5px;color:var(--ink2);margin:0 0 8px}
+
+/* Menu bar extra */
+.mbx{width:340px;background:color-mix(in srgb,var(--win) 90%,transparent);backdrop-filter:blur(20px);border-radius:12px;box-shadow:var(--shadow);padding:10px;font-size:13px}
+.mbx .mr{display:flex;gap:10px;align-items:center;padding:7px 8px;border-radius:8px}
+.mbx .mr small{display:block;color:var(--ink2);font-size:11.5px}
+.mbx .mr .r{margin-left:auto;font-size:11.5px;color:var(--ink2)}
+.mbx hr{border:0;border-top:.5px solid var(--hair);margin:6px 4px}
+.moments{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:28px;margin-top:28px;align-items:start}
+.moments>div{min-width:0}
+.moments p{color:var(--ink2);font-size:14px}
+.qs{counter-reset:q;display:grid;gap:14px;margin-top:20px}
+.qs div{background:var(--win);border-radius:12px;padding:14px 18px;box-shadow:0 0 0 .5px var(--hair)}
+.qs b{display:block;margin-bottom:2px}
+.qs span{color:var(--ink2);font-size:14px}
+@media (prefers-reduced-motion:no-preference){.playhead{animation:none}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></g></symbol>
+    <symbol id="i-sign" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 6h12l3 3-3 3H5z" fill="currentColor" fill-opacity=".25"/></g></symbol>
+    <symbol id="i-seal" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5l2.3 1.7 2.8-.2.9 2.7 2.4 1.5-.8 2.8.8 2.8-2.4 1.5-.9 2.7-2.8-.2L12 21.5l-2.3-1.7-2.8.2-.9-2.7-2.4-1.5.8-2.8-.8-2.8 2.4-1.5.9-2.7 2.8.2z"/><path d="M8.5 12l2.4 2.4 4.6-4.8"/></g></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h6l4-6h6M10 12l4 6h6M17 3l3 3-3 3M17 15l3 3-3 3"/></g></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></g></symbol>
+    <symbol id="i-db" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></g></symbol>
+    <symbol id="i-bucket" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 6h16l-2 14H6z"/><ellipse cx="12" cy="6" rx="8" ry="2.2"/></g></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z" fill="currentColor"/></symbol>
+    <symbol id="i-net" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="8.5" y="14" width="7" height="7" rx="2"/><path d="M6.5 10v2h11v-2M12 12v2"/></g></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 018 0v3"/></g></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.5 4.4-6.5 8-6.5s7 2 8 6.5"/></g></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v6c0 4.6-3.2 8-7.5 9-4.3-1-7.5-4.4-7.5-9V6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 16a8 8 0 1116 0"/><path d="M12 16l4-5"/></g></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/></g></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18h10.5a4 4 0 00.6-7.95A6 6 0 006.4 9.1 4.5 4.5 0 007 18z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4.5" y="5" width="15" height="10.5" rx="1.5"/><path d="M2.5 19h19"/></g></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M9 4.5v15"/></g></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></g></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17v.3" stroke-linecap="round"/></g></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.3"/></g></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></g></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M7 17L17 7M9 7h8v8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="col">
+<header class="hero">
+  <div class="eyebrow">Habitable · Design refresh · October 2026</div>
+  <h1>Manage infrastructure, <span>not code.</span></h1>
+  <p class="lede">A first-principles rethink of Habitable for newcomers and power users, local folders and HCP Terraform. Resources become the main thing you see and touch. Plans become a preview you watch on a live map. Configuration and runs step back into supporting roles.</p>
+</header>
+</div>
+
+<nav class="toc" aria-label="Sections">
+  <div class="wide">
+  <a href="#today">Today</a><a href="#principles">Principles</a><a href="#model">New model</a><a href="#library">Library</a><a href="#map">Map</a><a href="#preview">Preview changes</a><a href="#learn">Newcomers</a><a href="#power">Power users</a><a href="#new">New infrastructure</a><a href="#cloud">Cloud changes</a><a href="#moments">Signature details</a><a href="#questions">Decisions</a>
+  </div>
+</nav>
+
+<section id="today" class="wide">
+  <div class="col" style="margin:0">
+    <div class="eyebrow">Where we are</div>
+    <h2>The current app, screen by screen</h2>
+    <p class="muted">Paul's screenshots of the current build, with the friction each one shows. The app is a careful, correct wrapper around the Terraform CLI. It mirrors Terraform's own concepts one-to-one, which is exactly why it feels like managing code.</p>
+  </div>
+  <div class="shots">
+    <figure><img src="shots/workspace.jpg" alt="Current Workspace page" loading="lazy"><figcaption><b>Workspace</b>Status, latest run, Terraform details and command output in one reading column.<span class="issue">“Plan” and “Review run” render as plain grey text, so the most important action doesn't look clickable. Two thirds of the window is empty, and the run it highlights is an expired one with zero changes.</span></figcaption></figure>
+    <figure><img src="shots/resources.jpg" alt="Current Resources page" loading="lazy"><figcaption><b>Resources</b>A sortable table with four filter menus beside a metadata and attribute inspector.<span class="issue">Every address and provider is truncated (“module.child[&quot;eas…”, “terraform.io/builtin/t…”), and empty zebra rows fill the pane. Nothing shows how resources relate. The inspector leads with Mode and Schema version.</span></figcaption></figure>
+    <figure><img src="shots/runs.jpg" alt="Current Runs page" loading="lazy"><figcaption><b>Runs</b>A history list beside a run detail with Plan and Apply tabs.<span class="issue">Every run is called “#N run”, and six of seven say Expired. The detail is a wall of addresses and UUIDs, and the counts are hidden in a collapsed “Change summary”.</span></figcaption></figure>
+    <figure><img src="shots/configuration.jpg" alt="Current Configuration page" loading="lazy"><figcaption><b>Configuration</b>A file list, a syntax-colored editor and a validation strip.<span class="issue">A third column of chrome for two files. The page is a capable editor, but it's the code-first surface the refresh moves away from. It belongs in your editor or a drawer.</span></figcaption></figure>
+    <figure><img src="shots/settings.jpg" alt="Current Settings page" loading="lazy"><figcaption><b>Settings</b>One scroll of grouped boxes: workspace, Terraform version, agent connections, execution and Git.<span class="issue">App-wide and per-workspace settings are mixed. Buttons are grey text and look disabled. The auto-apply switch is below the fold.</span></figcaption></figure>
+    <figure><img src="shots/hcp.jpg" alt="Current HCP Terraform page" loading="lazy"><figcaption><b>HCP Terraform</b>Workspaces, remote runs and run detail in three columns, read-only.<span class="issue">Plan output is raw JSON log lines. Fifty workspaces in a plain list. It sits inside a local folder's sidebar, and the window title is truncated.</span></figcaption></figure>
+  </div>
+  <div class="col" style="margin:36px 0 0"><h3>Not pictured</h3><p class="muted" style="font-size:14px">Reconstructed from the SwiftUI source.</p></div>
+  <div class="inv" id="inv"></div>
+  <div class="col" style="margin:48px 0 0">
+    <div class="eyebrow">Reference</div>
+    <h3 style="font-size:22px;letter-spacing:-.02em">What HCP Terraform's web UI gets right</h3>
+    <p class="muted">The workspace overview leads with health, drift, tags and a latest-run card that shows policy checks, estimated cost and change counts together. The run page puts “1 to create” and “1 to destroy” as big colored bars above the detail. Habitable should match that information density on day one, then beat it on presentation and interaction.</p>
+  </div>
+  <div class="shots two">
+    <figure><img src="shots/web-overview.jpg" alt="HCP Terraform workspace overview" loading="lazy"><figcaption><b>Workspace overview</b>Health and drift, metrics, tags and resources on one page.<span class="borrow">Drift as a health meter, tags in the Library, and cost and policy on every preview.</span></figcaption></figure>
+    <figure><img src="shots/web-run.jpg" alt="HCP Terraform run page" loading="lazy"><figcaption><b>Run</b>Plan, cost estimation and apply as collapsible phases with color bars.<span class="borrow">Consequences above the fold. Outputs (application_url, database_endpoint) are the most useful thing on the page and deserve to be Endpoints.</span></figcaption></figure>
+  </div>
+</section>
+
+<section id="principles" class="col">
+  <div class="eyebrow">First principles</div>
+  <h2>What people actually came to do</h2>
+  <p class="lede">Someone opening Habitable wants to know what they have, whether it's healthy, what will change, and how to change it safely. Everything else is plumbing.</p>
+  <div class="principles">
+    <div><b>Resources are the noun.</b><p>The first thing you see is your infrastructure, laid out like a place. Files, runs and CLI flags are supporting detail you reach from a resource.</p></div>
+    <div><b>Show change before you make it.</b><p>A plan is a preview on the same map you already understand. Additions glow in, removals fade out, replacements are impossible to miss.</p></div>
+    <div><b>Plain language first, exact detail one click away.</b><p>“Orders database, PostgreSQL 16” leads. <code>aws_db_instance.orders</code> sits right under it. Nobody loses precision; newcomers gain a foothold.</p></div>
+    <div><b>Local and cloud are one library.</b><p>A folder on your Mac and an HCP Terraform workspace look and behave the same. Where it runs is a badge, not a different app.</p></div>
+    <div><b>Time is a dimension.</b><p>Every change is a clip on a timeline. Scrub back to see what your infrastructure looked like last Tuesday, and when it drifted.</p></div>
+    <div><b>Fast for experts, without a mode.</b><p>⌘K for everything, a table view for bulk work, keyboard navigation across the map, and a menu bar extra for runs in flight.</p></div>
+  </div>
+</section>
+
+<section id="model" class="col">
+  <div class="eyebrow">The new model</div>
+  <h2>Ten sidebar pages become one window</h2>
+  <p class="muted">Today's sidebar lists Terraform's internals as peers. The redesign collapses them into four places: a Library of all your infrastructure, a Map of one workspace, a Timeline of its changes, and an Inspector for whatever is selected.</p>
+  <div class="tablewrap">
+  <table class="map">
+    <thead><tr><th>Today</th><th></th><th>Redesign</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Open-folder screen</td><td class="arrow">→</td><td>Library <span class="tag">home</span></td><td>All local folders and HCP workspaces as living tiles, with what needs attention on top.</td></tr>
+      <tr><td>Workspace overview</td><td class="arrow">→</td><td>Map header + Library tile</td><td>Health, last change and next step live where you look anyway.</td></tr>
+      <tr><td>Resources</td><td class="arrow">→</td><td>Map <span class="tag">hero</span> + List view</td><td>The canvas is the app. The table stays for bulk and keyboard work.</td></tr>
+      <tr><td>Runs + Run detail</td><td class="arrow">→</td><td>Timeline + Preview changes</td><td>History is a scrubber along the bottom. A plan is a state of the map, not a log page.</td></tr>
+      <tr><td>Outputs</td><td class="arrow">→</td><td>Inspector “Endpoints”</td><td>URLs and connection strings sit on the resource that produces them, and in the workspace header.</td></tr>
+      <tr><td>Variables + Environment</td><td class="arrow">→</td><td>Inputs sheet</td><td>One form with typed fields, asked for only when a preview needs them.</td></tr>
+      <tr><td>Configuration</td><td class="arrow">→</td><td>“Defined in” + Source drawer</td><td>Every resource links to its file and line, which opens in VS Code or your chosen editor. A small Source drawer covers quick edits. The app is not an IDE.</td></tr>
+      <tr><td>README</td><td class="arrow">→</td><td>Library tile “About”</td><td>Rendered on the tile's detail and as the empty-map welcome.</td></tr>
+      <tr><td>Settings (workspace)</td><td class="arrow">→</td><td>Workspace Info (⌘I)</td><td>Backend, Terraform version, auto-apply: a Get Info panel, like Finder.</td></tr>
+      <tr><td>HCP Terraform page</td><td class="arrow">→</td><td>Library location</td><td>HCP workspaces open in the same Map with a cloud badge. Changes go through pull requests or the API and run remotely.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ============ A. LIBRARY ============ -->
+<section id="library">
+  <div class="col">
+    <div class="eyebrow">Exploration A</div>
+    <h2>Library</h2>
+    <p class="muted">The home window, in the spirit of the iMovie project browser. Every workspace you can reach, local or cloud, rendered as a miniature of its own map.</p>
+  </div>
+  <div class="stage"><div class="scaler">
+  <div class="win">
+    <div class="tb">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <span class="tbbtn"><svg><use href="#i-sidebar"/></svg></span>
+      <div class="tbtitle"><b>Library</b><span>14 workspaces · 3 need attention</span></div>
+      <div class="sp"></div>
+      <div class="seg"><span class="on">Tiles</span><span>List</span></div>
+      <div class="search"><svg><use href="#i-search"/></svg>Search infrastructure</div>
+      <span class="tbbtn prim"><svg><use href="#i-plus"/></svg>New</span>
+    </div>
+    <div class="body">
+      <div class="side">
+        <div class="sh">Library</div>
+        <div class="row on"><svg class="gl"><use href="#i-globe"/></svg>All Infrastructure<span class="ct">14</span></div>
+        <div class="row"><svg class="gl"><use href="#i-clock"/></svg>Recent<span class="ct">5</span></div>
+        <div class="row"><svg class="gl" style="color:var(--chg)"><use href="#i-warn"/></svg>Needs Attention<span class="ct">3</span></div>
+        <div class="sh">This Mac</div>
+        <div class="row"><svg class="gl"><use href="#i-folder"/></svg>~/infra<span class="ct">4</span></div>
+        <div class="row"><svg class="gl"><use href="#i-folder"/></svg>~/playground<span class="ct">2</span></div>
+        <div class="sh">HCP Terraform</div>
+        <div class="row"><svg class="gl"><use href="#i-cloud"/></svg>acme-corp<span class="ct">8</span></div>
+        <div class="row sub">Platform<span class="ct">3</span></div>
+        <div class="row sub">Payments<span class="ct">3</span></div>
+        <div class="row sub">Data<span class="ct">2</span></div>
+        <div class="sh">Tags</div>
+        <div class="row"><span class="dotst" style="background:var(--del)"></span>production<span class="ct">5</span></div>
+        <div class="row"><span class="dotst" style="background:var(--chg)"></span>staging<span class="ct">4</span></div>
+        <div class="row"><span class="dotst" style="background:var(--add)"></span>sandbox<span class="ct">5</span></div>
+      </div>
+      <div class="lib">
+        <div class="attn">
+          <div class="a"><svg style="color:var(--chg)"><use href="#i-warn"/></svg><div><b>acme-web drifted</b><small>A security group was edited in the AWS console</small></div></div>
+          <div class="a"><svg style="color:var(--accent)"><use href="#i-clock"/></svg><div><b>payments-api is waiting for you</b><small>HCP run planned 4 changes · needs approval</small></div></div>
+          <div class="a"><svg style="color:var(--del)"><use href="#i-info"/></svg><div><b>analytics apply failed</b><small>Quota exceeded for BigQuery datasets</small></div></div>
+        </div>
+        <div class="libhead"><h5>All Infrastructure</h5><span class="muted" style="font-size:12px">Sorted by last change</span></div>
+        <div class="grid">
+          <div class="card sel"><div class="thumb" data-seed="3" data-tone="drift"></div><div class="meta"><b>acme-web <span class="pill" style="background:color-mix(in srgb,var(--del) 14%,transparent);color:var(--del)">production</span></b><small>~/infra/acme-web · 23 resources</small><div class="foot"><span class="prov" style="background:#ff9900">AWS</span><span class="prov" style="background:#f38020">CF</span><span class="status" style="color:var(--chg);margin-left:auto"><span class="dotst" style="background:var(--chg)"></span>Drifted</span></div></div></div>
+          <div class="card"><div class="thumb" data-seed="7" data-tone="wait"></div><div class="meta"><b>payments-api <svg style="width:13px;height:13px;color:var(--ink3)"><use href="#i-cloud"/></svg></b><small>acme-corp / Payments · 41 resources</small><div class="foot"><span class="prov" style="background:#ff9900">AWS</span><span class="prov" style="background:#635bff">ST</span><span class="status" style="color:var(--accent);margin-left:auto"><span class="dotst" style="background:var(--accent)"></span>Needs approval</span></div></div></div>
+          <div class="card"><div class="thumb" data-seed="11" data-tone="ok"></div><div class="meta"><b>marketing-site</b><small>~/infra/marketing · 9 resources</small><div class="foot"><span class="prov" style="background:#000">VC</span><span class="prov" style="background:#f38020">CF</span><span class="status" style="color:var(--add);margin-left:auto"><span class="dotst" style="background:var(--add)"></span>In sync · 2h ago</span></div></div></div>
+          <div class="card"><div class="thumb" data-seed="5" data-tone="err"></div><div class="meta"><b>analytics <svg style="width:13px;height:13px;color:var(--ink3)"><use href="#i-cloud"/></svg></b><small>acme-corp / Data · 17 resources</small><div class="foot"><span class="prov" style="background:#4285f4">GC</span><span class="status" style="color:var(--del);margin-left:auto"><span class="dotst" style="background:var(--del)"></span>Apply failed</span></div></div></div>
+          <div class="card"><div class="thumb" data-seed="2" data-tone="ok"></div><div class="meta"><b>core-network <svg style="width:13px;height:13px;color:var(--ink3)"><use href="#i-cloud"/></svg></b><small>acme-corp / Platform · 58 resources</small><div class="foot"><span class="prov" style="background:#ff9900">AWS</span><span class="status" style="color:var(--add);margin-left:auto"><span class="dotst" style="background:var(--add)"></span>In sync · Yesterday</span></div></div></div>
+          <div class="card"><div class="thumb" data-seed="9" data-tone="new"></div><div class="meta"><b>local-only</b><small>~/playground/local-only · 2 resources</small><div class="foot"><span class="prov" style="background:#7b42bc">TF</span><span class="status" style="color:var(--ink2);margin-left:auto"><span class="dotst" style="background:var(--ink3)"></span>Not applied yet</span></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div></div>
+  <div class="notes">
+    <div><b>Needs Attention leads.</b>Drift, approvals and failures across every workspace surface above the grid, so the Library doubles as a morning check.</div>
+    <div><b>Thumbnails are real.</b>Each tile is a miniature of that workspace's map, tinted by status. You learn to recognize your infrastructure by shape.</div>
+    <div><b>One library, two locations.</b>Folders on this Mac and HCP Terraform projects sit side by side. The cloud glyph is the only difference.</div>
+  </div>
+</section>
+
+<!-- ============ B. MAP ============ -->
+<section id="map">
+  <div class="col">
+    <div class="eyebrow">Exploration B</div>
+    <h2>Map, Inspector, Timeline</h2>
+    <p class="muted">One workspace window, laid out like iMovie: an inventory on the left, the map as the viewer, an inspector on the right, and a timeline of changes along the bottom.</p>
+  </div>
+  <div class="stage"><div class="scaler">
+  <div class="win">
+    <div class="tb">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <span class="tbbtn"><svg><use href="#i-sidebar"/></svg></span>
+      <div class="tbtitle"><b>acme-web</b><span>production · AWS us-west-2</span></div>
+      <span class="loc"><svg><use href="#i-laptop"/></svg>This Mac</span>
+      <div class="sp"></div>
+      <div class="seg"><span class="on">Map</span><span>List</span></div>
+      <div class="sp"></div>
+      <span class="tbbtn bord"><svg><use href="#i-sliders"/></svg>Inputs</span>
+      <span class="tbbtn bord"><svg><use href="#i-code"/></svg>Source</span>
+      <span class="tbbtn prim"><svg><use href="#i-play"/></svg>Preview Changes</span>
+    </div>
+    <div class="body">
+      <div class="side">
+        <div class="sh">Endpoints</div>
+        <div class="row"><svg class="gl"><use href="#i-arrow"/></svg>app.acme.com</div>
+        <div class="row"><svg class="gl"><use href="#i-arrow"/></svg>uploads bucket URL</div>
+        <div class="sh">Edge</div>
+        <div class="row"><span class="ic" style="background:var(--c-edge)"><svg><use href="#i-sign"/></svg></span>app.acme.com<span class="ct">DNS</span></div>
+        <div class="row"><span class="ic" style="background:var(--c-edge)"><svg><use href="#i-seal"/></svg></span>TLS certificate</div>
+        <div class="row"><span class="ic" style="background:var(--c-edge)"><svg><use href="#i-split"/></svg></span>Web load balancer</div>
+        <div class="sh">Compute</div>
+        <div class="row"><span class="ic" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span>Web service<span class="ct">3 tasks</span></div>
+        <div class="row"><span class="ic" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span>API service<span class="ct">2 tasks</span></div>
+        <div class="sh">Data</div>
+        <div class="row on"><span class="ic" style="background:var(--c-data)"><svg><use href="#i-db"/></svg></span>Orders database</div>
+        <div class="row"><span class="ic" style="background:var(--c-data)"><svg><use href="#i-bucket"/></svg></span>Uploads bucket</div>
+        <div class="row"><span class="ic" style="background:var(--c-data)"><svg><use href="#i-bolt"/></svg></span>Session cache</div>
+        <div class="sh">Network</div>
+        <div class="row"><span class="ic" style="background:var(--c-net)"><svg><use href="#i-net"/></svg></span>Main network<span class="ct">9</span></div>
+        <div class="row"><span class="ic" style="background:var(--c-net)"><svg><use href="#i-shield"/></svg></span>Firewall rules<span class="ct" style="color:var(--chg)">● 6</span></div>
+        <div class="sh">Identity</div>
+        <div class="row"><span class="ic" style="background:var(--c-id)"><svg><use href="#i-person"/></svg></span>Roles &amp; policies<span class="ct">4</span></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div class="canvas" id="canvasB">
+          <div class="frm" style="left:24px;top:22px;width:612px;height:104px"><label>Edge</label></div>
+          <div class="frm" style="left:24px;top:146px;width:296px;height:200px"><label>Compute</label></div>
+          <div class="frm" style="left:340px;top:146px;width:296px;height:200px"><label>Data</label></div>
+          <div class="frm" style="left:24px;top:366px;width:612px;height:92px"><label>Network · 10.0.0.0/16</label></div>
+          <div class="node" style="left:40px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-sign"/></svg></span><span class="txt"><b>app.acme.com</b><small>DNS record · Route 53</small></span></div>
+          <div class="node" style="left:246px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-seal"/></svg></span><span class="txt"><b>TLS certificate</b><small>Renews Feb 11</small></span></div>
+          <div class="node" style="left:452px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-split"/></svg></span><span class="txt"><b>Web load balancer</b><small>Application LB</small></span></div>
+          <div class="node" style="left:88px;top:180px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><span class="txt"><b>Web service</b><small>3 of 3 tasks · Fargate</small></span></div>
+          <div class="node" style="left:88px;top:268px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><span class="txt"><b>API service</b><small>2 of 2 tasks · Fargate</small></span></div>
+          <div class="node sel" style="left:404px;top:180px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-db"/></svg></span><span class="txt"><b>Orders database</b><small>PostgreSQL 16 · RDS</small></span></div>
+          <div class="node" style="left:356px;top:268px;width:132px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-bucket"/></svg></span><span class="txt"><b>Uploads</b><small>S3 · 41 GB</small></span></div>
+          <div class="node" style="left:496px;top:268px;width:128px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-bolt"/></svg></span><span class="txt"><b>Cache</b><small>Redis 7</small></span></div>
+          <div class="node" style="left:40px;top:392px"><span class="sq" style="background:var(--c-net)"><svg><use href="#i-net"/></svg></span><span class="txt"><b>Main network</b><small>4 subnets · 2 zones</small></span></div>
+          <div class="node" style="left:246px;top:392px"><span class="sq" style="background:var(--c-net)"><svg><use href="#i-shield"/></svg></span><span class="txt"><b>Firewall rules</b><small style="color:var(--chg)">1 rule drifted</small></span><span class="badge" style="background:var(--chg)">!</span></div>
+          <div class="node" style="left:452px;top:392px"><span class="sq" style="background:var(--c-id)"><svg><use href="#i-person"/></svg></span><span class="txt"><b>Roles &amp; policies</b><small>4 roles</small></span></div>
+          <svg class="links" viewBox="0 0 660 538" preserveAspectRatio="none">
+            <path d="M208 79 H246"/><path d="M414 79 H452"/>
+            <path d="M536 108 C536 150 300 140 256 180"/>
+            <path d="M172 238 V268"/>
+            <path class="hot" d="M256 297 C330 297 340 209 404 209"/>
+            <path d="M256 297 C 420 330 560 300 560 297"/>
+            <path d="M256 209 C320 240 340 297 356 297"/>
+          </svg>
+          <div class="canvasbar"><span class="chip"><b>23</b> resources</span><span class="chip"><span class="dotst" style="background:var(--add)"></span>22 in sync</span><span class="chip"><span class="dotst" style="background:var(--chg)"></span>1 drifted</span></div>
+          <div class="zoom chip">− &nbsp;100% &nbsp;+</div>
+        </div>
+        <div class="tl">
+          <div class="tlh"><b>Changes</b><span>12 applied since Sep 2</span><span class="sp"></span><span>Scrub to see your infrastructure at any point</span></div>
+          <div class="track" id="trackB">
+            <div class="ruler"><span style="left:0">Sep 2</span><span style="left:18%">Sep 9</span><span style="left:36%">Sep 16</span><span style="left:54%">Sep 23</span><span style="left:72%">Sep 30</span><span style="left:92%">Today</span></div>
+            <div class="lane"></div>
+            <div class="clip" style="left:0;width:15%"><b>Initial network</b><small>+14</small><div class="bar"><i style="width:100%;background:var(--add)"></i></div></div>
+            <div class="clip" style="left:16%;width:11%"><b>Add database</b><small>+3</small><div class="bar"><i style="width:100%;background:var(--add)"></i></div></div>
+            <div class="clip" style="left:28%;width:8%"><b>Cache</b><small>+2</small><div class="bar"><i style="width:100%;background:var(--add)"></i></div></div>
+            <div class="clip" style="left:44%;width:12%"><b>Scale web to 3</b><small>~2</small><div class="bar"><i style="width:100%;background:var(--chg)"></i></div></div>
+            <div class="clip" style="left:57%;width:10%"><b>Uploads bucket</b><small>+2 ~1</small><div class="bar"><i style="width:66%;background:var(--add)"></i><i style="width:34%;background:var(--chg)"></i></div></div>
+            <div class="clip sel" style="left:72%;width:13%"><b>Upgrade Postgres 16</b><small>~1 · by Paul</small><div class="bar"><i style="width:100%;background:var(--chg)"></i></div></div>
+            <div class="drift" style="left:87.5%"></div>
+            <div class="playhead" style="left:94%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="insp">
+        <div class="ihead"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-db"/></svg></span><div><b>Orders database</b><small>PostgreSQL 16 · Amazon RDS</small></div></div>
+        <div class="isec" style="border-top:0;padding-top:0"><span class="status" style="color:var(--add)"><span class="dotst" style="background:var(--add)"></span>Available · in sync with your code</span></div>
+        <div class="isec"><h4>At a glance</h4>
+          <dl class="kv">
+            <dt>Size</dt><dd>2 vCPU · 4 GB (db.t4g.medium)</dd>
+            <dt>Storage</dt><dd>100 GB, encrypted</dd>
+            <dt>Availability</dt><dd>Two zones (Multi-AZ)</dd>
+            <dt>Backups</dt><dd>Daily, kept 7 days</dd>
+            <dt>Endpoint</dt><dd class="m">orders.c9x2.us-west-2.rds…</dd>
+          </dl>
+        </div>
+        <div class="isec"><h4>Connected to</h4>
+          <div class="conn"><span class="ic" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span>API service<span class="rel">reads &amp; writes</span></div>
+          <div class="conn"><span class="ic" style="background:var(--c-net)"><svg><use href="#i-net"/></svg></span>Private subnets a, b<span class="rel">lives in</span></div>
+          <div class="conn"><span class="ic" style="background:var(--c-id)"><svg><use href="#i-lock"/></svg></span>Database password<span class="rel">secret</span></div>
+        </div>
+        <div class="isec"><h4>Defined in</h4>
+          <div class="lnk"><svg><use href="#i-code"/></svg>modules/data/main.tf, line 14</div>
+          <div class="lnk" style="font-family:var(--mono);font-size:11.5px;color:var(--ink2)">module.data.aws_db_instance.orders</div>
+        </div>
+        <div class="isec"><h4>History</h4>
+          <div class="spark"><i style="height:30%"></i><i style="height:30%"></i><i style="height:60%;background:var(--add)"></i><i style="height:30%"></i><i style="height:30%"></i><i style="height:30%"></i><i style="height:80%;background:var(--chg)"></i><i style="height:30%"></i></div>
+          <small class="muted" style="font-size:11.5px">Created Sep 10 · Last changed Sep 30 (Upgrade Postgres 16)</small>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div></div>
+  <div class="notes">
+    <div><b>Grouped by purpose, not by provider type.</b>Edge, Compute, Data, Network and Identity are derived from resource types. Modules can override grouping, and users can drag tiles to arrange their own map.</div>
+    <div><b>Collapsing the noise.</b>Nine subnets, routes and gateways roll up into “Main network”. Six security groups roll up into “Firewall rules”. Double-click to open a group.</div>
+    <div><b>The inspector speaks human.</b>Instance classes are translated to vCPU and memory, booleans become sentences. The raw address and every attribute are still one disclosure away.</div>
+    <div><b>The timeline replaces Runs.</b>Each clip is a change; its color bar shows adds, updates and removals. The amber diamond marks drift. Drag the playhead back and the map shows that moment.</div>
+  </div>
+</section>
+
+<!-- ============ C. PREVIEW ============ -->
+<section id="preview">
+  <div class="col">
+    <div class="eyebrow">Exploration C</div>
+    <h2>Preview Changes</h2>
+    <p class="muted">“Plan” becomes Preview. The map switches into a review state: what's new arrives as glowing outlines, what changes turns amber, what will be replaced turns pink, and everything untouched dims. The timeline makes room for a review bar.</p>
+  </div>
+  <div class="stage"><div class="scaler">
+  <div class="win">
+    <div class="tb">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <span class="tbbtn"><svg><use href="#i-sidebar"/></svg></span>
+      <div class="tbtitle"><b>acme-web</b><span>Previewing changes from main @ 4f1c2e9</span></div>
+      <span class="loc"><svg><use href="#i-laptop"/></svg>This Mac</span>
+      <div class="sp"></div>
+      <div class="seg"><span class="on">Changes only</span><span>Everything</span></div>
+      <div class="sp"></div>
+      <span class="tbbtn bord">Show Plan Output</span>
+    </div>
+    <div class="body">
+      <div class="side">
+        <div class="sh">5 changes</div>
+        <div class="row"><span class="ic" style="background:var(--add)"><svg><use href="#i-plus"/></svg></span>CDN distribution<span class="ct" style="color:var(--add)">new</span></div>
+        <div class="row"><span class="ic" style="background:var(--add)"><svg><use href="#i-plus"/></svg></span>CDN certificate<span class="ct" style="color:var(--add)">new</span></div>
+        <div class="row"><span class="ic" style="background:var(--add)"><svg><use href="#i-plus"/></svg></span>Uploads access policy<span class="ct" style="color:var(--add)">new</span></div>
+        <div class="row"><span class="ic" style="background:var(--chg)"><svg><use href="#i-sign"/></svg></span>app.acme.com<span class="ct" style="color:var(--chg)">update</span></div>
+        <div class="row on"><span class="ic" style="background:var(--rep)"><svg><use href="#i-db"/></svg></span>Orders database<span class="ct" style="color:var(--rep)">replace</span></div>
+        <div class="sh">Inputs used</div>
+        <div class="row sub" style="padding-left:8px">db_instance_size = <span style="font-family:var(--mono);font-size:11.5px">"large"</span></div>
+        <div class="row sub" style="padding-left:8px">enable_cdn = <span style="font-family:var(--mono);font-size:11.5px">true</span></div>
+        <div class="sh">Checks</div>
+        <div class="row sub" style="padding-left:8px"><span class="dotst" style="background:var(--add)"></span>Configuration valid</div>
+        <div class="row sub" style="padding-left:8px"><span class="dotst" style="background:var(--add)"></span>Est. cost +$212/mo</div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div class="canvas">
+          <div class="frm" style="left:24px;top:22px;width:612px;height:104px"><label>Edge</label></div>
+          <div class="frm" style="left:24px;top:146px;width:296px;height:200px;opacity:.5"><label>Compute</label></div>
+          <div class="frm" style="left:340px;top:146px;width:296px;height:200px"><label>Data</label></div>
+          <div class="frm" style="left:24px;top:366px;width:612px;height:92px;opacity:.5"><label>Network</label></div>
+          <div class="node chg" style="left:40px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-sign"/></svg></span><span class="txt"><b>app.acme.com</b><small style="color:var(--chg)">Points to CDN</small></span><span class="badge" style="background:var(--chg)">~</span></div>
+          <div class="node add ghost" style="left:246px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-globe"/></svg></span><span class="txt"><b>CDN distribution</b><small style="color:var(--add)">New · CloudFront</small></span><span class="badge" style="background:var(--add)">+</span></div>
+          <div class="node dim" style="left:452px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-split"/></svg></span><span class="txt"><b>Web load balancer</b><small>No change</small></span></div>
+          <div class="node dim" style="left:88px;top:180px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><span class="txt"><b>Web service</b><small>No change</small></span></div>
+          <div class="node dim" style="left:88px;top:268px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><span class="txt"><b>API service</b><small>No change</small></span></div>
+          <div class="node rep sel" style="left:404px;top:180px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-db"/></svg></span><span class="txt"><b>Orders database</b><small style="color:var(--rep)">Will be replaced</small></span><span class="badge" style="background:var(--rep)">±</span></div>
+          <div class="node add ghost" style="left:356px;top:268px;width:132px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-lock"/></svg></span><span class="txt"><b>Access policy</b><small style="color:var(--add)">New</small></span><span class="badge" style="background:var(--add)">+</span></div>
+          <div class="node dim" style="left:496px;top:268px;width:128px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-bolt"/></svg></span><span class="txt"><b>Cache</b><small>No change</small></span></div>
+          <div class="node dim" style="left:40px;top:392px"><span class="sq" style="background:var(--c-net)"><svg><use href="#i-net"/></svg></span><span class="txt"><b>Main network</b><small>No change</small></span></div>
+          <div class="node dim" style="left:246px;top:392px"><span class="sq" style="background:var(--c-net)"><svg><use href="#i-shield"/></svg></span><span class="txt"><b>Firewall rules</b><small>No change</small></span></div>
+          <div class="node dim" style="left:452px;top:392px"><span class="sq" style="background:var(--c-id)"><svg><use href="#i-person"/></svg></span><span class="txt"><b>Roles &amp; policies</b><small>No change</small></span></div>
+          <svg class="links" viewBox="0 0 660 538" preserveAspectRatio="none">
+            <path class="newl" d="M208 79 H246"/><path class="newl" d="M414 79 H452"/>
+            <path class="newl" d="M330 108 C330 200 300 280 356 297"/>
+          </svg>
+          <div class="canvasbar"><span class="chip"><span class="dotst" style="background:var(--add)"></span><b>3</b> new</span><span class="chip"><span class="dotst" style="background:var(--chg)"></span><b>1</b> update</span><span class="chip"><span class="dotst" style="background:var(--rep)"></span><b>1</b> replace</span><span class="chip"><span class="dotst" style="background:var(--ink3)"></span>18 unchanged</span></div>
+        </div>
+        <div class="review">
+          <div class="counts">
+            <div><b style="color:var(--add)">3</b><small>to add</small></div>
+            <div><b style="color:var(--chg)">1</b><small>to change</small></div>
+            <div><b style="color:var(--rep)">1</b><small>to replace</small></div>
+            <div><b style="color:var(--ink3)">0</b><small>to remove</small></div>
+          </div>
+          <div class="warn"><b>Orders database will be replaced.</b> Changing the size to “large” also changes its storage type, which AWS can't do in place. Its data is deleted once the new one is up. A final snapshot is configured, so you can restore it.</div>
+          <div style="display:flex;gap:8px;align-items:center;grid-row:1;grid-column:2">
+            <span class="tbbtn">Discard Preview</span>
+            <div class="hold"><div class="prog"></div><span>Hold to Apply 5 Changes</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="insp">
+        <div class="ihead"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-db"/></svg></span><div><b>Orders database</b><small>module.data.aws_db_instance.orders</small></div></div>
+        <div class="isec" style="border-top:0;padding-top:0"><span class="pill" style="background:color-mix(in srgb,var(--rep) 15%,transparent);color:var(--rep)">Replace · delete, then create</span></div>
+        <div class="isec"><h4>What changes</h4>
+          <div class="diff">
+            <div class="d"><small>Size</small><span><span class="from">2 vCPU · 4 GB</span> → <span class="to">2 vCPU · 16 GB</span></span></div>
+            <div class="d"><small>Storage type <span style="color:var(--rep)">· forces replacement</span></small><span><span class="from">General purpose (gp2)</span> → <span class="to">gp3</span></span></div>
+            <div class="d"><small>Endpoint</small><span class="to">Known after apply</span></div>
+          </div>
+        </div>
+        <div class="isec"><h4>Who's affected</h4>
+          <div class="conn"><span class="ic" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span>API service<span class="rel" style="color:var(--chg)">brief outage</span></div>
+          <p style="font-size:12px;color:var(--ink2);margin:6px 0 0">The API reconnects to the new endpoint automatically because it reads the address from this database.</p>
+        </div>
+        <div class="isec"><h4>Why it's changing</h4>
+          <div class="lnk"><svg><use href="#i-code"/></svg>variables.tf · db_instance_size</div>
+          <div class="lnk"><svg><use href="#i-code"/></svg>modules/data/main.tf, line 21</div>
+        </div>
+        <div class="isec"><h4>Options</h4>
+          <div class="lnk">Exclude from this apply</div>
+          <div class="lnk">Ask Claude to avoid replacement</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div></div>
+  <div class="notes">
+    <div><b>Consequences beside the button.</b>The counts and the one thing that can hurt you sit next to Apply, never in a disclosure below it.</div>
+    <div><b>Hold to apply.</b>Any preview with a replace or remove needs a press-and-hold, like Delete in Photos. Additive previews apply on a click. Auto-apply shows as a persistent badge, never a silent setting.</div>
+    <div><b>Plan output is still here.</b>“Show Plan Output” opens the raw Terraform log and JSON for anyone who wants the exact text. The saved plan is still the thing that's applied.</div>
+    <div><b>Same view for HCP.</b>For cloud workspaces this preview comes from HCP Terraform, through a pull request or the API. See Exploration G.</div>
+  </div>
+</section>
+
+<!-- ============ D. NEWCOMERS ============ -->
+<section id="learn">
+  <div class="col">
+    <div class="eyebrow">Exploration D</div>
+    <h2>Quick Help for newcomers</h2>
+    <p class="muted">Borrowed straight from GarageBand. Turn on Quick Help (?) and hovering anything explains it in a sentence: a resource, a badge, a field in the inspector, a word like “replace”. The same mechanism powers the empty-map welcome when you open a folder that has never been applied.</p>
+  </div>
+  <div class="stage"><div class="scaler">
+  <div class="win">
+    <div class="tb">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <span class="tbbtn"><svg><use href="#i-sidebar"/></svg></span>
+      <div class="tbtitle"><b>local-only</b><span>Not applied yet · no cloud account needed</span></div>
+      <span class="loc"><svg><use href="#i-laptop"/></svg>This Mac</span>
+      <div class="sp"></div>
+      <span class="tbbtn bord" style="color:var(--accent);box-shadow:0 0 0 1px var(--accent)"><svg><use href="#i-info"/></svg>Quick Help</span>
+      <span class="tbbtn prim"><svg><use href="#i-play"/></svg>Preview Changes</span>
+    </div>
+    <div class="body">
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div class="canvas">
+          <div style="position:absolute;left:60px;top:40px;max-width:420px;z-index:3">
+            <div class="eyebrow" style="font-size:11px">Welcome</div>
+            <div style="font-family:var(--display);font-size:28px;font-weight:700;letter-spacing:-.02em;line-height:1.1;margin:6px 0 10px">This folder describes 2 things.<br>None of them exist yet.</div>
+            <p style="font-size:13.5px;color:var(--ink2);margin:0 0 14px">Terraform reads the files in this folder and makes the real world match them. Press Preview Changes to see what it would create. Nothing happens until you apply.</p>
+            <div style="display:flex;gap:8px"><span class="tbbtn prim">Preview Changes</span><span class="tbbtn bord">Read the README</span></div>
+          </div>
+          <div class="node add ghost" style="left:110px;top:270px;width:190px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><span class="txt"><b>Example resource</b><small style="color:var(--add)">Will be created</small></span></div>
+          <div class="node add ghost" style="left:380px;top:270px;width:190px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-arrow"/></svg></span><span class="txt"><b>greeting</b><small style="color:var(--add)">Output · “Hello, Paul”</small></span></div>
+          <svg class="links" viewBox="0 0 900 538" preserveAspectRatio="none"><path class="newl" d="M300 299 H380"/></svg>
+          <div class="pop r" style="left:590px;top:250px">
+            <b>What's an output?</b>
+            <p>An output is a value Terraform hands back after applying, like a website address or a database hostname. Habitable shows outputs as Endpoints you can copy or open.</p>
+            <span class="lnk" style="padding:0">Learn more in Terraform docs <svg><use href="#i-arrow"/></svg></span>
+          </div>
+          <div class="canvasbar"><span class="chip">Steps · <b>1 Preview</b> → 2 Review → 3 Apply</span></div>
+        </div>
+      </div>
+      <div class="insp">
+        <div class="ihead"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><div><b>Example resource</b><small>terraform_data.example</small></div></div>
+        <div class="isec" style="border-top:0;padding-top:0"><span class="status" style="color:var(--ink2)"><span class="dotst" style="background:var(--ink3)"></span>Doesn't exist yet</span></div>
+        <div class="isec"><h4>What it is</h4><p style="font-size:12.5px;color:var(--ink2);margin:0">A placeholder built into Terraform. It stores a value and is useful for learning, because creating it touches nothing outside your Mac.</p></div>
+        <div class="isec"><h4>Needs from you</h4>
+          <dl class="kv"><dt>name</dt><dd><span style="display:inline-block;width:100%;height:22px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--hair);padding:2px 7px;font-size:12px">Paul</span></dd></dl>
+          <small class="muted" style="font-size:11px">Remembered for this folder</small>
+        </div>
+        <div class="isec"><h4>Defined in</h4><div class="lnk"><svg><use href="#i-code"/></svg>main.tf, line 3</div></div>
+      </div>
+    </div>
+  </div>
+  </div></div>
+  <div class="notes">
+    <div><b>Say what's true, in a sentence.</b>The welcome states the situation (“2 things, none exist yet”) instead of a checklist of init, validate, plan.</div>
+    <div><b>Init and validate disappear.</b>Preview Changes runs init and validate on its own when needed and reports problems inline. Experts still have both in the Workspace menu.</div>
+    <div><b>Inputs are asked in context.</b>A required variable shows up as a field on the resource that needs it, not on a separate Variables page.</div>
+  </div>
+</section>
+
+<!-- ============ E. POWER ============ -->
+<section id="power">
+  <div class="col">
+    <div class="eyebrow">Exploration E</div>
+    <h2>List view and ⌘K for power users</h2>
+    <p class="muted">The same workspace as a dense, sortable table with filter tokens, plus a command palette that reaches every resource, action and Terraform command. The map is the default; experts can make List the default per workspace.</p>
+  </div>
+  <div class="stage"><div class="scaler">
+  <div class="win">
+    <div class="tb">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <span class="tbbtn"><svg><use href="#i-sidebar"/></svg></span>
+      <div class="tbtitle"><b>core-network</b><span>acme-corp / Platform · HCP Terraform</span></div>
+      <span class="loc"><svg><use href="#i-cloud"/></svg>HCP Terraform</span>
+      <div class="sp"></div>
+      <div class="seg"><span>Map</span><span class="on">List</span></div>
+      <div class="sp"></div>
+      <div class="search"><svg><use href="#i-search"/></svg>Filter</div>
+      <span class="tbbtn prim"><svg><use href="#i-play"/></svg>Start Run</span>
+    </div>
+    <div class="body">
+      <div class="tblv">
+        <div class="filters"><span class="tok">type:aws_security_group*</span><span class="tok">module:edge</span><span class="tok">status:drifted</span><span class="muted" style="font-size:12px;margin-left:6px">8 of 58</span><span class="sp"></span><span class="tbbtn bord">Select All</span><span class="tbbtn bord">Copy Addresses</span></div>
+        <table class="res">
+          <thead><tr><th>Name</th><th>Address</th><th>Module</th><th>Status</th><th>Last changed</th></tr></thead>
+          <tbody>
+            <tr><td>Edge ingress</td><td class="m">aws_security_group.edge_ingress</td><td>edge</td><td><span class="status" style="color:var(--chg)"><span class="dotst" style="background:var(--chg)"></span>Drifted</span></td><td>Sep 30</td></tr>
+            <tr class="on"><td>HTTPS from anywhere</td><td class="m">aws_security_group_rule.https[0]</td><td>edge</td><td>In sync</td><td>Sep 30</td></tr>
+            <tr><td>HTTPS from anywhere (v6)</td><td class="m">aws_security_group_rule.https[1]</td><td>edge</td><td>In sync</td><td>Sep 30</td></tr>
+            <tr><td>SSH from office</td><td class="m">aws_security_group_rule.ssh_office</td><td>edge</td><td><span class="status" style="color:var(--chg)"><span class="dotst" style="background:var(--chg)"></span>Drifted</span></td><td>Sep 12</td></tr>
+            <tr><td>Bastion</td><td class="m">aws_security_group.bastion</td><td>edge</td><td>In sync</td><td>Sep 12</td></tr>
+            <tr><td>Health checks</td><td class="m">aws_security_group_rule.lb_health</td><td>edge</td><td>In sync</td><td>Sep 9</td></tr>
+            <tr><td>Egress all</td><td class="m">aws_security_group_rule.egress</td><td>edge</td><td>In sync</td><td>Sep 2</td></tr>
+            <tr><td>VPN peers</td><td class="m">aws_security_group.vpn</td><td>edge</td><td>In sync</td><td>Sep 2</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pal">
+        <div class="in"><svg><use href="#i-search"/></svg>ssh</div>
+        <div class="grp">Resources</div>
+        <div class="it on"><span class="ic" style="background:var(--c-net)"><svg><use href="#i-shield"/></svg></span>SSH from office <small>aws_security_group_rule.ssh_office · drifted</small><kbd>↩</kbd></div>
+        <div class="it"><span class="ic" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span>Bastion host <small>aws_instance.bastion</small></div>
+        <div class="grp">Actions</div>
+        <div class="it"><span class="ic" style="background:var(--chg)"><svg><use href="#i-warn"/></svg></span>Accept drift into code… <small>write the console change back to edge.tf</small></div>
+        <div class="it"><span class="ic" style="background:var(--accent)"><svg><use href="#i-play"/></svg></span>Preview change to SSH from office only <kbd>⌘⇧P</kbd></div>
+        <div class="it"><span class="ic" style="background:var(--ink3)"><svg><use href="#i-code"/></svg></span>Move in state (state mv)… </div>
+        <div class="it"><span class="ic" style="background:var(--ink3)"><svg><use href="#i-code"/></svg></span>Open edge.tf at line 48 in Zed <kbd>⌘⇧O</kbd></div>
+      </div>
+    </div>
+  </div>
+  </div></div>
+  <div class="notes">
+    <div><b>Filter tokens, not forms.</b>Type, module, provider, status and tag become tokens, the way Mail and Finder search work. Saved filters show up in the sidebar.</div>
+    <div><b>Targeted work without flags.</b>Select rows, then Preview Changes to only those, Refresh only those, or Copy Addresses. Habitable writes the -target and -replace flags for you and shows them.</div>
+    <div><b>Every Terraform verb lives in ⌘K.</b>state mv, import, taint/replace, force-unlock and workspace select are actions with sheets that explain the consequence, instead of hidden CLI knowledge.</div>
+  </div>
+</section>
+
+<!-- ============ F. NEW ============ -->
+<section id="new">
+  <div class="col">
+    <div class="eyebrow">Exploration F</div>
+    <h2>New infrastructure</h2>
+    <p class="muted">GarageBand's project chooser, for infrastructure. Start from a folder you already have, an HCP Terraform workspace, or a template that previews exactly what it will create and roughly what it costs.</p>
+  </div>
+  <div class="stage"><div class="scaler">
+  <div class="win">
+    <div class="tb">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="tbtitle"><b>Library</b><span>14 workspaces</span></div>
+      <div class="sp"></div>
+    </div>
+    <div class="body" style="background:var(--win)"><div class="lib"></div></div>
+    <div class="dim"></div>
+    <div class="sheet">
+      <div class="sb">
+        <div class="sl">
+          <div class="sh">Open</div>
+          <div class="row"><svg class="gl"><use href="#i-folder"/></svg>Folder on this Mac…</div>
+          <div class="row"><svg class="gl"><use href="#i-cloud"/></svg>HCP Terraform workspace…</div>
+          <div class="sh">Start from a template</div>
+          <div class="row on"><svg class="gl"><use href="#i-globe"/></svg>Websites</div>
+          <div class="row"><svg class="gl"><use href="#i-box"/></svg>Apps &amp; APIs</div>
+          <div class="row"><svg class="gl"><use href="#i-db"/></svg>Databases</div>
+          <div class="row"><svg class="gl"><use href="#i-net"/></svg>Networks</div>
+          <div class="sh">Learn</div>
+          <div class="row"><svg class="gl"><use href="#i-laptop"/></svg>Playground (no cloud)</div>
+        </div>
+        <div class="sm">
+          <div style="font-family:var(--display);font-size:22px;font-weight:700;letter-spacing:-.02em">Websites</div>
+          <div class="muted" style="font-size:12.5px">Each template shows the resources it creates before anything is written.</div>
+          <div class="tgrid" id="tgrid">
+            <div class="tcard sel"><div class="art" data-art="0"></div><div class="tm"><b>Static website</b><small>Bucket, CDN, certificate and a domain record.</small><span class="cost">AWS · 4 resources · about $1/mo</span></div></div>
+            <div class="tcard"><div class="art" data-art="1"></div><div class="tm"><b>Container website</b><small>A load-balanced container service with HTTPS.</small><span class="cost">AWS · 11 resources · about $38/mo</span></div></div>
+            <div class="tcard"><div class="art" data-art="2"></div><div class="tm"><b>Edge site</b><small>Cloudflare Pages with a custom domain.</small><span class="cost">Cloudflare · 3 resources · free tier</span></div></div>
+            <div class="tcard"><div class="art" data-art="3"></div><div class="tm"><b>WordPress</b><small>Managed database, container and backups.</small><span class="cost">AWS · 14 resources · about $55/mo</span></div></div>
+            <div class="tcard"><div class="art" data-art="4"></div><div class="tm"><b>Redirect domain</b><small>Send one domain to another with HTTPS.</small><span class="cost">AWS · 3 resources · under $1/mo</span></div></div>
+            <div class="tcard"><div class="art" data-art="5"></div><div class="tm"><b>From the Registry…</b><small>Search public and private modules.</small><span class="cost">registry.terraform.io</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="sf"><span class="muted" style="font-size:12px;margin-right:auto">Creates a folder in ~/infra with readable .tf files you own.</span><span class="tbbtn bord">Cancel</span><span class="tbbtn prim">Choose</span></div>
+    </div>
+  </div>
+  </div></div>
+</section>
+
+<!-- ============ G. CLOUD CHANGES ============ -->
+<section id="cloud">
+  <div class="col">
+    <div class="eyebrow">Exploration G</div>
+    <h2>Changing cloud infrastructure</h2>
+    <p class="muted">In HCP Terraform, Habitable never applies anything from your Mac. A change becomes a pull request, HCP Terraform plans it remotely, and the result lands on the same map as a local preview. Merging and approving happen here, and the run itself happens in HCP Terraform.</p>
+  </div>
+  <div class="stage"><div class="scaler">
+  <div class="win">
+    <div class="tb">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <span class="tbbtn"><svg><use href="#i-sidebar"/></svg></span>
+      <div class="tbtitle"><b>payments-api</b><span>acme-corp / Payments · github.com/acme/payments-infra</span></div>
+      <span class="loc"><svg><use href="#i-cloud"/></svg>HCP Terraform</span>
+      <div class="sp"></div>
+      <div class="seg"><span class="on">Changes only</span><span>Everything</span></div>
+      <div class="sp"></div>
+      <span class="tbbtn bord"><svg><use href="#i-code"/></svg>Open in VS Code</span>
+      <span class="tbbtn bord"><svg><use href="#i-arrow"/></svg>View on GitHub</span>
+    </div>
+    <div class="body">
+      <div class="side">
+        <div class="sh">Pull request #128</div>
+        <div class="row on"><svg class="gl"><use href="#i-sliders"/></svg>Scale payment workers</div>
+        <div class="row sub" style="padding-left:8px;font-family:var(--mono);font-size:11.5px">habitable/scale-workers → main</div>
+        <div class="sh">Files changed</div>
+        <div class="row sub" style="padding-left:8px"><span class="dotst" style="background:var(--chg)"></span>workers.tf<span class="ct">+4 −2</span></div>
+        <div class="row sub" style="padding-left:8px"><span class="dotst" style="background:var(--chg)"></span>prod.auto.tfvars<span class="ct">+1 −1</span></div>
+        <div class="sh">3 changes</div>
+        <div class="row"><span class="ic" style="background:var(--add)"><svg><use href="#i-plus"/></svg></span>Worker alarm<span class="ct" style="color:var(--add)">new</span></div>
+        <div class="row"><span class="ic" style="background:var(--chg)"><svg><use href="#i-box"/></svg></span>Payment workers<span class="ct" style="color:var(--chg)">update</span></div>
+        <div class="row"><span class="ic" style="background:var(--chg)"><svg><use href="#i-gauge"/></svg></span>Worker autoscaling<span class="ct" style="color:var(--chg)">update</span></div>
+        <div class="sh">Other open proposals</div>
+        <div class="row sub" style="padding-left:8px">#126 Rotate Stripe webhook secret</div>
+        <div class="row sub" style="padding-left:8px">#121 Move logs to new bucket</div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div class="canvas">
+          <div class="frm" style="left:24px;top:22px;width:612px;height:104px;opacity:.5"><label>Edge</label></div>
+          <div class="frm" style="left:24px;top:146px;width:296px;height:200px"><label>Compute</label></div>
+          <div class="frm" style="left:340px;top:146px;width:296px;height:200px;opacity:.5"><label>Data</label></div>
+          <div class="frm" style="left:24px;top:366px;width:612px;height:92px"><label>Monitoring</label></div>
+          <div class="node dim" style="left:40px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-sign"/></svg></span><span class="txt"><b>pay.acme.com</b><small>No change</small></span></div>
+          <div class="node dim" style="left:246px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-split"/></svg></span><span class="txt"><b>API gateway</b><small>No change</small></span></div>
+          <div class="node dim" style="left:452px;top:50px"><span class="sq" style="background:var(--c-edge)"><svg><use href="#i-seal"/></svg></span><span class="txt"><b>TLS certificate</b><small>No change</small></span></div>
+          <div class="node dim" style="left:88px;top:180px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><span class="txt"><b>Payments API</b><small>No change</small></span></div>
+          <div class="node chg sel" style="left:88px;top:268px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-box"/></svg></span><span class="txt"><b>Payment workers</b><small style="color:var(--chg)">4 → 8 tasks</small></span><span class="badge" style="background:var(--chg)">~</span></div>
+          <div class="node dim" style="left:404px;top:180px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-db"/></svg></span><span class="txt"><b>Ledger database</b><small>No change</small></span></div>
+          <div class="node dim" style="left:404px;top:268px"><span class="sq" style="background:var(--c-data)"><svg><use href="#i-bolt"/></svg></span><span class="txt"><b>Job queue</b><small>No change</small></span></div>
+          <div class="node chg" style="left:40px;top:392px"><span class="sq" style="background:var(--c-compute)"><svg><use href="#i-gauge"/></svg></span><span class="txt"><b>Worker autoscaling</b><small style="color:var(--chg)">Max 8 → 16</small></span><span class="badge" style="background:var(--chg)">~</span></div>
+          <div class="node add ghost" style="left:246px;top:392px"><span class="sq" style="background:var(--c-id)"><svg><use href="#i-warn"/></svg></span><span class="txt"><b>Worker alarm</b><small style="color:var(--add)">New · queue depth</small></span><span class="badge" style="background:var(--add)">+</span></div>
+          <svg class="links" viewBox="0 0 660 538" preserveAspectRatio="none">
+            <path class="hot" d="M172 326 V392"/><path class="newl" d="M256 297 C320 330 330 360 330 392"/><path d="M256 297 C330 297 360 297 404 297"/>
+          </svg>
+          <div class="canvasbar"><span class="chip"><svg style="width:12px;height:12px"><use href="#i-cloud"/></svg>Speculative plan from HCP Terraform · 2 min ago</span><span class="chip"><span class="dotst" style="background:var(--add)"></span><b>1</b> new</span><span class="chip"><span class="dotst" style="background:var(--chg)"></span><b>2</b> update</span></div>
+        </div>
+        <div class="review">
+          <div class="counts">
+            <div><b style="color:var(--add)">1</b><small>to add</small></div>
+            <div><b style="color:var(--chg)">2</b><small>to change</small></div>
+            <div><b style="color:var(--ink3)">0</b><small>to replace</small></div>
+            <div><b style="color:var(--ink3)">0</b><small>to remove</small></div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;grid-row:1;grid-column:2">
+            <span class="tbbtn">Close Proposal</span>
+            <div class="hold" style="background:var(--add)"><span>Merge and Plan on main</span></div>
+          </div>
+          <div class="warn" style="background:color-mix(in srgb,var(--add) 9%,var(--win));box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--add) 40%,transparent)"><b style="color:var(--add)">Ready to merge.</b> Policies passed and Maya approved the pull request. Merging starts a run in HCP Terraform; you'll confirm the apply here when its plan matches this preview.</div>
+        </div>
+      </div>
+      <div class="insp">
+        <div class="ihead"><span class="sq" style="background:#24292f"><svg><use href="#i-code"/></svg></span><div><b>Scale payment workers</b><small>Pull request #128 · by Paul</small></div></div>
+        <div class="isec" style="border-top:0;padding-top:0">
+          <div class="steps">
+            <div class="st done"><i></i><div><b>Edited in VS Code</b><small>2 files on habitable/scale-workers</small></div></div>
+            <div class="st done"><i></i><div><b>Pull request opened</b><small>Committed and pushed by Habitable</small></div></div>
+            <div class="st done"><i></i><div><b>Speculative plan</b><small>HCP Terraform · +1 ~2 · matches preview</small></div></div>
+            <div class="st done"><i></i><div><b>Checks passed</b><small>Sentinel 3 of 3 · Cost +$46/mo</small></div></div>
+            <div class="st done"><i></i><div><b>Approved</b><small>Maya Chen · 6 min ago</small></div></div>
+            <div class="st now"><i></i><div><b>Merge</b><small>Starts a run in HCP Terraform</small></div></div>
+            <div class="st"><i></i><div><b>Confirm apply</b><small>Here, in Notification Center, or on the web</small></div></div>
+          </div>
+        </div>
+        <div class="isec"><h4>Conversation</h4>
+          <p style="font-size:12.5px;margin:0 0 4px"><b>Maya Chen</b> <span class="muted">approved</span></p>
+          <p style="font-size:12.5px;color:var(--ink2);margin:0">Alarm threshold looks right. Ship it before Black Friday traffic.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div></div>
+  <div class="notes">
+    <div><b>Git is handled for you.</b>Edit in VS Code, or change an input or tag in the inspector. Habitable creates the branch, commits, pushes and opens the pull request. People who never touch git still get a reviewable change.</div>
+    <div><b>The PR's plan is the preview.</b>HCP Terraform's speculative plan for the pull request renders on the map exactly like a local preview, with policy and cost checks inline.</div>
+    <div><b>Workspaces without a repo use the API.</b>CLI- and API-driven workspaces skip the pull request: Habitable uploads a configuration version and starts the run in HCP Terraform, then shows it on the same map.</div>
+    <div><b>Every apply is remote.</b>After merge, HCP Terraform plans main. Habitable confirms the plan matches what you reviewed, then you approve with a click or from a notification. Runs and logs stay in HCP Terraform.</div>
+  </div>
+</section>
+
+<!-- ============ MOMENTS ============ -->
+<section id="moments" class="wide">
+  <div class="col" style="margin:0">
+    <div class="eyebrow">Signature details</div>
+    <h2>What would win the award</h2>
+    <p class="muted">Apple Design Award winners usually have one unforgettable interaction and a hundred quiet, correct details. These are the candidates for the one.</p>
+  </div>
+  <div class="moments">
+    <div>
+      <h3>Time travel on the map</h3>
+      <p>Drag the timeline playhead and the map animates resources appearing and disappearing through history, built on saved state versions locally and on HCP state versions in the cloud. Let go on a moment to compare it with today.</p>
+    </div>
+    <div>
+      <h3>Changes that arrive</h3>
+      <p>During Apply, tiles fill in as Terraform reports each resource: a soft progress ring while creating, a settle animation when done, a shake on failure. Watching an apply becomes the satisfying part.</p>
+    </div>
+    <div>
+      <h3>Drift you can see</h3>
+      <p>A resource changed outside Terraform gets an amber pulse on the map and a diamond on the timeline. The inspector shows what changed and offers “Put it back” or “Keep it and update code”.</p>
+    </div>
+    <div>
+      <div class="mbx">
+        <div class="mr"><span class="dotst" style="background:var(--accent);width:9px;height:9px"></span><div><b>payments-api</b><small>Waiting for your approval · 4 changes</small></div><span class="r">Review</span></div>
+        <div class="mr"><span class="dotst" style="background:var(--add);width:9px;height:9px"></span><div><b>marketing-site</b><small>Applying · 6 of 9</small></div><span class="r">0:42</span></div>
+        <div class="mr"><span class="dotst" style="background:var(--chg);width:9px;height:9px"></span><div><b>acme-web</b><small>Drift detected 20 min ago</small></div></div>
+        <hr><div class="mr" style="color:var(--ink2)">Open Habitable</div>
+      </div>
+      <h3 style="margin-top:16px">Menu bar extra and notifications</h3>
+      <p>Runs in flight, HCP approvals and drift live in the menu bar. Actionable notifications let you approve an HCP run from Notification Center after checking the preview.</p>
+    </div>
+    <div>
+      <h3>Native everywhere</h3>
+      <p>App Intents so Shortcuts and Siri can “Check acme-web for drift”. Spotlight indexes resource names and endpoints. Quick Look on a .tfstate shows the map. Widgets show Library health.</p>
+    </div>
+    <div>
+      <h3>Claude, built in</h3>
+      <p>The existing MCP agent access becomes visible: “Ask Claude” in the inspector explains a replacement or drafts the code change that avoids it, and its proposals land as a Preview you review on the map like any other.</p>
+    </div>
+  </div>
+</section>
+
+<section id="questions" class="col">
+  <div class="eyebrow">Decided October 4</div>
+  <h2>Decisions</h2>
+  <div class="qs">
+    <div><b>The Map is the default for everyone.</b><span>List stays one click away for bulk and keyboard work.</span></div>
+    <div><b>Habitable is not an IDE.</b><span>“Defined in” opens VS Code or your chosen editor. A Source drawer covers quick edits. Visual editing covers inputs and tags only.</span></div>
+    <div><b>HCP Terraform writes ship in v1.</b><span>Infrastructure changes happen in HCP Terraform, never on the Mac. VCS-connected workspaces change through GitHub pull requests that Habitable creates and tracks. Other workspaces change through the API. Runs execute remotely.</span></div>
+    <div><b>macOS 27 Golden Gate only.</b><span>The redesign targets the newest SwiftUI, Liquid Glass materials and on-device models without fallbacks. Support for macOS 13 through 26 is dropped.</span></div>
+  </div>
+</section>
+
+<script>
+window.__INV=[
+ ["Open a Terraform folder","BlankSlate","A left-aligned column: “Choose Folder…”, “Connect to HCP Terraform…”, three Getting started steps and a list of recent folder paths.","Step three asks you to choose a Terraform workspace, but no workspace picker exists anywhere in the app."],
+ ["README","WorkspaceReadmePage","Rendered Markdown for the folder's README, with images replaced by “Open image” links.","A whole sidebar destination for a single document."],
+ ["Run detail","RunPage","Header with commit, then Plan / Apply / Errors tabs. Plan shows a big-number grid, collapsible per-resource Before/After stacks, and log sections.","Counts appear three times. The diff is uncolored and stacked vertically. “Confirm and apply” is only bold text, and the page says both Delete and Destroy."],
+ ["Outputs","OutputsListPage","Name and value rows, sensitive values masked, and a detail pane with Name, Type and Value.","Sorted Z→A. Outputs are disconnected from the resources that produce them."],
+ ["Variables","VariablesListPage","Declared inputs with descriptions, types, provenance and value previews; an Add/Edit sheet with type-aware fields.","Rows run up to eight lines. “Habitable value”, “Remembered” and “This session” are app jargon."],
+ ["Environment","EnvVarsListPage","Overrides and process environment variables with an Add sheet.","A separate destination for something most people set once."],
+ ["Agents","AgentsSettingsPage","Habitable MCP server toggle, detected agent clients, and buttons to install skills and tools.","Heavy jargon (MCP, loopback, skill), and four look-alike install buttons."],
+];
+</script>
+<script>
+(function(){
+  // Scale each fixed-size window mock to the available width.
+  function fit(){
+    document.querySelectorAll('.stage').forEach(function(st){
+      var sc=st.querySelector('.scaler'), w=sc.firstElementChild;
+      var s=Math.min(1, st.clientWidth/1200);
+      sc.style.transform='scale('+s+')';
+      st.style.height=(760*s)+'px';
+    });
+  }
+  fit(); window.addEventListener('resize',fit);
+  if(window.ResizeObserver){ new ResizeObserver(fit).observe(document.body); }
+
+  // Seeded miniature maps for Library tiles.
+  function rnd(seed){ var x=seed*9301+49297; return function(){ x=(x*9301+49297)%233280; return x/233280; }; }
+  var cols=['var(--c-edge)','var(--c-compute)','var(--c-data)','var(--c-net)','var(--c-id)'];
+  document.querySelectorAll('.thumb').forEach(function(t){
+    var r=rnd(+t.dataset.seed), tone=t.dataset.tone, out='<svg viewBox="0 0 300 128" preserveAspectRatio="xMidYMid meet">';
+    var groups=[[16,14,268,28],[16,50,128,44],[156,50,128,44],[16,100,268,20]];
+    groups.forEach(function(g,gi){
+      out+='<rect x="'+g[0]+'" y="'+g[1]+'" width="'+g[2]+'" height="'+g[3]+'" rx="7" fill="var(--frame)" stroke="var(--frameline)"/>';
+      var n=2+Math.floor(r()*4);
+      for(var i=0;i<n;i++){
+        var w=Math.min(46,(g[2]-12)/n-6), x=g[0]+6+i*((g[2]-12)/n), y=g[1]+g[3]/2-6;
+        var c=cols[gi===0?0:gi===1?1:gi===2?2:3];
+        if(gi===3 && i===n-1) c=cols[4];
+        out+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+w.toFixed(1)+'" height="12" rx="3.5" fill="var(--tile)" stroke="var(--tileline)"/>';
+        out+='<rect x="'+(x+2.5).toFixed(1)+'" y="'+(y+2.5).toFixed(1)+'" width="7" height="7" rx="2" fill="'+c+'"/>';
+      }
+    });
+    var mark={drift:'var(--chg)',wait:'var(--accent)',err:'var(--del)'}[tone];
+    if(mark){ out+='<circle cx="'+(60+r()*180).toFixed(0)+'" cy="'+(40+r()*50).toFixed(0)+'" r="7" fill="'+mark+'" stroke="var(--canvas)" stroke-width="2.5"/>'; }
+    if(tone==='new'){ out='<svg viewBox="0 0 300 128"><rect x="90" y="52" width="50" height="16" rx="4" fill="none" stroke="var(--add)" stroke-dasharray="3 3"/><rect x="160" y="52" width="50" height="16" rx="4" fill="none" stroke="var(--add)" stroke-dasharray="3 3"/>'; }
+    t.innerHTML=out+'</svg>';
+  });
+
+  // Template illustrations: little stacked tiles per template.
+  var arts=[[0,2,0],[0,1,1,2],[0,0],[1,2,2],[0,0],[3,3,3]];
+  var tint=['var(--c-edge)','var(--c-compute)','var(--c-data)','var(--ink3)'];
+  document.querySelectorAll('.art').forEach(function(a){
+    var spec=arts[+a.dataset.art], n=spec.length, out='<svg viewBox="0 0 240 120">';
+    out+='<rect width="240" height="120" fill="'+tint[spec[0]]+'" opacity=".12"/>';
+    spec.forEach(function(k,i){
+      var x=120-(n*44)/2+i*44+4, y=46+(i%2)*10;
+      out+='<rect x="'+x+'" y="'+y+'" width="36" height="28" rx="8" fill="var(--tile)" stroke="var(--tileline)"/><rect x="'+(x+9)+'" y="'+(y+6)+'" width="18" height="16" rx="5" fill="'+tint[k]+'"/>';
+    });
+    a.innerHTML=out+'</svg>';
+  });
+
+  // Current-app inventory.
+  var inv=window.__INV||[];
+  var host=document.getElementById('inv');
+  inv.forEach(function(s){
+    var el=document.createElement('article');
+    el.innerHTML='<h3>'+s[0]+'<small>'+s[1]+'</small></h3><p>'+s[2]+'</p><p class="issue">'+s[3]+'</p>';
+    host.appendChild(el);
+  });
+})();
+</script>
