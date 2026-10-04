@@ -6,13 +6,13 @@ DEST="${1:-/tmp/Habitable Map Preview.app}"
 xcodebuild -project Habitable.xcodeproj -scheme Habitable -configuration Debug \
   -destination 'platform=macOS' -derivedDataPath "$BUILD_DIR" CODE_SIGNING_ALLOWED=NO build
 python3 - "$BUILD_DIR/Build/Products/Debug/Habitable.app" "$DEST" <<'PY'
-import pathlib, plistlib, shutil, sys
+import os, pathlib, plistlib, shutil, sys
 source, target = map(pathlib.Path, sys.argv[1:])
 shutil.copytree(source, target, dirs_exist_ok=True)
 plist = target / 'Contents/Info.plist'
 with plist.open('rb') as file:
     info = plistlib.load(file)
-info.update(CFBundleIdentifier='com.thrashr888.Habitable.map-preview',
+info.update(CFBundleIdentifier=os.environ.get('HABITABLE_PREVIEW_BUNDLE_ID', 'com.thrashr888.Habitable.map-preview'),
             CFBundleName='Habitable Map Preview', CFBundleDisplayName='Habitable Map Preview',
             HabitableMapDemo=True)
 with plist.open('wb') as file:

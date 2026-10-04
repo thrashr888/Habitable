@@ -112,17 +112,28 @@ struct ResourceMapContent: View {
             }
             Divider()
             HStack(spacing: 16) {
-                Label("\(tiles.count) groups", systemImage: "square.grid.2x2")
-                Text("\(tiles.reduce(0) { $0 + $1.resources.count }) managed resources")
-                if let count = map?.dataSources.count, count > 0 {
-                    Button("\(count) data sources", action: onShowList).buttonStyle(.link)
+                if map != nil {
+                    Label(search.isEmpty ? "\(tiles.count) groups" : "\(visibleTiles.count) of \(tiles.count) groups", systemImage: "square.grid.2x2")
+                    Text("\(tiles.reduce(0) { $0 + $1.resources.count }) managed resources")
+                    if let count = map?.dataSources.count, count > 0 {
+                        Button("\(count) data sources", action: onShowList).buttonStyle(.link)
+                    }
+                    Spacer()
+                    Text("Current state").foregroundStyle(.tertiary)
+                } else {
+                    Text(isLoading ? "Reading state…" : (errorMessage == nil ? "No recorded state" : "State unavailable"))
+                    Spacer()
                 }
-                Spacer()
-                Text("Current state").foregroundStyle(.tertiary)
             }
             .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 10)
         }
         .onChange(of: identity) { _ in search = ""; selectedTileID = nil; selectedMember = nil }
+        .onChange(of: search) { _ in
+            if let selectedTileID, !visibleTiles.contains(where: { $0.id == selectedTileID }) {
+                self.selectedTileID = nil
+                selectedMember = nil
+            }
+        }
         .onChange(of: map) { _ in
             if let tile = selectedTile {
                 if !tile.resources.contains(selectedMember ?? "") { selectedMember = tile.anchors.first ?? tile.resources.first }
@@ -178,7 +189,10 @@ struct ResourceMapContent: View {
             } else if tiles.isEmpty {
                 empty("No managed resources yet", detail: emptyDetail, symbol: "square.dashed")
             } else if visibleTiles.isEmpty {
-                empty("No matching resources", detail: "Try a group name, resource type, or Terraform address.", symbol: "magnifyingglass")
+                VStack(spacing: 12) {
+                    empty("No matching resources", detail: "Try a group name, resource type, or Terraform address.", symbol: "magnifyingglass")
+                    Button("Clear search") { search = "" }.buttonStyle(.bordered)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 24) {
                     ForEach(MapKind.allCases, id: \.rawValue) { kind in
