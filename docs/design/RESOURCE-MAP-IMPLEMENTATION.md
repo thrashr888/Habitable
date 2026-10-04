@@ -1,8 +1,8 @@
 # Resource map foundation
 
 The first native slice implements deterministic map metadata in `ResourceMap.swift`.
-It is compiled into both the app and the model test target; the current UI does not
-call it yet.
+It is compiled into both the app and the model test target. Opening a local
+workspace now lands on the Map, with searchable kind rows and a group inspector.
 
 ## Input and ownership
 
@@ -54,3 +54,29 @@ compression ratios have not been validated against this implementation.
 
 Follow-up tracking: Habitable-nvm (state loading and Map/Inspector), Habitable-fee
 (corpus validation and remaining topology rules). Foundation: Habitable-bgl.
+
+## First interactive preview
+
+Run `bash scripts/build-map-preview.sh` to build `/tmp/Habitable Map Preview.app`.
+The separately identified, locally signed app starts with an in-memory sample:
+10 synthetic resources, 8 groups, 6 kind rows, and no runnable workspace or cloud
+connection. It does not replace the installed Habitable. Open a real local folder
+with File → Open to leave the sample and use the installed Terraform normally.
+The normal app supports `--map-demo` for the same explicit sample.
+
+Try Web Service → Orders in Connections, the masked password in Orders, searching
+for uploads, selecting its versioning resource, and List / Full inspector. A
+connection selection scrolls the destination tile into view. Connections are
+currently listed in the inspector; canvas edge drawing is still pending.
+
+Local refresh runs `show -json` followed by `state pull` under one existing command
+lease. It uses the selected backend and workspace, keeps raw state in memory only,
+and retains a clearly labeled inventory-only map if dependencies cannot be loaded
+or resource identities differ between the two snapshots. Clearing state or changing
+workspace clears the map and selection. Direct HCP API workspace maps remain pending.
+
+Validation: 233 model tests executed, 8 optional tests skipped, zero failures;
+native Debug build passed. Live UI verified sample selection, dependency navigation,
+search, List, masked password, and switching from sample to the provider-free
+playground (26 managed resources plus one data source). Empty/malformed behavior is
+covered by model tests; the complete live fixture matrix remains unverified.

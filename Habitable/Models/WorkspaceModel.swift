@@ -373,7 +373,12 @@ class Workspace: ObservableObject {
     @Published var textOutput: String?
     @Published var errorMessage: String?
     @Published var runs: [TerraformRun] = []
-    @Published var state: ShowMessage?
+    @Published var state: ShowMessage? {
+        didSet { resourceMap = nil; mapNotice = nil }
+    }
+    @Published private(set) var isMapDemo = false
+    @Published private(set) var resourceMap: ResourceMap?
+    @Published private(set) var mapNotice: String?
     @Published var terraformVariables: [TerraformVariable] = []
     @Published private(set) var terraformInputDiagnostics: [String] = []
     @Published private(set) var isInspectingInputs = false
@@ -666,6 +671,7 @@ class Workspace: ObservableObject {
             isLoadingWorkspaceDescription = false
         }
         historyError = nil
+        isMapDemo = false
         state = nil
         isInitialized = false
         isValid = false
@@ -1024,54 +1030,96 @@ class Workspace: ObservableObject {
     }
     
     func refreshResources() {
-        guard let workingDirectory = workingDirectory else { return }
-        guard !locked else { return }
+        guard let workingDirectory, !locked else { return }
         let lease: WorkspaceCommandCoordinator.Lease
         do { lease = try acquireCommandLease() }
         catch { errorMessage = error.localizedDescription; return }
-        // Clear stale inventory while querying the selected local or remote backend.
         state = nil
         hasState = false
         errorMessage = nil
         lock()
-        
         let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
-        activeCommand = runner.show(workingDirectory: workingDirectory, completion: { res, error in
-            self.finishCommand()
-            self.unlock()
-            lease.release()
-            
-            if let res = res {
-                guard let data = res.data(using: .utf8), let json = try? JSON(data: data),
-                      let object = json.dictionary else {
-                    self.errorMessage = "Terraform returned malformed state data."
-                    return
-                }
-                if json["values"].dictionary != nil, json["values"]["root_module"].dictionary != nil {
-                    self.state = transformShow(json)
-                    self.hasState = true
-                    self.isValid = true
-                } else if json["values"].exists() == false,
-                          json["format_version"].string != nil,
-                          object.keys.allSatisfy({ ["format_version", "terraform_version"].contains($0) }) {
-                    // `terraform show -json` succeeds in a fresh local workspace and
-                    // returns only format_version (and optionally terraform_version).
-                    // That is a valid empty state, not an error.
-                    self.state = nil
-                    self.hasState = false
-                } else {
-                    self.state = nil
-                    self.hasState = false
-                    self.errorMessage = "Terraform returned malformed state data."
+        activeCommand = runner.show(workingDirectory: workingDirectory) { res, error in
+            var pullingState = false
+            defer {
+                if !pullingState {
+                    self.finishCommand()
+                    self.unlock()
+                    lease.release()
                 }
             }
-            
-            if let error = error {
-                // Validation succeeded; a missing state or inaccessible backend should
-                // not make the Terraform configuration itself appear invalid.
+            if let error {
                 self.errorMessage = redactor.redact(error.message)
+                return
             }
-        })
+            guard let res, let data = res.data(using: .utf8), let json = try? JSON(data: data),
+                  let object = json.dictionary else {
+                self.errorMessage = "Terraform returned malformed state data."
+                return
+            }
+            if json["values"].dictionary != nil,
+               json["values"]["root_module"].dictionary != nil || json["values"]["outputs"].dictionary != nil {
+                self.state = transformShow(json)
+                self.hasState = true
+                self.isValid = true
+                let metadata = self.state?.resources.compactMap { resource -> MapResource? in
+                    guard let address = resource.address, let type = resource.type, let name = resource.name else { return nil }
+                    let record = ResourceBrowserRecord(id: address, address: address, type: type,
+                                                       provider: resource.provider_name, mode: resource.mode)
+                    return MapResource(address: address, type: type, name: name,
+                                       module: record.module == "root" ? "" : record.module, isData: resource.mode == "data")
+                } ?? []
+                self.resourceMap = try? ResourceMapClassifier().classify(metadata)
+                guard !metadata.isEmpty, !self.isCancelingCommand else { return }
+                self.mapNotice = "Reading resource connections…"
+                pullingState = true
+                self.activeCommand = self.runner.pullState(workingDirectory: workingDirectory) { raw, pullError in
+                    defer { self.finishCommand(); self.unlock(); lease.release() }
+                    guard pullError == nil, let raw, let rawData = raw.data(using: .utf8),
+                          let resources = try? ResourceMapStateReader.read(rawData),
+                          Self.mapInventoryMatches(resources, metadata),
+                          let map = try? ResourceMapClassifier().classify(resources) else {
+                        self.mapNotice = "Connections unavailable. Showing resources from the latest inventory. Refresh to try again."
+                        return
+                    }
+                    self.resourceMap = map
+                    self.mapNotice = nil
+                }
+            } else if !json["values"].exists(), json["format_version"].string != nil,
+                      object.keys.allSatisfy({ ["format_version", "terraform_version"].contains($0) }) {
+                self.hasState = false
+            } else {
+                self.errorMessage = "Terraform returned malformed state data."
+            }
+        }
+    }
+
+    /// An explicit, in-memory sample: no workspace, cloud calls or runnable configuration.
+    func loadMapDemo() {
+        guard workingDirectory == nil, !locked else { return }
+        isMapDemo = true
+        let raw = ResourceMapSample.rawState
+        let json = JSON(raw)
+        let shown: [[String: Any]] = (raw["resources"] as? [[String: Any]] ?? []).map { resource in
+            let instance = (resource["instances"] as? [[String: Any]])!.first!
+            return ["address": "\(resource["type"]!).\(resource["name"]!)", "type": resource["type"]!,
+                    "name": resource["name"]!, "mode": "managed", "provider_name": "registry.terraform.io/hashicorp/aws",
+                    "values": instance["attributes"]!, "sensitive_values": instance["sample_sensitive"] ?? [:]]
+        }
+        state = transformShow(JSON(["values": ["root_module": ["resources": shown]]]))
+        if let data = try? json.rawData(), let resources = try? ResourceMapStateReader.read(data) {
+            resourceMap = try? ResourceMapClassifier().classify(resources)
+        }
+        mapNotice = "Sample infrastructure · nothing here is connected to a cloud account."
+    }
+
+    /// Never combine a newer backend snapshot's topology with older inspector values.
+    static func mapInventoryMatches(_ raw: [MapResource], _ shown: [MapResource]) -> Bool {
+        func inventory(_ values: [MapResource]) -> [MapResource] {
+            values.map { MapResource(address: $0.address, type: $0.type, name: $0.name,
+                                     module: $0.module, isData: $0.isData) }.sorted { $0.address < $1.address }
+        }
+        return inventory(raw) == inventory(shown)
     }
     
 //    func show() {

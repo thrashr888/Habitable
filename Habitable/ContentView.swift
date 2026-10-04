@@ -29,10 +29,11 @@ extension FocusedValues {
 
 struct ContentView: View {
     enum NavigationItem: String {
-        case workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings, hcpTerraform
+        case map, workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings, hcpTerraform
 
         var title: String {
             switch self {
+            case .map: "Map"
             case .workspace: "Workspace"
             case .readme: "README"
             case .configuration: "Configuration"
@@ -51,7 +52,14 @@ struct ContentView: View {
         }
     }
 
-    @StateObject var workspace = Workspace()
+    @StateObject var workspace: Workspace
+
+    init() {
+        let demo = ProcessInfo.processInfo.arguments.contains("--map-demo") || Bundle.main.object(forInfoDictionaryKey: "HabitableMapDemo") as? Bool == true
+        let model = Workspace(restoreLastDirectory: !demo)
+        if demo { model.loadMapDemo() }
+        _workspace = StateObject(wrappedValue: model)
+    }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
     @StateObject private var releaseCatalog = TerraformReleaseCatalog()
@@ -61,7 +69,7 @@ struct ContentView: View {
     @StateObject private var hcpViewer = HCPWorkspaceViewerModel()
     @StateObject private var agentAccess = HabitableAgentAccess()
     @StateObject private var windowIdentity = WorkspaceTitlebarController()
-    @State private var selection: NavigationItem? = .workspace
+    @State private var selection: NavigationItem? = .map
     @State private var selectedRun: UUID?
     @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
@@ -84,7 +92,7 @@ struct ContentView: View {
             agentAccess.workspaceChanged(in: workspace)
             if let directory, isAvailableDirectory(directory) {
                 recentWorkspaces.recordSuccessfulOpen(directory)
-                if selection == .hcpTerraform { navigationSelection.wrappedValue = .workspace }
+                navigationSelection.wrappedValue = .map
             }
         }
         .alert("Unable to Open Folder", isPresented: $isOpenErrorPresented) {
@@ -153,7 +161,7 @@ struct ContentView: View {
 
     private var windowContent: some View {
         Group {
-            if workspace.workingDirectory == nil && selection != .hcpTerraform {
+            if workspace.workingDirectory == nil && !workspace.isMapDemo && selection != .hcpTerraform {
                 BlankSlateView(recentFolders: recentWorkspaces.folders,
                                onChooseFolder: openFolder,
                                onOpenRecent: openRecent,
@@ -223,6 +231,7 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: navigationSelection) {
+            Label("Map", systemImage: "square.grid.3x3").tag(NavigationItem.map)
             Label("Workspace", systemImage: "folder").tag(NavigationItem.workspace)
             Label("README", systemImage: "book.closed").tag(NavigationItem.readme)
             Label("Configuration", systemImage: "doc.text").tag(NavigationItem.configuration)
@@ -314,6 +323,11 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
+        case .map: ResourceMapPage(onShowList: { navigationSelection.wrappedValue = .resources },
+                                    onOpenResource: { address in
+                                        selectedResource = address
+                                        navigationSelection.wrappedValue = .resources
+                                    })
         case .readme: WorkspaceReadmePage(directory: workspace.workingDirectory, presentation: readme)
         case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel,
                                                declarationRequest: $declarationRequest)
