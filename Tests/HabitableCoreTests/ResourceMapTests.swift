@@ -1,0 +1,126 @@
+import XCTest
+@testable import HabitableCore
+
+final class ResourceMapTests: XCTestCase {
+    private let classifier = ResourceMapClassifier()
+    private func r(_ type: String, _ name: String = "main", module: String = "", deps: [String] = []) -> MapResource {
+        MapResource(address: (module.isEmpty ? "" : module + ".") + type + "." + name,
+                    type: type, name: name, module: module, dependencies: deps)
+    }
+
+    func testProviderCategoriesAndOverrides() {
+        XCTAssertEqual(ResourceMapCategories.values.count, 3997)
+        for (type, kind) in [("aws_s3_bucket", MapKind.data), ("aws_lambda_function", .appsAndAI),
+                             ("aws_sqs_queue", .messaging), ("aws_iam_role", .identityAndMonitoring),
+                             ("google_compute_network", .network), ("google_compute_backend_service", .frontDoor),
+                             ("kubernetes_secret", .appsAndAI), ("helm_release", .appsAndAI),
+                             ("custom_bucket", .data), ("custom_mystery", .other)] {
+            XCTAssertEqual(classifier.kind(for: type), kind, type)
+        }
+    }
+
+    func testFacetPrefersExplicitParentOverCloserLexicalAnchor() throws {
+        let bucket = r("aws_s3_bucket", "storage")
+        let function = r("aws_lambda_function", "aaa")
+        let facet = r("aws_s3_bucket_versioning", "storage", deps: [bucket.address, function.address])
+        let map = try classifier.classify([function, facet, bucket])
+        XCTAssertEqual(map.tiles.first { $0.id == bucket.address }?.resources, [bucket.address, facet.address].sorted())
+    }
+
+    func testNearestHelperAndStableTieBreaking() throws {
+        let a = r("aws_lambda_function", "alpha"), b = r("aws_lambda_function", "beta")
+        let helper = r("aws_iam_role", deps: [b.address, a.address])
+        let map = try classifier.classify([a, b, helper])
+        XCTAssertTrue(map.tiles.first { $0.id == a.address }!.resources.contains(helper.address))
+        XCTAssertEqual(map, try classifier.classify([helper, b, a]))
+    }
+
+    func testModuleInstancesAndKindsDoNotMergeByName() throws {
+        let resources = [r("aws_s3_bucket", "chat_api", module: "module.service[\"one\"]"),
+                         r("aws_s3_bucket", "chat_api", module: "module.service[\"two\"]"),
+                         r("aws_lambda_function", "chat_api", module: "module.service[\"one\"]")]
+        XCTAssertEqual(try classifier.classify(resources).tiles.count, 3)
+    }
+
+    func testGenericNamesRemainSeparateAndSemanticStemsMerge() throws {
+        XCTAssertEqual(try classifier.classify([r("aws_s3_bucket"), r("aws_db_instance")]).tiles.count, 2)
+        XCTAssertEqual(try classifier.classify([r("aws_s3_bucket", "chat_data_primary"), r("aws_s3_bucket", "chat_data_secondary")]).tiles.count, 1)
+    }
+
+    func testAllResourcesAccountedForIncludingUnknownAndData() throws {
+        let unknown = r("acme_widget"), role = r("aws_iam_role")
+        let data = MapResource(address: "data.aws_region.current", type: "aws_region", name: "current", isData: true)
+        let map = try classifier.classify([unknown, role, data])
+        XCTAssertEqual(map.tiles.map(\.kind), [.identityAndMonitoring, .other])
+        XCTAssertEqual(map.tiles.flatMap(\.resources).sorted(), [unknown.address, role.address].sorted())
+        XCTAssertEqual(map.dataSources, [data.address])
+    }
+
+    func testThreeHopLimitAndCyclesTerminate() throws {
+        let anchor = r("aws_lambda_function")
+        let h1 = r("aws_iam_role", "h1", deps: [anchor.address])
+        let h2 = r("aws_iam_role", "h2", deps: [h1.address])
+        let h3 = r("aws_iam_role", "h3", deps: [h2.address])
+        let h4 = r("aws_iam_role", "h4", deps: [h3.address, "aws_iam_role.h5"])
+        let h5 = r("aws_iam_role", "h5", deps: [h4.address])
+        let map = try classifier.classify([h5, h4, h3, h2, h1, anchor])
+        XCTAssertEqual(map.tiles.first { $0.id == anchor.address }?.resources.count, 4)
+        XCTAssertEqual(map.tiles.count, 3)
+    }
+
+    func testRawStateStacksKeysAndDependencies() throws {
+        let state = #"""
+        {"version":4,"resources":[
+          {"mode":"managed","module":"module.app[\"east\"]","type":"aws_lambda_function","name":"main","instances":[
+            {"index_key":"a.b\"c","dependencies":["aws_iam_role.main"],"attributes":{"password":"do not retain"}},
+            {"index_key":2,"dependencies":["aws_iam_role.main"]},
+            {"index_key":2,"deposed":"old","attributes":{}}]},
+          {"mode":"managed","type":"aws_iam_role","name":"main","instances":[{}]}]}
+        """#
+        let resources = try ResourceMapStateReader.read(Data(state.utf8))
+        XCTAssertEqual(resources.count, 3)
+        XCTAssertTrue(resources.contains { $0.address == #"module.app["east"].aws_lambda_function.main["a.b\"c"]"# })
+        let map = try classifier.classify(resources)
+        XCTAssertEqual(map.tiles.count, 1)
+        XCTAssertEqual(map.tiles[0].anchors.count, 2)
+        XCTAssertEqual(map.tiles[0].resources.count, 3)
+    }
+
+    func testBlockDependenciesResolveInstancesAndKeepConnectionsDirected() throws {
+        let a = MapResource(address: "aws_s3_bucket.main[0]", type: "aws_s3_bucket", name: "main")
+        let b = MapResource(address: "aws_s3_bucket.main[1]", type: "aws_s3_bucket", name: "main")
+        let app = r("aws_lambda_function", deps: ["aws_s3_bucket.main"])
+        let map = try classifier.classify([a, app, b])
+        XCTAssertEqual(map.connections, [MapConnection(source: app.address, target: a.address)])
+    }
+
+    func testShowJSONNestedModulesDoesNotInventDependencies() throws {
+        let json = #"""
+        {"format_version":"1.0","values":{"root_module":{"child_modules":[
+          {"address":"module.app","resources":[{"address":"module.app.aws_s3_bucket.main","mode":"managed","type":"aws_s3_bucket","name":"main","values":{"id":"secret"}}]}
+        ]}}}
+        """#
+        let result = try ResourceMapStateReader.read(Data(json.utf8))
+        XCTAssertEqual(result, [r("aws_s3_bucket", module: "module.app")])
+        XCTAssertEqual(try ResourceMapStateReader.read(Data(#"{"format_version":"1.0","values":{"outputs":{}}}"#.utf8)), [])
+    }
+
+    func testInvalidAndDuplicateStateFailsExplicitly() throws {
+        for json in [#"{}"#, #"{"version":4,"resources":[{}]}"#,
+                     #"{"format_version":"1.0","values":{"root_module":{"resources":{}}}}"#,
+                     #"{"format_version":"1.0","values":{"root_module":[]}}"#] {
+            XCTAssertThrowsError(try ResourceMapStateReader.read(Data(json.utf8)))
+        }
+        XCTAssertThrowsError(try classifier.classify([r("aws_s3_bucket"), r("aws_s3_bucket")]))
+    }
+
+    func testThousandResourcesAreDeterministicAndFullyAccountedFor() throws {
+        let resources = (0..<1000).map { r("aws_s3_bucket", "bucket\($0)") }
+        let start = ContinuousClock.now
+        let map = try classifier.classify(resources)
+        print("Resource map 1000-resource classification: \(start.duration(to: .now))")
+        XCTAssertEqual(map.tiles.count, 1000)
+        XCTAssertEqual(map, try classifier.classify(resources.reversed()))
+        XCTAssertEqual(Set(map.tiles.flatMap(\.resources)).count, 1000)
+    }
+}
