@@ -68,8 +68,10 @@ struct HCPWorkspaceViewer: View {
             if !connectionOnly && model.isConnected {
               QuietToolbar {
                 ToolbarItemGroup(placement: .navigation) {
+                    // The window title already names the workspace; the chooser names
+                    // the collection it opens, as a Finder pop-up would.
                     Button { showingWorkspaces.toggle() } label: {
-                        Label(model.selectedWorkspace?.name ?? "Choose workspace", systemImage: "square.grid.2x2")
+                        Label(model.selectedWorkspace == nil ? "Choose workspace" : "Workspaces", systemImage: "square.grid.2x2")
                             .labelStyle(.titleAndIcon)
                     }
                     .accessibilityLabel("Choose cloud workspace")

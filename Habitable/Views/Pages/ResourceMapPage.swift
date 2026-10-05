@@ -124,7 +124,8 @@ struct ResourceMapContent: View {
     var sideFaces: [MapSideFace] = []
     @State private var sideFaceID = "inspector"
     @State private var showingVariables = false
-    @State private var showingInventory = true
+    // Settings › General › "Show inventory when a map opens".
+    @State private var showingInventory = UserDefaults.standard.object(forKey: "map.showInventory") as? Bool ?? true
     @StateObject private var renderCache = MapRenderCache()
     @State private var selectedTileID: String?
     @State private var selectedMember: String?
