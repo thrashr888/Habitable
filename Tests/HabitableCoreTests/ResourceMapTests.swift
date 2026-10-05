@@ -80,8 +80,8 @@ final class ResourceMapTests: XCTestCase {
         XCTAssertEqual(try tile(containing: dbSubnets.address).id, database.address)
         XCTAssertEqual(try tile(containing: cacheSubnets.address).id, cache.address)
         XCTAssertNotEqual(try tile(containing: database.address).id, try tile(containing: cache.address).id)
-        XCTAssertEqual(try tile(containing: github.address).kind, .other)
-        XCTAssertEqual(try tile(containing: monitor.address).kind, .other)
+        XCTAssertEqual(try tile(containing: github.address).kind, .code)
+        XCTAssertEqual(try tile(containing: monitor.address).kind, .identityAndMonitoring)
         XCTAssertTrue([cert, cdn, dns, email, bucket].allSatisfy { resource in
             (try? tile(containing: resource.address).title.contains("·")) == true
         })
@@ -93,6 +93,73 @@ final class ResourceMapTests: XCTestCase {
         XCTAssertEqual(try tile(containing: vpc.address).title, "Rookery · Network")
         XCTAssertEqual(try tile(containing: eip.address).title, "Rookery · Network")
         XCTAssertEqual(Set(map.tiles.flatMap(\.resources)).count, 17)
+    }
+
+    func testGitHubAndDatadogKinds() {
+        for (type, kind) in [("github_repository", MapKind.code), ("github_branch_protection", .code),
+                             ("github_actions_secret", .code), ("github_repository_file", .code),
+                             ("github_team", .identityAndMonitoring), ("github_team_repository", .identityAndMonitoring),
+                             ("github_membership", .identityAndMonitoring), ("github_organization_settings", .identityAndMonitoring),
+                             ("github_actions_organization_secret", .identityAndMonitoring),
+                             ("datadog_monitor", .identityAndMonitoring), ("datadog_dashboard", .identityAndMonitoring),
+                             ("datadog_integration_aws", .identityAndMonitoring)] {
+            XCTAssertEqual(classifier.kind(for: type), kind, type)
+        }
+    }
+
+    func testGitHubRepositoriesAndTeamsAnchorTheirSettings() throws {
+        let repo = r("github_repository", "rookery")
+        // Branch protection often names the repository by string, not reference.
+        let protection = r("github_branch_protection", "rookery")
+        let secret = r("github_actions_secret", "deploy_key", deps: [repo.address])
+        let team = r("github_team", "platform")
+        let access = r("github_team_repository", "platform_rookery", deps: [repo.address, team.address])
+        let member = r("github_team_membership", "platform_alice", deps: [team.address])
+        let map = try classifier.classify([repo, protection, secret, team, access, member])
+        func tile(containing address: String) throws -> MapTile {
+            try XCTUnwrap(map.tiles.first { $0.resources.contains(address) })
+        }
+        XCTAssertEqual(map.tiles.count, 2)
+        XCTAssertEqual(try tile(containing: repo.address).kind, .code)
+        XCTAssertEqual(try tile(containing: repo.address).resources, [protection.address, secret.address, repo.address].sorted())
+        XCTAssertEqual(try tile(containing: team.address).kind, .identityAndMonitoring)
+        XCTAssertEqual(try tile(containing: team.address).anchors, [team.address])
+        XCTAssertEqual(try tile(containing: team.address).resources, [team.address, access.address, member.address].sorted())
+        XCTAssertEqual(map.connections.map { [$0.source, $0.target].sorted() }, [[repo.address, team.address].sorted()])
+    }
+
+    func testAmbiguousNameFallbackStaysSeparate() throws {
+        let repo = r("github_repository", "rookery")
+        let other = r("github_repository_ruleset", "rookery", module: "module.other")
+        let protection = r("github_branch_protection", "shared")
+        let first = r("github_repository", "shared", module: "module.a")
+        let map = try classifier.classify([repo, other, protection, first])
+        // Name fallback never crosses module boundaries.
+        XCTAssertEqual(map.tiles.first { $0.id == repo.address }?.resources, [repo.address])
+        XCTAssertEqual(map.tiles.first { $0.resources.contains(protection.address) }?.anchors, [])
+        XCTAssertEqual(Set(map.tiles.flatMap(\.resources)).count, 4)
+    }
+
+    func testDatadogObjectivesGroupMonitorsAndDashboardsConnect() throws {
+        let latency = r("datadog_monitor", "api_latency")
+        let errors = r("datadog_monitor", "api_errors")
+        let slo = r("datadog_service_level_objective", "api_availability", deps: [errors.address, latency.address])
+        let dashboard = r("datadog_dashboard", "api_overview", deps: [latency.address])
+        let downtime = r("datadog_downtime", "api_maintenance", deps: [errors.address])
+        let integration = r("datadog_integration_aws", "main")
+        let map = try classifier.classify([latency, errors, slo, dashboard, downtime, integration])
+        func tile(containing address: String) throws -> MapTile {
+            try XCTUnwrap(map.tiles.first { $0.resources.contains(address) })
+        }
+        XCTAssertEqual(map.tiles.count, 3)
+        XCTAssertTrue(map.tiles.allSatisfy { $0.kind == .identityAndMonitoring })
+        let objective = try tile(containing: slo.address)
+        XCTAssertEqual(objective.anchors, [errors.address, latency.address, slo.address].sorted())
+        XCTAssertEqual(objective.resources, [errors.address, latency.address, slo.address, downtime.address].sorted())
+        XCTAssertEqual(try tile(containing: dashboard.address).resources, [dashboard.address])
+        XCTAssertEqual(try tile(containing: integration.address).anchors, [])
+        XCTAssertEqual(map.connections, [MapConnection(source: dashboard.address, target: objective.id,
+                                                       evidence: [MapConnectionEvidence(sourceResource: dashboard.address, targetResource: latency.address)])])
     }
 
     func testAllResourcesAccountedForIncludingUnknownAndData() throws {
