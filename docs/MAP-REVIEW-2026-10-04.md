@@ -40,3 +40,11 @@ The user correctly rejected the small, low-contrast text at 75% zoom. The earlie
 Following user feedback, the sample cloud entry point and sheet are removed. Preview startup now restores the real workspace through the normal app flow; neither a launch argument nor a bundle flag substitutes demo data. Synthetic models remain available to automated tests only. The stable preview identifier and signing workflow are unchanged. Native build passes.
 
 Live verification after removal: normal startup restored the prior local directory; the HCP disconnected screen contains no sample CTA. Connecting through the saved credential loaded the selected real workspace, cool-website in pthrasher_v2, showing 2 groups, 8 managed resources and 4 data sources. No infrastructure mutations were performed.
+
+## Startup failure found by user
+
+The preview still remembered `/private/tmp/Habitable Map Checks/Malformed`, a deliberately invalid QA state fixture. Earlier verification saw that failure and then switched to HCP; that was an inadequate handoff. Switching to HCP did not survive restart, so launch fell back to the local Map and the old fixture.
+
+The app now remembers whether the last selected source was local or HCP. HCP startup does not load an unrelated saved local directory. Local folder opens still select the local Map. State failures identify the workspace, offer refresh, and preserve selectable, left-aligned Terraform diagnostics behind a disclosure.
+
+Verified with the rebuilt stable preview: opened and expanded the malformed-state diagnostic; switched to HCP; quit via Command-Q; relaunched; confirmed HCP was selected with no local fixture loaded; connected using the existing saved credential; confirmed Rookery loaded with 17 groups, 57 managed resources and 13 data sources; refreshed Rookery and confirmed the same loaded counts with no error. No Terraform state or infrastructure was modified. Native build and diff checks passed. This verifies startup and state loading, not full Map design acceptance.

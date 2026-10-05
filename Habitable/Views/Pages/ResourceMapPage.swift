@@ -178,8 +178,23 @@ struct ResourceMapContent: View {
             ScrollViewReader { proxy in
                 ScrollView([.horizontal, .vertical]) {
                     if let error = errorMessage, map == nil {
-                        empty("Couldn’t read this workspace", detail: error, symbol: "exclamationmark.triangle")
-                            .frame(width: viewport.size.width)
+                        VStack(alignment: .leading, spacing: 16) {
+                            Label("Couldn’t read state for \(title)", systemImage: "exclamationmark.triangle")
+                                .font(.headline)
+                            Text("The Map needs readable Terraform state. Check that you opened the intended workspace, then refresh after resolving the state error.")
+                                .font(.body).foregroundStyle(.secondary)
+                            Text(identity.components(separatedBy: "|").first ?? "")
+                                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                            DisclosureGroup("Technical details") {
+                                Text(error).font(.system(.body, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 8)
+                            }
+                            Button("Refresh state", action: refresh).disabled(!canRefresh)
+                        }
+                        .padding(24)
+                        .frame(width: viewport.size.width, alignment: .leading)
                     } else if isLoading && map == nil {
                         ProgressView("Reading your infrastructure…")
                             .frame(width: viewport.size.width, height: 180)
