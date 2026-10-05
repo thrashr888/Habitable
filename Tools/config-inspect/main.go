@@ -29,7 +29,24 @@ type metadataOutput struct {
 	ModuleCalls       map[string]moduleCallMetadataOutput `json:"module_calls"`
 	Resources         map[string]resourceMetadataOutput   `json:"resources"`
 	RequiredCore      []string                            `json:"required_core,omitempty"`
+	Backend           *backendMetadataOutput              `json:"backend,omitempty"`
 	Diagnostics       tfconfig.Diagnostics                `json:"diagnostics,omitempty"`
+}
+
+type backendMetadataOutput struct {
+	Type         string                   `json:"type"`
+	Hostname     string                   `json:"hostname,omitempty"`
+	Organization string                   `json:"organization,omitempty"`
+	Workspaces   *backendWorkspacesOutput `json:"workspaces,omitempty"`
+	Unresolved   []string                 `json:"unresolved,omitempty"`
+	Pos          tfconfig.SourcePos       `json:"pos"`
+}
+
+type backendWorkspacesOutput struct {
+	Name    string   `json:"name,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Prefix  string   `json:"prefix,omitempty"`
+	Project string   `json:"project,omitempty"`
 }
 
 type resourceMetadataOutput struct {
@@ -208,8 +225,10 @@ func inspectMetadata(directory string) (*metadataOutput, error) {
 		resources[address] = resourceMetadataOutput{Address: address, Pos: item.Pos}
 	}
 	diagnostics = append(diagnostics, propDiagnostics...)
+	backend, backendDiagnostics := readBackend(directory)
+	diagnostics = append(diagnostics, backendDiagnostics...)
 	return &metadataOutput{Path: module.Path, Variables: variables, Outputs: outputs,
-		RequiredProviders: providers, ModuleCalls: moduleCalls, Resources: resources, RequiredCore: module.RequiredCore, Diagnostics: diagnostics}, nil
+		RequiredProviders: providers, ModuleCalls: moduleCalls, Resources: resources, RequiredCore: module.RequiredCore, Backend: backend, Diagnostics: diagnostics}, nil
 }
 
 func readValues(filename string) (*valueOutput, error) {
@@ -326,4 +345,134 @@ func readDeclarationProperties(directory string) (map[string]declarationProperti
 // Kept separate to make parser diagnostics visible at the input boundary.
 func hclsyntaxParse(filename string, data []byte) (*hcl.File, hcl.Diagnostics) {
 	return hclsyntax.ParseConfig(data, filename, hcl.Pos{Line: 1, Column: 1})
+}
+
+// readBackend finds the first terraform { cloud {} } or backend "X" {} declaration
+// in the directory's *.tf files, reading only literal values.
+func readBackend(directory string) (*backendMetadataOutput, tfconfig.Diagnostics) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, nil
+	}
+	var found []*backendMetadataOutput
+	for _, entry := range entries { // ReadDir returns entries sorted by filename.
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".tf" {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		file, diags := hclsyntaxParse(entry.Name(), data)
+		if diags.HasErrors() {
+			continue
+		}
+		body, ok := file.Body.(*hclsyntax.Body)
+		if !ok {
+			continue
+		}
+		for _, block := range body.Blocks {
+			if block.Type != "terraform" {
+				continue
+			}
+			for _, nested := range block.Body.Blocks {
+				isCloud := nested.Type == "cloud" && len(nested.Labels) == 0
+				isBackend := nested.Type == "backend" && len(nested.Labels) == 1
+				if !isCloud && !isBackend {
+					continue
+				}
+				out := &backendMetadataOutput{Type: "cloud", Pos: tfconfig.SourcePos{Filename: path, Line: nested.DefRange().Start.Line}}
+				if isBackend {
+					out.Type = nested.Labels[0]
+				}
+				if isCloud || out.Type == "remote" {
+					readRemoteBackend(nested.Body, out)
+				}
+				found = append(found, out)
+			}
+		}
+	}
+	if len(found) == 0 {
+		return nil, nil
+	}
+	var diagnostics tfconfig.Diagnostics
+	if len(found) > 1 {
+		diagnostics = append(diagnostics, tfconfig.Diagnostic{Severity: tfconfig.DiagWarning, Summary: "Multiple backend declarations",
+			Detail: fmt.Sprintf("Found %d backend or cloud declarations; using the first, at %s:%d.", len(found), found[0].Pos.Filename, found[0].Pos.Line)})
+	}
+	return found[0], diagnostics
+}
+
+func literalValue(attr *hclsyntax.Attribute) (cty.Value, bool) {
+	if len(attr.Expr.Variables()) != 0 {
+		return cty.NilVal, false
+	}
+	value, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() || !value.IsWhollyKnown() || value.IsNull() {
+		return cty.NilVal, false
+	}
+	return value, true
+}
+
+func literalString(attr *hclsyntax.Attribute) (string, bool) {
+	value, ok := literalValue(attr)
+	if !ok || value.Type() != cty.String {
+		return "", false
+	}
+	return value.AsString(), true
+}
+
+func literalStringList(attr *hclsyntax.Attribute) ([]string, bool) {
+	value, ok := literalValue(attr)
+	if !ok {
+		return nil, false
+	}
+	ty := value.Type()
+	if !ty.IsListType() && !ty.IsTupleType() && !ty.IsSetType() {
+		return nil, false
+	}
+	var items []string
+	for it := value.ElementIterator(); it.Next(); {
+		_, element := it.Element()
+		if element.IsNull() || element.Type() != cty.String {
+			return nil, false
+		}
+		items = append(items, element.AsString())
+	}
+	return items, true
+}
+
+func readRemoteBackend(body *hclsyntax.Body, out *backendMetadataOutput) {
+	setString := func(attrs hclsyntax.Attributes, key, path string, dest *string) {
+		attr, ok := attrs[key]
+		if !ok {
+			return
+		}
+		if value, ok := literalString(attr); ok {
+			*dest = value
+		} else {
+			out.Unresolved = append(out.Unresolved, path)
+		}
+	}
+	setString(body.Attributes, "hostname", "hostname", &out.Hostname)
+	setString(body.Attributes, "organization", "organization", &out.Organization)
+	for _, nested := range body.Blocks {
+		if nested.Type != "workspaces" || len(nested.Labels) != 0 {
+			continue
+		}
+		ws := &backendWorkspacesOutput{}
+		out.Workspaces = ws
+		setString(nested.Body.Attributes, "name", "workspaces.name", &ws.Name)
+		setString(nested.Body.Attributes, "prefix", "workspaces.prefix", &ws.Prefix)
+		setString(nested.Body.Attributes, "project", "workspaces.project", &ws.Project)
+		if attr, ok := nested.Body.Attributes["tags"]; ok {
+			if tags, ok := literalStringList(attr); ok {
+				ws.Tags = tags
+			} else {
+				out.Unresolved = append(out.Unresolved, "workspaces.tags")
+			}
+		}
+		break
+	}
 }

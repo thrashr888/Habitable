@@ -210,3 +210,82 @@ output "endpoint" {
 		t.Fatalf("metadata included a variable default or output value: %s", encoded)
 	}
 }
+
+func TestMetadataBackend(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		check func(t *testing.T, b *backendMetadataOutput)
+	}{
+		{"cloud name no hostname", map[string]string{"main.tf": "terraform {\n  cloud {\n    organization = \"acme\"\n    workspaces {\n      name = \"prod\"\n    }\n  }\n}\n"}, func(t *testing.T, b *backendMetadataOutput) {
+			if b == nil || b.Type != "cloud" || b.Hostname != "" || b.Organization != "acme" || b.Workspaces == nil || b.Workspaces.Name != "prod" || len(b.Unresolved) != 0 || b.Pos.Line != 2 {
+				t.Fatalf("got %#v", b)
+			}
+		}},
+		{"cloud tags", map[string]string{"main.tf": "terraform {\n  cloud {\n    workspaces {\n      tags = [\"app\", \"prod\"]\n    }\n  }\n}\n"}, func(t *testing.T, b *backendMetadataOutput) {
+			if b == nil || b.Workspaces == nil || strings.Join(b.Workspaces.Tags, ",") != "app,prod" {
+				t.Fatalf("got %#v", b)
+			}
+		}},
+		{"remote prefix", map[string]string{"main.tf": "terraform {\n  backend \"remote\" {\n    hostname = \"tfe.example.com\"\n    organization = \"acme\"\n    workspaces { prefix = \"app-\" }\n  }\n}\n"}, func(t *testing.T, b *backendMetadataOutput) {
+			if b == nil || b.Type != "remote" || b.Hostname != "tfe.example.com" || b.Organization != "acme" || b.Workspaces == nil || b.Workspaces.Prefix != "app-" {
+				t.Fatalf("got %#v", b)
+			}
+		}},
+		{"unresolved organization", map[string]string{"main.tf": "terraform {\n  cloud {\n    organization = var.org\n  }\n}\n"}, func(t *testing.T, b *backendMetadataOutput) {
+			if b == nil || b.Organization != "" || strings.Join(b.Unresolved, ",") != "organization" {
+				t.Fatalf("got %#v", b)
+			}
+		}},
+		{"map tags unresolved", map[string]string{"main.tf": "terraform {\n  cloud {\n    workspaces {\n      tags = { env = \"prod\" }\n    }\n  }\n}\n"}, func(t *testing.T, b *backendMetadataOutput) {
+			if b == nil || b.Workspaces == nil || len(b.Workspaces.Tags) != 0 || strings.Join(b.Unresolved, ",") != "workspaces.tags" {
+				t.Fatalf("got %#v", b)
+			}
+		}},
+		{"s3", map[string]string{"main.tf": "terraform {\n  backend \"s3\" {\n    bucket = \"b\"\n  }\n}\n"}, func(t *testing.T, b *backendMetadataOutput) {
+			if b == nil || b.Type != "s3" || b.Workspaces != nil || b.Hostname != "" || len(b.Unresolved) != 0 {
+				t.Fatalf("got %#v", b)
+			}
+		}},
+		{"none", map[string]string{"main.tf": "variable \"a\" {}\n"}, func(t *testing.T, b *backendMetadataOutput) {
+			if b != nil {
+				t.Fatalf("got %#v", b)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, content := range tt.files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			metadata, err := inspectMetadata(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.check(t, metadata.Backend)
+		})
+	}
+}
+
+func TestMetadataBackendMultipleDeclarationsWarns(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.tf"), []byte("terraform {\n  backend \"s3\" {}\n}\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "b.tf"), []byte("terraform {\n  cloud {}\n}\n"), 0o600)
+	metadata, err := inspectMetadata(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Backend == nil || metadata.Backend.Type != "s3" {
+		t.Fatalf("got %#v", metadata.Backend)
+	}
+	warned := false
+	for _, d := range metadata.Diagnostics {
+		warned = warned || d.Summary == "Multiple backend declarations"
+	}
+	if !warned {
+		t.Fatalf("missing warning: %#v", metadata.Diagnostics)
+	}
+}

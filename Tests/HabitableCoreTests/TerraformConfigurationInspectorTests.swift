@@ -12,6 +12,9 @@ final class TerraformConfigurationInspectorTests: XCTestCase {
         XCTAssertEqual(link.organization, "example-org")
         XCTAssertEqual(link.workspaceName, "prod")
         XCTAssertEqual(link.url.absoluteString, "https://app.terraform.io/app/example-org/workspaces/prod")
+        XCTAssertTrue(link.isExact)
+        XCTAssertTrue(link.isInitialized)
+        XCTAssertEqual(link.selectorDescription, "workspace prod")
     }
 
     func testRemoteWorkspaceLinkRejectsAmbiguousOrMalformedSelectors() {
@@ -19,11 +22,126 @@ final class TerraformConfigurationInspectorTests: XCTestCase {
         XCTAssertNotNil(TerraformRemoteWorkspaceLink.resolve(backendMetadata: Data(base.utf8)))
         for invalid in [
             #"{"backend":{"type":"remote","config":{"organization":"example-org","workspaces":{"name":"prod","tags":{"env":"prod"}}}}}"#,
-            #"{"backend":{"type":"remote","config":{"organization":"example-org","workspaces":{"name":"prod","prefix":"prod-"}}}}}"#,
+            #"{"backend":{"type":"remote","config":{"organization":"example-org","workspaces":{"name":"prod","prefix":"prod-"}}}}"#,
             #"{"backend":{"type":"remote","config":{"hostname":17,"organization":"example-org","workspaces":{"name":"prod"}}}}"#
         ] {
             XCTAssertNil(TerraformRemoteWorkspaceLink.resolve(backendMetadata: Data(invalid.utf8)))
         }
+    }
+
+    private func backendJSON(type: String = "cloud", org: String = "example-org", workspaces: String) -> Data {
+        Data(#"{"backend":{"type":"\#(type)","config":{"organization":"\#(org)","workspaces":\#(workspaces)}}}"#.utf8)
+    }
+
+    func testTagsWithoutSelectionResolveToTagLink() throws {
+        let data = backendJSON(workspaces: #"{"name":null,"tags":["prod","app","app"]}"#)
+        let link = try XCTUnwrap(TerraformRemoteWorkspaceLink.resolve(backendMetadata: data))
+        XCTAssertEqual(link.selector, .tags(["app", "prod"]))
+        XCTAssertFalse(link.isExact)
+        XCTAssertNil(link.workspaceName)
+        XCTAssertEqual(link.selectorDescription, "workspaces tagged app, prod")
+        XCTAssertTrue(link.url.absoluteString.hasSuffix("/workspaces"))
+    }
+
+    func testTagsWithSelectedWorkspaceResolveToName() throws {
+        let data = backendJSON(workspaces: #"{"tags":["app"]}"#)
+        let link = try XCTUnwrap(TerraformRemoteWorkspaceLink.resolve(backendMetadata: data, selectedWorkspace: "prod-app"))
+        XCTAssertEqual(link.selector, .name("prod-app"))
+        XCTAssertTrue(link.url.absoluteString.hasSuffix("/workspaces/prod-app"))
+    }
+
+    func testPrefixResolution() throws {
+        let data = backendJSON(type: "remote", workspaces: #"{"name":null,"prefix":"app-"}"#)
+        XCTAssertEqual(TerraformRemoteWorkspaceLink.resolve(backendMetadata: data, selectedWorkspace: "blue")?.selector,
+                       .name("app-blue"))
+        let link = try XCTUnwrap(TerraformRemoteWorkspaceLink.resolve(backendMetadata: data))
+        XCTAssertEqual(link.selector, .prefix("app-"))
+        XCTAssertEqual(link.selectorDescription, "workspaces prefixed app-")
+    }
+
+    func testDictionaryTagsAreUnsupported() {
+        let data = backendJSON(workspaces: #"{"tags":{"env":"prod"}}"#)
+        XCTAssertNil(TerraformRemoteWorkspaceLink.resolve(backendMetadata: data))
+        XCTAssertNil(TerraformRemoteWorkspaceLink.resolve(backendMetadata: data, selectedWorkspace: "prod"))
+    }
+
+    func testConfigurationDeclarationResolution() throws {
+        var declaration = TerraformBackendDeclaration(type: "cloud", hostname: nil, organization: "org",
+            workspaceName: "prod", sourceFile: "main.tf", sourceLine: 3)
+        let link = try XCTUnwrap(TerraformRemoteWorkspaceLink.resolve(configuration: declaration))
+        XCTAssertEqual(link.selector, .name("prod"))
+        XCTAssertEqual(link.source, .configuration(sourceFile: "main.tf"))
+        XCTAssertFalse(link.isInitialized)
+        XCTAssertEqual(link.hostname, "app.terraform.io")
+
+        declaration.unresolved = ["organization"]
+        XCTAssertNil(TerraformRemoteWorkspaceLink.resolve(configuration: declaration))
+
+        let remote = TerraformBackendDeclaration(type: "remote", hostname: "tfe.example.com", organization: "org",
+            workspacePrefix: "app-", sourceFile: "main.tf", sourceLine: nil)
+        XCTAssertEqual(TerraformRemoteWorkspaceLink.resolve(configuration: remote)?.selector, .prefix("app-"))
+        XCTAssertNil(TerraformRemoteWorkspaceLink.resolve(configuration: TerraformBackendDeclaration(
+            type: "s3", organization: "org", workspaceName: "x", sourceFile: "main.tf")))
+    }
+
+    private func makeFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable link \(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent(".terraform"), withIntermediateDirectories: true)
+        return folder
+    }
+
+    func testWorkingDirectoryResolvesInitializedTagsWithSelectedWorkspace() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try backendJSON(workspaces: #"{"tags":["app"]}"#).write(to: folder.appendingPathComponent(".terraform/terraform.tfstate"))
+        try "prod\n".write(to: folder.appendingPathComponent(".terraform/environment"), atomically: true, encoding: .utf8)
+        let link = try XCTUnwrap(TerraformRemoteWorkspaceLink.resolve(workingDirectory: folder))
+        XCTAssertEqual(link.selector, .name("prod"))
+        XCTAssertTrue(link.isInitialized)
+    }
+
+    func testInitializedNonCloudBackendDoesNotFallBackToConfiguration() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data(#"{"backend":{"type":"s3","config":{"bucket":"b"}}}"#.utf8)
+            .write(to: folder.appendingPathComponent(".terraform/terraform.tfstate"))
+        try #"terraform { cloud { organization = "org"\n workspaces { name = "prod" } } }"#
+            .write(to: folder.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        XCTAssertNil(TerraformRemoteWorkspaceLink.resolve(workingDirectory: folder, helper: try? helper()))
+    }
+
+    func testWorkingDirectoryFallsBackToConfigurationWithoutMetadata() throws {
+        let helper = try helper()
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try """
+        terraform {
+          cloud {
+            organization = "org"
+            workspaces {
+              name = "prod"
+            }
+          }
+        }
+        """.write(to: folder.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        let link = try XCTUnwrap(TerraformRemoteWorkspaceLink.resolve(workingDirectory: folder, helper: helper))
+        XCTAssertEqual(link.selector, .name("prod"))
+        XCTAssertEqual(link.source, .configuration(sourceFile: "main.tf"))
+    }
+
+    @MainActor
+    func testLocalWorkspaceLinkIndexMatchesExactWorkspaceOnly() async throws {
+        let first = try makeFolder(), second = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: first); try? FileManager.default.removeItem(at: second) }
+        try backendJSON(workspaces: #"{"name":"prod"}"#).write(to: first.appendingPathComponent(".terraform/terraform.tfstate"))
+        try backendJSON(workspaces: #"{"name":"staging"}"#).write(to: second.appendingPathComponent(".terraform/terraform.tfstate"))
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable missing \(UUID())")
+        let index = LocalWorkspaceLinkIndex()
+        await index.refresh(folders: [first, second, missing])
+        XCTAssertEqual(index.entries.count, 2)
+        XCTAssertEqual(index.folders(hostname: "APP.TERRAFORM.IO", organization: "example-org", workspaceName: "prod"), [first])
+        XCTAssertTrue(index.folders(hostname: "app.terraform.io", organization: "Example-Org", workspaceName: "prod").isEmpty)
+        XCTAssertFalse(index.isRefreshing)
     }
 
     private func helper() throws -> URL {

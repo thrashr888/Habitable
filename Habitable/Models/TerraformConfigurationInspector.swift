@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Combine
 
 struct TerraformDeclaredInput: Identifiable, Equatable, Sendable {
     let name: String
@@ -74,6 +75,18 @@ struct TerraformOutputMetadata: Identifiable, Equatable, Sendable {
     var id: String { name }
 }
 
+struct TerraformBackendDeclaration: Equatable, Sendable {
+    var type: String
+    var hostname: String?
+    var organization: String?
+    var workspaceName: String?
+    var workspaceTags: [String]?
+    var workspacePrefix: String?
+    var unresolved: [String] = []
+    var sourceFile: String
+    var sourceLine: Int?
+}
+
 struct TerraformConfigurationMetadata: Sendable {
     var inputs: [TerraformDeclaredInput] = []
     var outputs: [TerraformOutputMetadata] = []
@@ -81,30 +94,85 @@ struct TerraformConfigurationMetadata: Sendable {
     var modules: [TerraformModuleCallMetadata] = []
     var resources: [TerraformResourceDeclaration] = []
     var requiredCore: [String] = []
+    var backend: TerraformBackendDeclaration?
     var diagnostics: [String] = []
 }
 
 /// An external Terraform workspace URL derived only from initialized backend
-/// metadata. No remote lookup or credential access is performed.
+/// metadata, the CLI-selected workspace file, or the declared backend block.
+/// No remote lookup or credential access is performed.
 struct TerraformRemoteWorkspaceLink: Equatable, Sendable {
+    enum Selector: Equatable, Sendable { case name(String), tags([String]), prefix(String) }
+    enum Source: Equatable, Sendable { case initializedBackend, configuration(sourceFile: String) }
+
     let hostname: String
     let organization: String
-    let workspaceName: String
+    let selector: Selector
+    let source: Source
     let url: URL
 
-    /// Reads only Terraform's initialized backend metadata file. Backends that
-    /// select workspaces by tag or prefix do not identify one exact workspace.
-    static func resolve(workingDirectory: URL) -> TerraformRemoteWorkspaceLink? {
+    init(hostname: String, organization: String, selector: Selector, source: Source, url: URL) {
+        self.hostname = hostname
+        self.organization = organization
+        self.selector = selector
+        self.source = source
+        self.url = url
+    }
+
+    init(hostname: String, organization: String, workspaceName: String, url: URL) {
+        self.init(hostname: hostname, organization: organization, selector: .name(workspaceName),
+                  source: .initializedBackend, url: url)
+    }
+
+    var workspaceName: String? {
+        if case .name(let name) = selector { return name }
+        return nil
+    }
+
+    var isExact: Bool { workspaceName != nil }
+
+    var selectorDescription: String {
+        switch selector {
+        case .name(let name): return "workspace \(name)"
+        case .tags(let tags): return "workspaces tagged \(tags.joined(separator: ", "))"
+        case .prefix(let prefix): return "workspaces prefixed \(prefix)"
+        }
+    }
+
+    var isInitialized: Bool { source == .initializedBackend }
+
+    private static let defaultHostname = "app.terraform.io"
+    private static let maximumMetadataBytes = 1_048_576
+
+    /// An initialized backend (`.terraform/terraform.tfstate`) wins and never falls
+    /// back to configuration; otherwise the declared backend block is used.
+    static func resolve(workingDirectory: URL, helper: URL? = nil) -> TerraformRemoteWorkspaceLink? {
         let metadataURL = workingDirectory.appendingPathComponent(".terraform/terraform.tfstate")
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: metadataURL.path),
-              let size = attributes[.size] as? NSNumber, size.intValue <= 1_048_576,
-              let data = try? Data(contentsOf: metadataURL) else { return nil }
-        return resolve(backendMetadata: data)
+        if FileManager.default.fileExists(atPath: metadataURL.path) {
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: metadataURL.path),
+                  let size = attributes[.size] as? NSNumber, size.intValue <= maximumMetadataBytes,
+                  let data = try? Data(contentsOf: metadataURL) else { return nil }
+            return resolve(backendMetadata: data,
+                           selectedWorkspace: selectedWorkspaceName(workingDirectory: workingDirectory))
+        }
+        guard let declaration = TerraformConfigurationInspector
+            .inspectMetadata(directory: workingDirectory, helper: helper).backend else { return nil }
+        return resolve(configuration: declaration)
+    }
+
+    /// Terraform's CLI-selected workspace (`.terraform/environment`). Nothing else is read.
+    static func selectedWorkspaceName(workingDirectory: URL) -> String? {
+        let url = workingDirectory.appendingPathComponent(".terraform/environment")
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber, size.intValue <= 4_096,
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        return cleanSegment(text)
     }
 
     /// Purely resolves an explicit `cloud` or `remote` backend configuration.
-    static func resolve(backendMetadata data: Data) -> TerraformRemoteWorkspaceLink? {
-        guard data.count <= 1_048_576,
+    static func resolve(backendMetadata data: Data, selectedWorkspace: String? = nil) -> TerraformRemoteWorkspaceLink? {
+        guard data.count <= maximumMetadataBytes,
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let backend = root["backend"] as? [String: Any],
               let type = backend["type"] as? String,
@@ -113,35 +181,81 @@ struct TerraformRemoteWorkspaceLink: Equatable, Sendable {
               let hostname = Self.backendHostname(config),
               let rawOrganization = config["organization"] as? String,
               let organization = Self.cleanSegment(rawOrganization),
-              let workspaces = config["workspaces"] as? [String: Any],
-              let rawWorkspace = workspaces["name"] as? String,
-              let workspaceName = Self.cleanSegment(rawWorkspace),
-              Self.exactWorkspaceSelector(workspaces) else { return nil }
+              let workspaces = config["workspaces"] as? [String: Any] else { return nil }
 
+        func present(_ key: String) -> Any? {
+            guard let value = workspaces[key], !(value is NSNull) else { return nil }
+            return value
+        }
+        let name = present("name"), tags = present("tags"), prefix = present("prefix")
+        let selector: Selector
+        if let name {
+            guard tags == nil, prefix == nil, let raw = name as? String,
+                  let clean = cleanSegment(raw) else { return nil }
+            selector = .name(clean)
+        } else if let tags {
+            guard prefix == nil, let list = tags as? [String], !list.isEmpty,
+                  list.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
+            if let selectedWorkspace { selector = .name(selectedWorkspace) }
+            else { selector = .tags(Array(Set(list.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })).sorted()) }
+        } else if let prefix {
+            guard let value = prefix as? String, !value.isEmpty else { return nil }
+            if let selectedWorkspace {
+                guard let combined = cleanSegment(value + selectedWorkspace) else { return nil }
+                selector = .name(combined)
+            } else { selector = .prefix(value) }
+        } else { return nil }
+        return make(hostname: hostname, organization: organization, selector: selector, source: .initializedBackend)
+    }
+
+    /// Resolves a literal `cloud` or `remote` block found in configuration.
+    static func resolve(configuration: TerraformBackendDeclaration) -> TerraformRemoteWorkspaceLink? {
+        guard ["cloud", "remote"].contains(configuration.type),
+              let rawOrganization = configuration.organization,
+              let organization = cleanSegment(rawOrganization) else { return nil }
+        let unresolved = Set(configuration.unresolved)
+        guard unresolved.isDisjoint(with: ["organization", "hostname"]) else { return nil }
+        let hostname: String
+        if let raw = configuration.hostname {
+            guard let normalized = HCPAPIClient.normalizedHostname(raw) else { return nil }
+            hostname = normalized
+        } else { hostname = defaultHostname }
+        func isUnresolved(_ attribute: String) -> Bool {
+            unresolved.contains(attribute) || unresolved.contains("workspaces.\(attribute)")
+        }
+        let selector: Selector
+        if let raw = configuration.workspaceName {
+            guard !isUnresolved("name"), let name = cleanSegment(raw) else { return nil }
+            selector = .name(name)
+        } else if let tags = configuration.workspaceTags, !tags.isEmpty {
+            guard !isUnresolved("tags") else { return nil }
+            selector = .tags(Array(Set(tags)).sorted())
+        } else if let prefix = configuration.workspacePrefix, !prefix.isEmpty {
+            guard !isUnresolved("prefix") else { return nil }
+            selector = .prefix(prefix)
+        } else { return nil }
+        return make(hostname: hostname, organization: organization, selector: selector,
+                    source: .configuration(sourceFile: configuration.sourceFile))
+    }
+
+    private static func make(hostname: String, organization: String, selector: Selector,
+                             source: Source) -> TerraformRemoteWorkspaceLink? {
+        var path = "/app/\(encodePathSegment(organization))/workspaces"
+        if case .name(let name) = selector { path += "/\(encodePathSegment(name))" }
         var components = URLComponents()
         components.scheme = "https"
         components.host = hostname
-        components.percentEncodedPath = "/app/\(Self.encodePathSegment(organization))/workspaces/\(Self.encodePathSegment(workspaceName))"
+        components.percentEncodedPath = path
         guard let url = components.url else { return nil }
         return TerraformRemoteWorkspaceLink(hostname: hostname, organization: organization,
-                                           workspaceName: workspaceName, url: url)
+                                           selector: selector, source: source, url: url)
     }
 
     private static func backendHostname(_ config: [String: Any]) -> String? {
-        guard let raw = config["hostname"] else { return "app.terraform.io" }
-        if raw is NSNull { return "app.terraform.io" }
+        guard let raw = config["hostname"] else { return defaultHostname }
+        if raw is NSNull { return defaultHostname }
         guard let hostname = raw as? String else { return nil }
         return HCPAPIClient.normalizedHostname(hostname)
-    }
-
-    private static func exactWorkspaceSelector(_ workspaces: [String: Any]) -> Bool {
-        // Terraform serializes unset optional attributes as JSON null. Tags or a
-        // prefix selector means this backend does not name one exact workspace.
-        for key in ["tags", "prefix"] {
-            guard let value = workspaces[key], !(value is NSNull) else { continue }
-            return false
-        }
-        return true
     }
 
     private static func cleanSegment(_ raw: String) -> String? {
@@ -155,6 +269,49 @@ struct TerraformRemoteWorkspaceLink: Equatable, Sendable {
         var allowed = CharacterSet.urlPathAllowed
         allowed.subtract(CharacterSet(charactersIn: "/?#%"))
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    }
+}
+
+/// Finds known local folders linked to a remote workspace. Only exact `.name`
+/// links are matched.
+@MainActor
+final class LocalWorkspaceLinkIndex: ObservableObject {
+    struct Entry: Equatable, Sendable { let folder: URL; let link: TerraformRemoteWorkspaceLink }
+    @Published private(set) var entries: [Entry] = []
+    @Published private(set) var isRefreshing = false
+    private static let maximumFolders = 10
+
+    func refresh(folders: [URL], helper: URL? = nil) async {
+        var seen = Set<String>()
+        let candidates = folders.filter { seen.insert(RecentWorkspaceStore.canonicalPath($0)).inserted }
+            .prefix(Self.maximumFolders).map { $0 }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        let task = Task.detached(priority: .utility) { () -> [Entry] in
+            var result: [Entry] = []
+            for folder in candidates {
+                if Task.isCancelled { break }
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+                      isDirectory.boolValue,
+                      let link = TerraformRemoteWorkspaceLink.resolve(workingDirectory: folder, helper: helper)
+                else { continue }
+                result.append(Entry(folder: folder, link: link))
+            }
+            return result
+        }
+        let resolved = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        guard !Task.isCancelled else { return }
+        entries = resolved
+    }
+
+    func folders(hostname: String, organization: String, workspaceName: String) -> [URL] {
+        guard let host = HCPAPIClient.normalizedHostname(hostname) else { return [] }
+        return entries.compactMap { entry in
+            guard entry.link.workspaceName == workspaceName, entry.link.organization == organization,
+                  HCPAPIClient.normalizedHostname(entry.link.hostname) == host else { return nil }
+            return entry.folder
+        }
     }
 }
 
@@ -200,9 +357,10 @@ enum TerraformConfigurationInspector {
         var moduleCalls: [String: MetadataModuleCall]?
         var resources: [String: MetadataResource]?
         var requiredCore: [String]?
+        var backend: MetadataBackend?
         var diagnostics: [Diagnostic]?
         enum CodingKeys: String, CodingKey {
-            case variables, outputs, diagnostics
+            case variables, outputs, diagnostics, backend
             case requiredProviders = "required_providers"
             case moduleCalls = "module_calls", resources
             case requiredCore = "required_core"
@@ -223,6 +381,11 @@ enum TerraformConfigurationInspector {
     private struct MetadataAlias: Decodable { var name: String; var alias: String? }
     private struct MetadataModuleCall: Decodable { var name: String; var source: String; var version: String?; var pos: Position? }
     private struct MetadataResource: Decodable { var address: String; var pos: Position? }
+    private struct MetadataBackend: Decodable {
+        struct Workspaces: Decodable { var name: String?; var tags: [String]?; var prefix: String?; var project: String? }
+        var type: String; var hostname: String?; var organization: String?
+        var workspaces: Workspaces?; var unresolved: [String]?; var pos: Position?
+    }
 
     /// Resolves declarations represented by config-inspect metadata for the current module.
     static func declaration(for address: String, in metadata: TerraformConfigurationMetadata) -> TerraformResourceDeclaration? {
@@ -547,6 +710,14 @@ enum TerraformConfigurationInspector {
                     sourceFile: URL(fileURLWithPath: path).lastPathComponent, sourceLine: item.pos?.line)
             }.sorted { $0.address < $1.address }
             result.requiredCore = metadata.requiredCore ?? []
+            result.backend = metadata.backend.map { item in
+                TerraformBackendDeclaration(type: item.type, hostname: item.hostname,
+                    organization: item.organization, workspaceName: item.workspaces?.name,
+                    workspaceTags: item.workspaces?.tags, workspacePrefix: item.workspaces?.prefix,
+                    unresolved: item.unresolved ?? [],
+                    sourceFile: URL(fileURLWithPath: item.pos?.filename ?? "(unknown source)").lastPathComponent,
+                    sourceLine: item.pos?.line)
+            }
             result.diagnostics = (metadata.diagnostics ?? []).map(\.summary)
         } catch {
             result.diagnostics.append("Could not inspect Terraform module metadata: \(error.localizedDescription)")

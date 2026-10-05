@@ -25,9 +25,10 @@ struct HCPWorkspaceViewer: View {
     }
 
     private var filteredWorkspaces: [HCPWorkspace] {
+        let source = model.linkedWorkspaceCandidates ?? model.workspaces
         let query = workspaceSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return model.workspaces }
-        return model.workspaces.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        guard !query.isEmpty else { return source }
+        return source.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
 
     var body: some View {
@@ -283,8 +284,43 @@ struct HCPWorkspaceViewer: View {
         .padding(.vertical, 12)
     }
 
+    /// Shown when a local folder's backend selects workspaces by tag or prefix.
+    /// Only the verified candidates are offered; nothing is chosen for the user.
+    private func linkedCandidateChooser(_ candidates: [HCPWorkspace], notice: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(notice, systemImage: "folder.badge.questionmark").font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(candidates) { workspace in
+                    Button { workspaceSelection.wrappedValue = workspace.id } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(workspace.name)
+                                HStack(spacing: 6) {
+                                    if let version = workspace.terraformVersion { Text("Terraform \(version)") }
+                                    if !workspace.tagNames.isEmpty { Text(workspace.tagNames.joined(separator: ", ")) }
+                                }.font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        }
+                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).accessibilityLabel("Choose workspace \(workspace.name)")
+                }
+            }
+            Button("Show all workspaces") { model.clearLinkedWorkspaceCandidates() }.buttonStyle(.borderless)
+        }
+        .padding(20).frame(maxWidth: 520, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     @ViewBuilder private var cloudMap: some View {
-        if model.selectedWorkspace == nil {
+        if model.selectedWorkspace == nil, let candidates = model.linkedWorkspaceCandidates,
+           let notice = model.linkedWorkspaceNotice {
+            linkedCandidateChooser(candidates, notice: notice)
+        } else if model.selectedWorkspace == nil {
             Text("Choose a workspace to view its resource map.")
                 .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
