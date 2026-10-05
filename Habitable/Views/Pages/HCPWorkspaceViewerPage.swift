@@ -2,12 +2,19 @@ import SwiftUI
 
 struct HCPWorkspaceViewer: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
+    let connectionOnly: Bool
+    let onOpenConnections: () -> Void
+    let onOpenWorkspaces: () -> Void
     @State private var workspaceSearch = ""
     @State private var showingMap = true
     @State private var showingWorkspaces = false
     @State private var inspectorRequest: HCPMapInspectorRequest?
 
-    init(model: HCPWorkspaceViewerModel) { self.model = model }
+    init(model: HCPWorkspaceViewerModel, connectionOnly: Bool = false,
+         onOpenConnections: @escaping () -> Void = {}, onOpenWorkspaces: @escaping () -> Void = {}) {
+        self.model = model; self.connectionOnly = connectionOnly
+        self.onOpenConnections = onOpenConnections; self.onOpenWorkspaces = onOpenWorkspaces
+    }
 
     private var filteredWorkspaces: [HCPWorkspace] {
         let query = workspaceSearch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -17,9 +24,20 @@ struct HCPWorkspaceViewer: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            connectionPanel
-            if model.isConnected {
-                HStack {
+            if connectionOnly {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Terraform connection").font(.largeTitle.weight(.semibold))
+                    Text("Connect to HCP Terraform or your Terraform Enterprise server.").foregroundStyle(.secondary)
+                    connectionPanel
+                    if model.isConnected {
+                        Button("Open workspaces", action: onOpenWorkspaces).buttonStyle(.borderedProminent)
+                    }
+                    Spacer()
+                }.padding(16).frame(maxWidth: 720, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else if model.isConnected {
+                HStack(spacing: 16) {
+                    organizationPicker.frame(maxWidth: 270)
                     if showingMap {
                         Toggle(isOn: $showingWorkspaces) { Label("Workspaces", systemImage: "sidebar.left") }
                             .toggleStyle(.button).accessibilityLabel("Show workspace list")
@@ -93,6 +111,24 @@ struct HCPWorkspaceViewer: View {
         })
     }
 
+    @ViewBuilder private var organizationPicker: some View {
+        if model.organizations.isEmpty {
+            TextField("Organization name", text: $model.selectedOrganization)
+                .textFieldStyle(.roundedBorder).accessibilityLabel("HCP Terraform organization")
+        } else {
+            Picker("Organization", selection: Binding(get: { model.selectedOrganization }, set: { organization in
+                guard organization != model.selectedOrganization else { return }
+                let reconnect = model.isConnected
+                model.selectedOrganization = organization
+                if reconnect { Task { await model.connect() } }
+            })) {
+                ForEach(model.organizations) { organization in Text(organization.name).tag(organization.name) }
+            }
+            .labelsHidden().lineLimit(1).accessibilityLabel("HCP Terraform organization")
+            .help(model.hostname)
+        }
+    }
+
     private var connectionPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             LazyVGrid(columns: [GridItem(.flexible(minimum: 160), alignment: .leading),
@@ -106,20 +142,10 @@ struct HCPWorkspaceViewer: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Organization").font(.caption).foregroundStyle(.secondary)
-                    if model.organizations.isEmpty {
-                        TextField("Organization name", text: $model.selectedOrganization)
-                            .textFieldStyle(.roundedBorder)
-                            .accessibilityLabel("HCP Terraform organization")
-                    } else {
-                        Picker("Organization", selection: $model.selectedOrganization) {
-                            ForEach(model.organizations) { organization in Text(organization.name).tag(organization.name) }
-                        }
-                        .labelsHidden().lineLimit(1).truncationMode(.middle)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                        .accessibilityLabel("HCP Terraform organization")
-                    }
+                    organizationPicker
                 }
             }
+
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(model.isConnected ? model.connectionSummary : "Credentials are stored in Keychain.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -253,6 +279,7 @@ struct HCPWorkspaceViewer: View {
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
             if let error = model.errorMessage { Text(error).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480) }
             if model.isLoading { ProgressView().controlSize(.small) }
+            Button("Open connection settings", action: onOpenConnections).buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

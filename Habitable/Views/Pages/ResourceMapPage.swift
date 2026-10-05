@@ -160,14 +160,6 @@ struct ResourceMapContent: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if variablesPanel != nil {
-                    Toggle(isOn: Binding(get: { showingVariables && selectedTileID == nil }, set: { show in
-                        showingVariables = show
-                        if show { selectedTileID = nil; selectedMember = nil }
-                    })) { Label("Variables", systemImage: "sidebar.right") }
-                        .toggleStyle(.button).help("Show or hide workspace variables")
-                        .accessibilityLabel("Show workspace variables")
-                }
                 Menu {
                     Button("100%") { canvasZoom = 1 }
                     Button("125%") { canvasZoom = 1.25 }
@@ -182,6 +174,14 @@ struct ResourceMapContent: View {
                 Button(action: refresh) { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.bordered).disabled(!canRefresh)
                     .accessibilityLabel("Refresh map").help("Refresh map from Terraform state")
+                if variablesPanel != nil {
+                    Toggle(isOn: Binding(get: { showingVariables && selectedTileID == nil }, set: { show in
+                        showingVariables = show
+                        if show { selectedTileID = nil; selectedMember = nil }
+                    })) { Label("Variables", systemImage: "sidebar.right") }
+                        .toggleStyle(.button).help("Show or hide workspace variables")
+                        .accessibilityLabel("Show workspace variables")
+                }
             }
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
