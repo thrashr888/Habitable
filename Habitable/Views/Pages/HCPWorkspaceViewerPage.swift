@@ -67,7 +67,7 @@ struct HCPWorkspaceViewer: View {
                             }
                         }
                         Text("Authentication checks do not run a plan or change infrastructure. Provider settings in each workspace determine which profile, subscription, and project Terraform uses.")
-                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }.padding(16).frame(maxWidth: 980, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.task { await localConnections.refresh() }
@@ -188,20 +188,20 @@ struct HCPWorkspaceViewer: View {
                                 GridItem(.flexible(minimum: 160), alignment: .leading)],
                       alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Hostname").font(.caption).foregroundStyle(.secondary)
+                    Text("Hostname").font(.system(size: 12)).foregroundStyle(.secondary)
                     TextField("app.terraform.io", text: $model.hostname)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityLabel("HCP Terraform hostname")
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Organization").font(.caption).foregroundStyle(.secondary)
+                    Text("Organization").font(.system(size: 12)).foregroundStyle(.secondary)
                     organizationPicker
                 }
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(model.isConnected ? model.connectionSummary : "Credentials are stored in Keychain.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 if model.isConnected {
@@ -220,7 +220,7 @@ struct HCPWorkspaceViewer: View {
             .buttonStyle(.borderless)
             if model.isImporting {
                 Label("Importing credential into Keychain…", systemImage: "key.fill")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
             }
         }
         .padding(.bottom, 12)
@@ -244,7 +244,7 @@ struct HCPWorkspaceViewer: View {
                     .frame(maxWidth: 220)
                     .accessibilityLabel("Filter HCP workspaces")
                 Text("\(filteredWorkspaces.count) of \(model.workspaces.count) workspaces")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 if model.workspaceHasNextPage {
                     Button("Load more") { Task { await model.loadNextWorkspacePage() } }
@@ -263,7 +263,7 @@ struct HCPWorkspaceViewer: View {
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 if let workspace = model.selectedWorkspace {
                     if let version = workspace.terraformVersion {
-                        Text("Terraform \(version)").font(.caption).foregroundStyle(.secondary)
+                        Text("Terraform \(version)").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
                     if workspace.locked { Image(systemName: "lock").help("Workspace locked").accessibilityLabel("Workspace locked") }
                     if let url = workspace.htmlURL {
@@ -317,7 +317,7 @@ struct HCPWorkspaceViewer: View {
                                 HStack(spacing: 6) {
                                     if let version = workspace.terraformVersion { Text("Terraform \(version)") }
                                     if !workspace.tagNames.isEmpty { Text(workspace.tagNames.joined(separator: ", ")) }
-                                }.font(.caption).foregroundStyle(.secondary)
+                                }.font(.system(size: 12)).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Image(systemName: "chevron.right").foregroundStyle(.tertiary)
@@ -403,7 +403,7 @@ struct HCPWorkspaceViewer: View {
             HStack {
                 Text("Workspaces").font(.headline)
                 Spacer()
-                Text("\(model.workspaces.count)").font(.caption).foregroundStyle(.secondary)
+                Text("\(model.workspaces.count)").font(.system(size: 12)).foregroundStyle(.secondary)
             }
             TextField("Filter workspaces", text: $workspaceSearch)
                 .textFieldStyle(.roundedBorder)
@@ -417,7 +417,7 @@ struct HCPWorkspaceViewer: View {
                                     HStack(spacing: 5) {
                                         if let version = workspace.terraformVersion { Text("Terraform \(version)") }
                                         if workspace.locked { Text("Locked") }
-                                    }.font(.caption).foregroundStyle(.secondary)
+                                    }.font(.system(size: 12)).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 4)
                                 if model.selectedWorkspaceID == workspace.id {
@@ -602,7 +602,7 @@ private struct HCPRunDetailView: View {
                 }
             }
             .accessibilityElement(children: .contain)
-            Text(details.run.id).font(.system(size: 12, design: .monospaced)).foregroundStyle(.tertiary)
+            Text(details.run.id).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
         }
     }
 
@@ -812,7 +812,7 @@ private struct HCPMapResourceSheet: View {
             HSplitView {
                 List(selection: $selectedMapResource) {
                     ForEach(resources, id: \.address) { resource in
-                        Text(resource.address).font(.system(.callout, design: .monospaced)).tag(resource.address)
+                        Text(resource.address).font(.system(size: 13, design: .monospaced)).tag(resource.address)
                     }
                 }.frame(minWidth: 260, idealWidth: 340)
                 ScrollView {
@@ -825,8 +825,8 @@ private struct HCPMapResourceSheet: View {
                             }
                             ForEach(resource.displayAttributes) { attribute in
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(attribute.path).font(.caption).foregroundStyle(.secondary)
-                                    Text(attribute.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                    Text(attribute.path).font(.system(size: 12)).foregroundStyle(.secondary)
+                                    Text(attribute.value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
                                 }
                             }
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
@@ -866,10 +866,10 @@ private struct LocalCloudConnectionCard: View {
                         .accessibilityLabel("Connect \(connection.name)")
                     if isConnecting { ProgressView().controlSize(.small) }
                     if let loginMessage {
-                        Text(loginMessage).font(.callout).foregroundStyle(.secondary)
+                        Text(loginMessage).font(.system(size: 13)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else if !connection.isAuthenticated {
-                        Text("Opens Terminal and your browser to sign in.").font(.callout).foregroundStyle(.secondary)
+                        Text("Opens Terminal and your browser to sign in.").font(.system(size: 13)).foregroundStyle(.secondary)
                     }
                 }
                 ForEach(Array(connection.details.enumerated()), id: \.offset) { _, detail in

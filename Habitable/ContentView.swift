@@ -353,7 +353,7 @@ struct ContentView: View {
                 .help("Back to the Map")
             Text(page.title).font(.headline)
             Spacer()
-            workspaceStatusLabel.font(.caption).foregroundStyle(.secondary)
+            workspaceStatusLabel.font(.system(size: 12)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
     }

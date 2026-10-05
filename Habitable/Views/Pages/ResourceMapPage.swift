@@ -118,7 +118,7 @@ struct ResourceMapContent: View {
                 HStack(spacing: 0) {
                     // The inventory slides like a Finder sidebar; HSplitView cannot animate.
                     if showingInventory, !tiles.isEmpty {
-                        inventory.frame(width: 204).frame(maxHeight: .infinity)
+                        inventory.frame(width: 224).frame(maxHeight: .infinity)
                             .transition(.move(edge: .leading).combined(with: .opacity))
                         Divider()
                     }
@@ -157,13 +157,13 @@ struct ResourceMapContent: View {
                             .buttonStyle(.plain).help("Open the data sources in List")
                     }
                     Spacer()
-                    Text(notice ?? "This Mac · Current state").foregroundStyle(.tertiary)
+                    Text(notice ?? "This Mac · Current state").foregroundStyle(.secondary)
                 } else {
                     Text(isLoading ? "Reading state…" : (errorMessage == nil ? "No recorded state" : "State unavailable"))
                     Spacer()
                 }
             }
-            .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
+            .font(.system(size: 13)).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
         }
         .task(id: sourceIdentity) {
             sourceDeclaration = nil
@@ -256,12 +256,12 @@ struct ResourceMapContent: View {
                 let endpointTiles = visibleTiles.filter { !presentation(for: $0).endpoints.isEmpty }
                 if !endpointTiles.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Endpoints").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("Endpoints").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
                         ForEach(endpointTiles, id: \.id) { tile in
                             if let endpoint = presentation(for: tile).endpoints.first {
                                 Button { select(tile) } label: {
                                     Label(endpoint.value, systemImage: "arrow.up.right")
-                                        .font(.callout).lineLimit(1).truncationMode(.middle)
+                                        .font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }.buttonStyle(.plain).foregroundStyle(Color.accentColor)
                                     .help("\(tile.title) · \(endpoint.value)")
@@ -272,14 +272,14 @@ struct ResourceMapContent: View {
                 }
                 ForEach(MapKind.allCases.filter { kind in visibleTiles.contains { $0.kind == kind } }, id: \.rawValue) { kind in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(kind.title).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(kind.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
                             .padding(.horizontal, 8)
                         ForEach(visibleTiles.filter { $0.kind == kind }, id: \.id) { tile in
                             Button { select(tile) } label: {
                                 HStack(alignment: .top, spacing: 8) {
                                     Image(systemName: symbol(for: tile)).foregroundStyle(tile.kind.color).frame(width: 16)
-                                    Text(tile.title).font(.callout).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                                    Text("\(tile.resources.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                                    Text(tile.title).font(.system(size: 13)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("\(tile.resources.count)").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
                                 }.padding(8).contentShape(Rectangle())
                                     .background(selectedTileID == tile.id ? Color.accentColor.opacity(0.17) : .clear, in: RoundedRectangle(cornerRadius: 7))
                             }.buttonStyle(.plain).accessibilityLabel("Inspect \(tile.title)")
@@ -348,7 +348,7 @@ struct ResourceMapContent: View {
                                 }
                             }.frame(width: 1).allowsHitTesting(false).accessibilityHidden(true)
                             if !references.isEmpty {
-                                Text("WORKSPACE REFERENCES").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                                Text("WORKSPACE REFERENCES").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
                                     .offset(x: 20, y: layout.height + 16)
                                 ForEach(Array(references.enumerated()), id: \.element.address) { index, reference in
                                     Button { selectedReference = reference.address } label: {
@@ -362,9 +362,9 @@ struct ResourceMapContent: View {
                                         .popover(isPresented: Binding(get: { selectedReference == reference.address }, set: { if !$0 { selectedReference = nil } })) {
                                             VStack(alignment: .leading, spacing: 12) {
                                                 Text(reference.name).font(.headline)
-                                                Text(reference.address).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                                                Text(reference.address).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
                                                 Text("This data-source alias is recorded in this workspace’s state. The destination workspace has not been verified.")
-                                                    .font(.callout).foregroundStyle(.secondary)
+                                                    .font(.system(size: 13)).foregroundStyle(.secondary)
                                                 ForEach(reference.consumers, id: \.self) { id in
                                                     if let tile = tiles.first(where: { $0.id == id }) {
                                                         Button("Used by \(tile.title)") { selectedReference = nil; select(tile) }.buttonStyle(.link)
@@ -431,7 +431,7 @@ struct ResourceMapContent: View {
                     .frame(width: layout.width - 16, height: band.height)
                     .offset(x: 8, y: band.y)
                 Text(band.kind.title.uppercased())
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
                     .offset(x: 20, y: band.y + 10)
             }
         }
@@ -585,7 +585,7 @@ struct ResourceMapContent: View {
             if let tile = selectedTile {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack {
-                        Text("Inspector").font(.callout).foregroundStyle(.secondary)
+                        Text("Inspector").font(.system(size: 13)).foregroundStyle(.secondary)
                         Spacer()
                         Button { selectedTileID = nil; selectedMember = nil } label: { Image(systemName: "xmark") }
                             .buttonStyle(.plain).accessibilityLabel("Close inspector")
@@ -595,16 +595,16 @@ struct ResourceMapContent: View {
                             .frame(width: 44, height: 44).background(tile.kind.color, in: RoundedRectangle(cornerRadius: 12))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(tile.title).font(.title3.weight(.semibold))
-                            Text(presentation(for: tile).subtitle).font(.callout).foregroundStyle(.secondary)
+                            Text(presentation(for: tile).subtitle).font(.system(size: 13)).foregroundStyle(.secondary)
                         }
                     }
                     Label("Recorded in Terraform state", systemImage: "checkmark.circle")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
                         .help("This describes the loaded state. Live health and configuration drift have not been checked.")
                     Divider()
                     Text("At a glance").font(.headline)
                     if presentation(for: tile).facts.isEmpty {
-                        Text("\(tile.resources.count) managed resources · \(tile.kind.title)").font(.callout).foregroundStyle(.secondary)
+                        Text("\(tile.resources.count) managed resources · \(tile.kind.title)").font(.system(size: 13)).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 8) {
                     ForEach(presentation(for: tile).facts) { fact in
@@ -613,7 +613,7 @@ struct ResourceMapContent: View {
                             Spacer(minLength: 4)
                             Text(fact.value).multilineTextAlignment(.trailing).textSelection(.enabled)
                             MapCopyButton(value: fact.value, label: fact.label)
-                        }.font(.callout)
+                        }.font(.system(size: 13))
                     }
                     }
                     if !presentation(for: tile).endpoints.isEmpty {
@@ -622,14 +622,14 @@ struct ResourceMapContent: View {
                         ForEach(presentation(for: tile).endpoints) { endpoint in
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
-                                    Text(endpoint.label).font(.callout).foregroundStyle(.secondary)
+                                    Text(endpoint.label).font(.system(size: 13)).foregroundStyle(.secondary)
                                     Spacer()
                                     MapCopyButton(value: endpoint.value, label: endpoint.label)
                                 }
                                 if let url = endpoint.url {
                                     Link(endpoint.value, destination: url).lineLimit(3)
                                 } else {
-                                    Text(endpoint.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                    Text(endpoint.value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
                                 }
                             }
                         }
@@ -648,7 +648,7 @@ struct ResourceMapContent: View {
                                         HStack(alignment: .top, spacing: 8) {
                                             Image(systemName: selectedMember == address ? "checkmark.circle.fill" : "circle")
                                                 .foregroundStyle(selectedMember == address ? Color.accentColor : Color.secondary)
-                                            Text(address).font(.system(.callout, design: .monospaced)).multilineTextAlignment(.leading)
+                                            Text(address).font(.system(size: 13, design: .monospaced)).multilineTextAlignment(.leading)
                                         }.frame(maxWidth: .infinity, alignment: .leading)
                                     }.buttonStyle(.plain)
                                     MapCopyButton(value: address, label: "resource address")
@@ -664,7 +664,7 @@ struct ResourceMapContent: View {
                             Button("Full inspector") { onOpenResource(resource.address) }.buttonStyle(.link)
                         }
                         HStack {
-                            Text(resource.type).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(resource.type).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
                             Spacer()
                             MapCopyButton(value: resource.type, label: "resource type")
                         }
@@ -672,17 +672,17 @@ struct ResourceMapContent: View {
                             ForEach(Array(resource.displayAttributes.prefix(14))) { attribute in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
-                                        Text(attribute.path).font(.callout).foregroundStyle(.secondary)
+                                        Text(attribute.path).font(.system(size: 13)).foregroundStyle(.secondary)
                                         Spacer()
                                         if !attribute.value.contains("(sensitive value)") {
                                             MapCopyButton(value: attribute.value, label: "attribute value")
                                         }
                                     }
-                                    Text(attribute.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                    Text(attribute.value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
                                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
                             }
                             if resource.displayAttributes.count > 14 {
-                                Text("Open the full inspector for all attributes.").font(.callout).foregroundStyle(.secondary)
+                                Text("Open the full inspector for all attributes.").font(.system(size: 13)).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -698,7 +698,7 @@ struct ResourceMapContent: View {
             Text("Defined in").font(.headline)
             if let resource = selectedResource {
                 HStack(alignment: .top) {
-                    Text(resource.address).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Text(resource.address).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
                     Spacer(minLength: 4)
                     MapCopyButton(value: resource.address, label: "resource address")
                 }
@@ -714,10 +714,10 @@ struct ResourceMapContent: View {
                     }
                 } else {
                     Text(workspaceDirectory == nil ? "File and line are not included in remote Terraform state." : "No matching source declaration found in this folder.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
             }
-            if let workspaceURL { Link("Open workspace in HCP Terraform", destination: workspaceURL).font(.callout) }
+            if let workspaceURL { Link("Open workspace in HCP Terraform", destination: workspaceURL).font(.system(size: 13)) }
         }
     }
 
@@ -725,18 +725,18 @@ struct ResourceMapContent: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("History").font(.headline)
             if let stateCreatedAt {
-                Text("State recorded \(stateCreatedAt.formatted(date: .abbreviated, time: .shortened))").font(.callout)
+                Text("State recorded \(stateCreatedAt.formatted(date: .abbreviated, time: .shortened))").font(.system(size: 13))
             }
-            if let stateSerial { Text("State revision \(stateSerial)").font(.callout).foregroundStyle(.secondary) }
+            if let stateSerial { Text("State revision \(stateSerial)").font(.system(size: 13)).foregroundStyle(.secondary) }
             if let stateVersionID {
                 HStack(alignment: .top) {
-                    Text(stateVersionID).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Text(stateVersionID).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
                     Spacer(minLength: 4)
                     MapCopyButton(value: stateVersionID, label: "state version")
                 }
             }
             Text("Current state does not include this resource’s creation or last-change history.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.system(size: 13)).foregroundStyle(.secondary)
             if let onShowHistory { Button("Open workspace runs", action: onShowHistory).buttonStyle(.link) }
         }
     }
@@ -752,9 +752,9 @@ struct ResourceMapContent: View {
                 connectionGroup("Depends on", connections: outgoing, selected: tile.id)
                 connectionGroup("Used by", connections: incoming, selected: tile.id)
                 if !mixed.isEmpty {
-                    Text("Grouped connections").font(.callout).foregroundStyle(.secondary)
+                    Text("Grouped connections").font(.system(size: 13)).foregroundStyle(.secondary)
                     Text("Different resources inside these groups have dependencies in both directions. A two-way group link does not imply a circular resource dependency.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
                     connectionGroup(nil, connections: mixed, selected: tile.id)
                 }
             }
@@ -763,7 +763,7 @@ struct ResourceMapContent: View {
 
     @ViewBuilder private func connectionGroup(_ label: String?, connections: [MapConnection], selected: String) -> some View {
         if !connections.isEmpty {
-            if let label { Text(label).font(.callout).foregroundStyle(.secondary) }
+            if let label { Text(label).font(.system(size: 13)).foregroundStyle(.secondary) }
             ForEach(connections, id: \.self) { connection in
                 let neighbor = connection.source == selected ? connection.target : connection.source
                 if let tile = tiles.first(where: { $0.id == neighbor }) {
@@ -784,9 +784,9 @@ struct ResourceMapContent: View {
                                             Spacer(minLength: 4)
                                             MapCopyButton(value: evidence.targetResource, label: "dependency resource address")
                                         }
-                                    }.font(.system(.caption, design: .monospaced)).padding(.vertical, 6)
+                                    }.font(.system(size: 12, design: .monospaced)).padding(.vertical, 6)
                                 }
-                            }.font(.callout)
+                            }.font(.system(size: 13))
                         }
                     }
                 }
@@ -803,7 +803,7 @@ struct ResourceMapContent: View {
     /// recorded facts appear here; sync and drift are never inferred.
     private func statusChip(count: Int, label: String) -> some View {
         HStack(spacing: 4) {
-            Text(count, format: .number).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.primary)
+            Text(count, format: .number).font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundStyle(.primary)
             Text(label)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -816,7 +816,7 @@ struct ResourceMapContent: View {
         VStack(spacing: 12) {
             Image(systemName: symbol).font(.system(size: 30)).foregroundStyle(.tertiary)
             Text(title).font(.headline)
-            Text(detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text(detail).font(.system(size: 13)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.padding(28).frame(maxWidth: .infinity).padding(.top, 60)
     }
 }
