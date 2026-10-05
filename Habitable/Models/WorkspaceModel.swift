@@ -1067,7 +1067,8 @@ class Workspace: ObservableObject {
                     let record = ResourceBrowserRecord(id: address, address: address, type: type,
                                                        provider: resource.provider_name, mode: resource.mode)
                     return MapResource(address: address, type: type, name: name,
-                                       module: record.module == "root" ? "" : record.module, isData: resource.mode == "data")
+                                       module: record.module == "root" ? "" : record.module, isData: resource.mode == "data",
+                                       identity: MapResource.stateIdentity(type: type, displayAttributes: resource.displayAttributes))
                 } ?? []
                 self.resourceMap = try? ResourceMapClassifier().classify(metadata)
                 guard !metadata.isEmpty, !self.isCancelingCommand else { return }
@@ -1078,7 +1079,10 @@ class Workspace: ObservableObject {
                     guard pullError == nil, let raw, let rawData = raw.data(using: .utf8),
                           let resources = try? ResourceMapStateReader.read(rawData),
                           Self.mapInventoryMatches(resources, metadata),
-                          let map = try? ResourceMapClassifier().classify(resources) else {
+                          let map = try? ResourceMapClassifier().classify(
+                            MapResource.withIdentities(resources, attributes: { address in
+                                self.state?.resources.first { $0.address == address }?.displayAttributes
+                            })) else {
                         self.mapNotice = "Connections unavailable. Showing resources from the latest inventory. Refresh to try again."
                         return
                     }

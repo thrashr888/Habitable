@@ -40,6 +40,8 @@ bd sync               # Sync with git
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+> **Tracking moved to Linear (October 5, 2026):** file and update work in the Habitable project at https://linear.app/paul-thrasher/project/habitable-78a007a8998d/overview. The `bd` notes below are historical; do not create new beads issues.
+
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.

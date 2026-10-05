@@ -8,11 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC21000000000000000002 /* MapConnectionRoute.swift */; };
+		AA60400000000000000000B2 /* RunPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B3 /* RunPresentation.swift */; };
 		AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC20000000000000000002 /* MapResourcePresentation.swift */; };
 		AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC10000000000000000002 /* LocalCloudConnections.swift */; };
 		AA6040000000000000000040 /* HCPMapSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000041 /* HCPMapSnapshot.swift */; };
 		AA6040000000000000000030 /* ResourceMapSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000031 /* ResourceMapSample.swift */; };
 		AA6040000000000000000020 /* ResourceMapPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000021 /* ResourceMapPage.swift */; };
+		AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B1 /* MapTimelineStrip.swift */; };
 		AA6040000000000000000010 /* ResourceMapCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000011 /* ResourceMapCategories.swift */; };
 		AA6040000000000000000000 /* ResourceMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000001 /* ResourceMap.swift */; };
 		AA6030000000000000000010 /* ResourceBrowserIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000011 /* ResourceBrowserIndex.swift */; };
@@ -87,11 +89,13 @@
 
 /* Begin PBXFileReference section */
 		AACC21000000000000000002 /* MapConnectionRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapConnectionRoute.swift; sourceTree = "<group>"; };
+		AA60400000000000000000B3 /* RunPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPresentation.swift; sourceTree = "<group>"; };
 		AACC20000000000000000002 /* MapResourcePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapResourcePresentation.swift; sourceTree = "<group>"; };
 		AACC10000000000000000002 /* LocalCloudConnections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCloudConnections.swift; sourceTree = "<group>"; };
 		AA6040000000000000000041 /* HCPMapSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPMapSnapshot.swift; sourceTree = "<group>"; };
 		AA6040000000000000000031 /* ResourceMapSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapSample.swift; sourceTree = "<group>"; };
 		AA6040000000000000000021 /* ResourceMapPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapPage.swift; sourceTree = "<group>"; };
+		AA60400000000000000000B1 /* MapTimelineStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapTimelineStrip.swift; sourceTree = "<group>"; };
 		AA6040000000000000000011 /* ResourceMapCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapCategories.swift; sourceTree = "<group>"; };
 		AA6040000000000000000001 /* ResourceMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMap.swift; sourceTree = "<group>"; };
 		AA6030000000000000000011 /* ResourceBrowserIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceBrowserIndex.swift; sourceTree = "<group>"; };
@@ -202,6 +206,7 @@
 				AACC10000000000000000002 /* LocalCloudConnections.swift */,
 				AACC20000000000000000002 /* MapResourcePresentation.swift */,
 				AACC21000000000000000002 /* MapConnectionRoute.swift */,
+				AA60400000000000000000B3 /* RunPresentation.swift */,
 				0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */,
 				B1EAA330000000000000002 /* TerraformProviderSchema.swift */,
 				B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */,
@@ -259,6 +264,7 @@
 				8AA12B0D264260570048A4A9 /* RunListPage.swift */,
 				8A926B65264E4A5500FDBA5C /* RunPage.swift */,
 				AA6040000000000000000021 /* ResourceMapPage.swift */,
+				AA60400000000000000000B1 /* MapTimelineStrip.swift */,
 				8AA12B0F264260820048A4A9 /* ResourceListPage.swift */,
 				8A926B74264FA12400FDBA5C /* ResourcePage.swift */,
 				8A926B76264FA29C00FDBA5C /* OutputsListPage.swift */,
@@ -407,6 +413,7 @@
 				AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */,
 				AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */,
 				AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */,
+				AA60400000000000000000B2 /* RunPresentation.swift in Sources */,
 				903CDE668045415297D22E75 /* HCPWorkspaceViewerPage.swift in Sources */,
 				4C2E594417E941249EC613A0 /* AgentsSettingsPage.swift in Sources */,
 				B91637601B374FF8AA9B4158 /* HabitableMCPHTTPListener.swift in Sources */,
@@ -439,6 +446,7 @@
 				8AA12B0C26425FB00048A4A9 /* WorkspaceModel.swift in Sources */,
 				8A926B582648C48E00FDBA5C /* ndjson.swift in Sources */,
 				AA6040000000000000000020 /* ResourceMapPage.swift in Sources */,
+				AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */,
 				8AA12B10264260820048A4A9 /* ResourceListPage.swift in Sources */,
 				8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */,
 				8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */,
