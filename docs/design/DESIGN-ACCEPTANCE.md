@@ -79,6 +79,20 @@ Test route: open the stable Preview → cloud window shows Rookery with one tool
 
 Issue tracking moved to Linear on October 5, 2026: this pass is PAUL-169; Map acceptance remains PAUL-33.
 
+## Feedback round, October 5, 2026 (after the Exploration B pass)
+
+Paul's review of the Exploration B build: much closer to the mocks; inventory should animate and toggled slowly (~500 ms); Map zoomed in but not out; Runs UI had tiny text and raw log output; inputs/variables were hard to follow as wrapping cards (compare HCP Terraform's table); toolbar glass capsules looked wrong.
+
+| Feedback | Change | Verified |
+| --- | --- | --- |
+| Inventory animation and speed | Inventory is a fixed 204pt column that slides in/out (`.move(edge: .leading)`, 0.22 s). Layout, obstacle routing and service facts are memoized per visible tiles/width step/zoom, so toggling no longer recomputes routes for every frame or render. ⌃⌘S toggles it. | Toggled live both ways; routing work no longer repeats on toggle. Exact timing not instrumented. |
+| Zoom | Zoom menu now 50/75/100/125/150% with Zoom In ⌘=, Zoom Out ⌘-, Actual Size ⌘0. 100% stays the default. | Menu built; not opened in background QA. |
+| Runs | HCP run detail parses Terraform JSON-UI lines and the plain text format (ANSI colors stripped): consequences row (to add/change/replace/remove), planned changes with action chips, apply activity, diagnostics as callouts, other output and raw logs collapsed. Nothing below 12pt; run list rows 13/12pt with status dots. Errored runs show their status instead of a false "No changes". | Live: the errored "Fix HCP Terraform GitHub provider auth" run shows a Diagnostics callout with the provider install error and address. An applied run with a plan summary was not re-checked live after the text parser landed. |
+| Inputs/variables | Both the local Inputs page and HCP Variables are tables with a pinned header: Key (mono, description, type · declaration), Value (mono, single line, masked values keep their placeholder with a lock), Source/Category chips, trailing actions. Compact single-column rows under 760pt. | Live: local Inputs page on Rookery shows the table with masked sensitive values and tfvars provenance. |
+| Toolbar glass | Toolbar groups use the existing `QuietToolbar` (shared glass background hidden) in both windows; the inventory toggle is a plain symbol button. | Live: flat toolbar items in both windows. |
+
+Validation: full Swift suite re-run after these changes (see commit message for the count); native build installed into the stable Preview. Screenshots stay local.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

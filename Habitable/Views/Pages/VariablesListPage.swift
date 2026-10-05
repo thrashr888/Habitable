@@ -7,8 +7,18 @@
 
 import SwiftUI
 
-struct TerraformVariableSummaryView: View {
+private struct TerraformVariableRow: View {
     @ObservedObject var variable: TerraformVariable
+    let index: Int
+    let compact: Bool
+    let keyWidth: CGFloat
+    let locked: Bool
+    let onEdit: () -> Void
+    let onRemove: () -> Void
+
+    private var mono: Font { .system(size: 13, design: .monospaced) }
+
+    private var hasValue: Bool { variable.isUserInput || variable.discoveredSource != nil }
 
     private var safeValuePreview: String {
         if variable.rememberedSecretUnavailable { return "Remembered value unavailable" }
@@ -31,49 +41,120 @@ struct TerraformVariableSummaryView: View {
         return variable.declaration?.required == true ? "Required · unset" : "Optional · unset"
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private var provenance: String {
+        if variable.isUserInput { return variable.isRemembered ? "Remembered" : "App input" }
+        if let source = variable.discoveredSource { return source }
+        if variable.hasUnresolvedDiscoveredValue { return variable.unresolvedSource ?? "Unresolved" }
+        if variable.declaration?.hasDefault == true { return "Default" }
+        return "Declared"
+    }
+
+    private var keyCell: some View {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                Text(variable.key).font(.system(.body, design: .monospaced).weight(.medium))
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(variable.key).font(mono.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                    .help(variable.key)
                 SafeCopyButton(value: variable.key, label: "Copy input key \(variable.key)")
                 SafeCopyButton(value: "var.\(variable.key)", label: "Copy variable reference var.\(variable.key)")
             }
             let details = variable.declaration?.description ?? variable.description
             if !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(details)
-                    .font(.callout).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(details).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
             }
-            if let type = variable.declaration?.type {
-                Text(type.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression))
-                    .font(.caption.monospaced()).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                    .help(type).accessibilityLabel("Type: \(type)")
-            }
-            let metadata = [
-                variable.declaration?.required == true ? "Required" : nil,
-                variable.declaration?.hasDefault == true ? "Default" : nil,
-                variable.sensitive ? "Sensitive" : nil,
-                variable.declaration?.ephemeral == true ? "Ephemeral" : nil,
-                variable.isRemembered ? "Remembered" : (variable.isUserInput ? "This session" : nil),
-                variable.rememberedSecretUnavailable ? "Unavailable" : nil
-            ].compactMap { $0 }.joined(separator: " · ")
-            if !metadata.isEmpty {
-                Text(metadata).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text(status).font(.callout.weight(.medium))
-                .foregroundStyle(variable.isUserInput || variable.discoveredSource != nil ? .primary : .secondary)
-            if variable.isUserInput || variable.discoveredSource != nil {
-                Text(safeValuePreview).font(.callout).foregroundColor(.secondary)
-                    .lineLimit(2).truncationMode(.middle)
-            }
-            if let source = variable.declaration?.sourceLocation {
-                Text("Declared in \(source)").font(.caption).foregroundColor(.secondary)
-                    .textSelection(.enabled)
+            // Type and declaration share one quiet line so rows stay compact.
+            if variable.declaration?.type != nil || variable.declaration?.sourceLocation != nil {
+                HStack(spacing: 6) {
+                    if let type = variable.declaration?.type {
+                        Text(type.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression))
+                            .font(.system(size: 12, design: .monospaced))
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(type).accessibilityLabel("Type: \(type)")
+                    }
+                    if variable.declaration?.type != nil, variable.declaration?.sourceLocation != nil {
+                        Text("·")
+                    }
+                    if let source = variable.declaration?.sourceLocation {
+                        Text(source).font(.system(size: 12))
+                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                            .help("Declared in \(source)").accessibilityLabel("Declared in \(source)")
+                    }
+                }.foregroundStyle(.tertiary)
             }
         }
+    }
+
+    @ViewBuilder private var valueCell: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if variable.rememberedSecretUnavailable || variable.sensitive {
+                Label(safeValuePreview, systemImage: "lock.fill")
+                    .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+            } else if hasValue {
+                Text(safeValuePreview).font(mono).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(variable.value.isEmpty ? .secondary : .primary)
+            } else {
+                Text("Not set").font(.system(size: 13)).italic().foregroundStyle(.secondary)
+            }
+            Text(status).font(.system(size: 12))
+                .foregroundStyle(.secondary).lineLimit(2)
+        }
+    }
+
+    private var chips: some View {
+        let layout = compact ? AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 6))
+                             : AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+        return layout {
+            VariableChip(text: provenance, tint: hasValue ? .accentColor : .secondary)
+            if variable.hcl { VariableChip(text: "JSON") }
+            if variable.declaration?.required == true { VariableChip(text: "Required") }
+            if variable.sensitive { VariableChip(text: "Sensitive", systemImage: "lock.fill") }
+            if variable.declaration?.ephemeral == true { VariableChip(text: "Ephemeral") }
+            if variable.rememberedSecretUnavailable { VariableChip(text: "Unavailable", tint: .orange) }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if variable.isUserInput {
+                Button("Edit") { onEdit() }
+                    .buttonStyle(.borderless).fixedSize().disabled(locked)
+                Button(role: .destructive) { onRemove() } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless).disabled(locked)
+                    .accessibilityLabel("Remove app input \(variable.key)")
+                    .help("Remove app input")
+            } else if variable.declaration != nil {
+                Button(variable.discoveredSource == nil ? "Set value" : "Override") { onEdit() }
+                    .buttonStyle(.borderless).fixedSize().disabled(locked)
+                    .accessibilityLabel("Set value for \(variable.key)")
+            }
+        }
+        .frame(width: 100, alignment: .trailing)
+    }
+
+    var body: some View {
+        Group {
+            if compact {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        keyCell
+                        valueCell
+                        chips
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    actions
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    keyCell.frame(width: keyWidth, alignment: .leading)
+                    valueCell.frame(maxWidth: .infinity, alignment: .leading)
+                    chips.frame(width: 190, alignment: .leading)
+                    actions
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(index % 2 == 1 ? Color.primary.opacity(0.025) : Color.clear)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -93,6 +174,29 @@ struct VariableListPage: View {
     @State private var requiredOnly = false
     @State private var missingOnly = false
     @State private var searchText = ""
+    @State private var tableWidth: CGFloat = 1000
+
+    private var compact: Bool { tableWidth < 760 }
+    private var keyWidth: CGFloat { min(320, max(180, tableWidth * 0.28)) }
+
+    private var columnHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("Key").frame(width: compact ? nil : keyWidth, alignment: .leading)
+                .frame(maxWidth: compact ? .infinity : nil, alignment: .leading)
+            if !compact {
+                Text("Value").frame(maxWidth: .infinity, alignment: .leading)
+                Text("Source").frame(width: 190, alignment: .leading)
+            }
+            Text("Actions").frame(width: 100, alignment: .trailing)
+        }
+        .font(.system(size: 12, weight: .semibold)).textCase(.uppercase)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) { Divider() }
+        .accessibilityHidden(true)
+    }
 
     init(showMissingOnly: Bool = false) {
         self.showMissingOnly = showMissingOnly
@@ -121,14 +225,14 @@ struct VariableListPage: View {
                     Label("Some Terraform inputs could not be inspected", systemImage: "exclamationmark.triangle")
                         .font(.callout.weight(.medium))
                     ForEach(Array(workspace.terraformInputDiagnostics.enumerated()), id: \.offset) { _, message in
-                        Text(message).font(.caption).foregroundStyle(.secondary)
+                        Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)
             }
             if let error = workspace.rememberedInputsError {
-                Text(error).foregroundColor(.red).font(.caption).padding(.horizontal)
+                Text(error).foregroundColor(.red).font(.system(size: 12)).padding(.horizontal)
             }
             HStack(spacing: 10) {
                 if workspace.isInspectingInputs {
@@ -155,29 +259,26 @@ struct VariableListPage: View {
             .font(.callout).padding(.horizontal, 16).padding(.vertical, 8)
             TextField("Search names and descriptions", text: $searchText)
                 .textFieldStyle(.roundedBorder).padding(.horizontal, 16).padding(.bottom, 6)
-            List {
-                ForEach(visibleVariables, id: \.id) { variable in
-                    HStack(alignment: .top, spacing: 12) {
-                        TerraformVariableSummaryView(variable: variable)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if variable.isUserInput {
-                            Button("Edit") { openEditor(for: variable) }
-                                .buttonStyle(.borderless).fixedSize().disabled(workspace.locked)
-                            Button(role: .destructive) { remove(variable) } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless).disabled(workspace.locked)
-                                .accessibilityLabel("Remove app input \(variable.key)")
-                                .help("Remove app input")
-                        } else if variable.declaration != nil {
-                            Button(variable.discoveredSource == nil ? "Set value" : "Override") { openEditor(for: variable) }
-                                .buttonStyle(.borderless).fixedSize().disabled(workspace.locked)
-                                .accessibilityLabel("Set value for \(variable.key)")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    Section {
+                        ForEach(Array(visibleVariables.enumerated()), id: \.element.id) { index, variable in
+                            TerraformVariableRow(
+                                variable: variable, index: index, compact: compact, keyWidth: keyWidth,
+                                locked: workspace.locked,
+                                onEdit: { openEditor(for: variable) },
+                                onRemove: { remove(variable) })
+                            Divider()
                         }
+                    } header: {
+                        columnHeader
                     }
-                    .padding(.vertical, 6)
-                    .accessibilityElement(children: .contain)
                 }
             }
-            .listStyle(.inset)
+            .background(GeometryReader { proxy in
+                Color.clear.preference(key: VariablesTableWidthKey.self, value: proxy.size.width)
+            })
+            .onPreferenceChange(VariablesTableWidthKey.self) { tableWidth = $0 }
             .overlay {
                 if visibleVariables.isEmpty {
                     VStack(spacing: 10) {
@@ -338,7 +439,7 @@ private struct TerraformVariableEditor: View {
     var body: some View {
         Form {
             Section(header: Text("Save a Terraform variable").font(.headline)) {
-                Text("Key").font(.caption).foregroundColor(.secondary)
+                Text("Key").font(.system(size: 12)).foregroundColor(.secondary)
                 TextField("Variable key", text: $variable.key).labelsHidden().accessibilityLabel("Terraform variable key").multilineTextAlignment(.leading)
                 if let type = variable.declaration?.type {
                     LabeledContent("Terraform type", value: type)
@@ -346,7 +447,7 @@ private struct TerraformVariableEditor: View {
                 if let details = variable.declaration?.description, !details.isEmpty {
                     Text(details).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                Text("Value").font(.caption).foregroundColor(.secondary)
+                Text("Value").font(.system(size: 12)).foregroundColor(.secondary)
                 Picker("Entry format", selection: $editorMode) {
                     ForEach(availableEditorModes) { mode in Text(mode.rawValue).tag(mode) }
                 }
@@ -369,14 +470,14 @@ private struct TerraformVariableEditor: View {
                 }
                 if editorMode == .rawJSON {
                     Text("Enter a JSON value, including lists, objects, numbers, booleans, or null.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Toggle("Sensitive", isOn: $variable.sensitive)
                     .disabled(variable.declaration?.sensitive == true)
                     .help(variable.declaration?.sensitive == true ? "Terraform declares this input sensitive." : "")
                 Text("Hides this value and redacts matching input values from Habitable run logs and reviews. Also mark it sensitive in your Terraform configuration for Terraform’s own output.")
-                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text("Description").font(.caption).foregroundColor(.secondary)
+                    .font(.system(size: 12)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Description").font(.system(size: 12)).foregroundColor(.secondary)
                 TextField("Optional description", text: $variable.description).labelsHidden().accessibilityLabel("Terraform variable description")
                     .multilineTextAlignment(.leading)
                 if (didEditKey || didAttemptSave), let validationError = editorValidationError {
@@ -389,10 +490,10 @@ private struct TerraformVariableEditor: View {
                 Text(variable.isRemembered
                      ? "This input is saved for the workspace; secrets use macOS Keychain."
                      : "This input lasts for this app session only.")
-                    .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 12)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 if variable.rememberedSecretUnavailable {
                     Text("This remembered secret is unavailable. Restore Keychain access or remove this input before running Terraform.")
-                        .font(.caption).foregroundColor(.red)
+                        .font(.system(size: 12)).foregroundColor(.red)
                 }
                 HStack {
                     Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)

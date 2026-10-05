@@ -163,6 +163,7 @@ struct ContentView: View {
         .disclosureGroupStyle(FullHeaderDisclosureStyle())
         .focusedSceneValue(\.workspaceWindowActions, windowActions)
         .toolbar {
+          QuietToolbar {
             if workspace.workingDirectory != nil {
                 ToolbarItemGroup(placement: .navigation) {
                     Picker("View", selection: viewModeSelection) {
@@ -207,6 +208,7 @@ struct ContentView: View {
                 }
                 Button { openWindow(id: "App.settings") } label: { Label("Settings", systemImage: "gear") }
             }
+          }
         }
     }
 
