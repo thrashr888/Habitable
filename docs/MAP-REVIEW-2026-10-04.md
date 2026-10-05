@@ -72,3 +72,11 @@ Final-build screenshots: `/tmp/habitable-map-review/connections-page.png` and `/
 ## Omit empty categories
 
 Empty categories no longer produce bands or placeholder text. Search also removes bands without matching tiles, while the existing whole-map empty/no-match states remain. Updated the layout regression test; all 18 ResourceMap tests and native build pass. Live real ethertext inspection showed only Front door and Data; searching Website Bucket reduced the map to Data, and clearing restored both. Screenshot: `/tmp/habitable-map-review/populated-sections-only.png`. Provider-specific grouping for GitHub/Datadog remains tracked in Habitable-tuo.
+
+## Local cloud connections
+
+Connections now includes local AWS, Azure and Google Cloud cards alongside HCP/TFE. Discovery uses installed CLIs and existing credential caches, showing account/profile/subscription/project metadata, explicit authentication status and copyable sign-in commands. Google CLI and ADC are checked separately; both are needed for the complete status. Checks run off-main, time out, cap metadata output, discard token stdout and omit raw stderr. This page does not change profiles, credentials, workspace provider settings, or infrastructure.
+
+Validation: native Debug build passed and 4 focused cloud discovery tests passed, covering successful metadata, missing CLIs, failures, timeout, malformed AWS/Azure success and partial GCP authentication. Live final-build inspection showed all three real cloud accounts authenticated, including Google ADC. Exercised Refresh and Google command Copy, reviewed top and bottom layout with readable cards and footer. Screenshot `/tmp/habitable-map-review/local-cloud-connections.png` remains local. No Terraform plan/apply was run; this verifies local authentication, not resource permissions for each workspace.
+
+User test route: Connections, scroll to Local cloud access, Refresh cloud connections, verify the displayed identity/subscription/project and copy a sign-in command. Account switching and workspace-specific connection binding are not part of this read-only status page.
