@@ -4,6 +4,7 @@ Work from the Habitable design refresh, brought into the repo so local sessions 
 
 | File | What it is |
 | --- | --- |
+| [DESIGN-ACCEPTANCE.md](DESIGN-ACCEPTANCE.md) | Original-reference comparison, later user overrides, current gaps and the page handoff gate. Read for every UI change. |
 | [DECISIONS.md](DECISIONS.md) | Settled product and design decisions. Read this first. |
 | [design-explorations.html](design-explorations.html) | Explorations A–G for the new app model (Library, Map, Inspector, Timeline, Preview Changes, HCP change flow), plus screenshots of the current app in `shots/`. Open in a browser. Published copy: https://claude.ai/artifact/8jwxxWFhYociwhNtjFanZe |
 | [map-research.html](map-research.html) | Research on classifying real Terraform into a map, with five map explorations. Published copy: https://claude.ai/artifact/Q79RepVbNcKD6GKhXcxJVV |
