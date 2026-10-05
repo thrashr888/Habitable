@@ -88,6 +88,7 @@ struct ResourceMapContent: View {
     var variablesPanel: AnyView? = nil
     @State private var showingVariables = false
     @State private var showingInventory = true
+    @StateObject private var renderCache = MapRenderCache()
     @State private var selectedTileID: String?
     @State private var selectedMember: String?
     @State private var search = ""
@@ -114,15 +115,22 @@ struct ResourceMapContent: View {
             header
             Divider()
             VSplitView {
-                HSplitView {
+                HStack(spacing: 0) {
+                    // The inventory slides like a Finder sidebar; HSplitView cannot animate.
                     if showingInventory, !tiles.isEmpty {
-                        inventory.frame(minWidth: 170, idealWidth: 195, maxWidth: 235, minHeight: 0, maxHeight: .infinity)
+                        inventory.frame(width: 204).frame(maxHeight: .infinity)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                        Divider()
                     }
-                    canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                    if selectedTile != nil {
-                        inspector.frame(minWidth: 280, idealWidth: 330, maxWidth: 390, maxHeight: .infinity)
+                    HSplitView {
+                        canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        if selectedTile != nil {
+                            inspector.frame(minWidth: 280, idealWidth: 330, maxWidth: 390, maxHeight: .infinity)
+                        }
                     }
-                }.frame(minHeight: 220, maxHeight: .infinity)
+                }
+                .animation(.easeInOut(duration: 0.22), value: showingInventory)
+                .frame(minHeight: 220, maxHeight: .infinity)
                 if showingVariables, let variablesPanel {
                     VStack(spacing: 0) {
                         HStack {
@@ -170,7 +178,11 @@ struct ResourceMapContent: View {
             sourceDeclaration = declaration
             sourceDeclarationIdentity = requestIdentity
         }
-        .onChange(of: identity) { _ in search = ""; selectedTileID = nil; selectedMember = nil; selectedReference = nil }
+        .onChange(of: identity) { _ in
+            renderCache.reset()
+            search = ""; selectedTileID = nil; selectedMember = nil; selectedReference = nil
+        }
+        .onChange(of: map) { _ in renderCache.reset() }
         .onChange(of: search) { _ in
             if let selectedTileID, !visibleTiles.contains(where: { $0.id == selectedTileID }) {
                 self.selectedTileID = nil
@@ -188,8 +200,9 @@ struct ResourceMapContent: View {
     /// Map keeps only its own controls (Exploration B).
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-                Toggle(isOn: $showingInventory) { Image(systemName: "sidebar.left") }
-                    .toggleStyle(.button).accessibilityLabel("Show resource inventory")
+                Button { showingInventory.toggle() } label: { Image(systemName: "sidebar.left") }
+                    .buttonStyle(.borderless).accessibilityLabel(showingInventory ? "Hide resource inventory" : "Show resource inventory")
+                    .keyboardShortcut("s", modifiers: [.command, .control])
                     .help("Show or hide the resource inventory")
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -206,11 +219,18 @@ struct ResourceMapContent: View {
                 .help("Find a service, resource type or Terraform address. Arrows point to dependencies.")
                 Spacer()
                 Menu {
-                    Button("100%") { canvasZoom = 1 }
-                    Button("125%") { canvasZoom = 1.25 }
-                    Button("150%") { canvasZoom = 1.5 }
-                } label: { Text("\(Int(canvasZoom * 100))%") }
+                    Button("Zoom In") { stepZoom(1) }.keyboardShortcut("=", modifiers: .command)
+                        .disabled(canvasZoom >= Self.zoomLevels.last!)
+                    Button("Zoom Out") { stepZoom(-1) }.keyboardShortcut("-", modifiers: .command)
+                        .disabled(canvasZoom <= Self.zoomLevels.first!)
+                    Button("Actual Size") { canvasZoom = 1 }.keyboardShortcut("0", modifiers: .command)
+                    Divider()
+                    ForEach(Self.zoomLevels, id: \.self) { level in
+                        Button("\(Int(level * 100))%") { canvasZoom = level }
+                    }
+                } label: { Text("\(Int(canvasZoom * 100))%").monospacedDigit() }
                 .accessibilityLabel("Map zoom")
+                .help("Zoom the Map. ⌘= and ⌘- step; ⌘0 returns to actual size.")
                 Toggle(isOn: $showsConnections) { Image(systemName: "point.3.connected.trianglepath.dotted") }
                     .toggleStyle(.button).accessibilityLabel("Show dependency connections")
                     .help("Show Terraform dependencies between groups")
@@ -271,7 +291,9 @@ struct ResourceMapContent: View {
     }
 
     private func presentation(for tile: MapTile) -> MapResourcePresentation {
-        MapResourcePresentation.summarize(tile: tile, resources: resources)
+        renderCache.presentation(key: identity + "|" + tile.id) {
+            MapResourcePresentation.summarize(tile: tile, resources: resources)
+        }
     }
 
     private var canvas: some View {
@@ -308,8 +330,7 @@ struct ResourceMapContent: View {
                             Button("Clear search") { search = "" }.buttonStyle(.bordered)
                         }.frame(width: viewport.size.width)
                     } else {
-                        let filteredMap = ResourceMap(tiles: visibleTiles, connections: map?.connections ?? [], dataSources: [])
-                        let layout = MapCanvasLayout(map: filteredMap, width: max(580, (viewport.size.width - 24) / canvasZoom))
+                        let layout = cachedLayout(width: viewport.size.width)
                         let references = map?.workspaceReferences ?? []
                         let portColumns = max(1, Int((layout.width - 56) / 260))
                         let portHeight = references.isEmpty ? 0.0 : Double((references.count + portColumns - 1) / portColumns) * 46 + 46
@@ -387,8 +408,7 @@ struct ResourceMapContent: View {
 
     private func scrollToSelection(_ proxy: ScrollViewProxy, width: Double) {
         guard let selectedTileID else { return }
-        let filteredMap = ResourceMap(tiles: visibleTiles, connections: map?.connections ?? [], dataSources: [])
-        let layout = MapCanvasLayout(map: filteredMap, width: max(580, (width - 24) / canvasZoom))
+        let layout = cachedLayout(width: width)
         guard let tile = layout.tiles.first(where: { $0.id == selectedTileID }) else { return }
         DispatchQueue.main.async {
             proxy.scrollTo("map-row-\(tile.y)", anchor: .top)
@@ -417,12 +437,34 @@ struct ResourceMapContent: View {
         }
     }
 
+    private static let zoomLevels: [Double] = [0.5, 0.75, 1, 1.25, 1.5]
+
+    private func stepZoom(_ direction: Int) {
+        let levels = Self.zoomLevels
+        guard let index = levels.firstIndex(where: { abs($0 - canvasZoom) < 0.001 }) else { canvasZoom = 1; return }
+        canvasZoom = levels[max(0, min(levels.count - 1, index + direction))]
+    }
+
+    /// Layout and routes are memoized per visible tiles, width step and zoom, so
+    /// toggling panels or re-rendering never re-runs obstacle routing needlessly.
+    private func cachedLayout(width: Double) -> MapCanvasLayout {
+        // Snap widths so an animating panel yields a handful of layouts, not one per frame.
+        let steppedWidth = (max(580, (width - 24) / canvasZoom) / 24).rounded(.down) * 24
+        let key = "\(identity)|\(search)|\(steppedWidth)"
+        return renderCache.layout(key: key) {
+            MapCanvasLayout(map: ResourceMap(tiles: visibleTiles, connections: map?.connections ?? [], dataSources: []),
+                            width: steppedWidth)
+        }
+    }
+
     private func connectionLines(_ layout: MapCanvasLayout) -> some View {
-        let positions = Dictionary(uniqueKeysWithValues: layout.tiles.map { ($0.id, $0) })
-        let routes = (map?.connections ?? []).compactMap { connection -> (MapConnection, [CGPoint])? in
-            guard let source = positions[connection.source], let target = positions[connection.target] else { return nil }
-            let points = MapConnectionRoute.points(from: source, to: target, avoiding: layout.tiles, canvasWidth: layout.width)
-            return points.count >= 2 ? (connection, points) : nil
+        let routes = renderCache.routes(key: "\(identity)|\(search)|\(layout.width)|\(layout.tiles.count)") {
+            let positions = Dictionary(uniqueKeysWithValues: layout.tiles.map { ($0.id, $0) })
+            return (map?.connections ?? []).compactMap { connection -> (MapConnection, [CGPoint])? in
+                guard let source = positions[connection.source], let target = positions[connection.target] else { return nil }
+                let points = MapConnectionRoute.points(from: source, to: target, avoiding: layout.tiles, canvasWidth: layout.width)
+                return points.count >= 2 ? (connection, points) : nil
+            }
         }
         return Canvas { context, _ in
             for (connection, points) in routes {
@@ -803,5 +845,40 @@ struct MapCopyButton: View {
             guard !Task.isCancelled else { return }
             copied = false
         }
+    }
+}
+
+/// Memoizes per-render Map work (service facts, layout, obstacle routing). The
+/// values depend only on the keys they are stored under; `reset()` runs whenever
+/// the map identity or contents change, so stale geometry is never reused.
+@MainActor
+private final class MapRenderCache: ObservableObject {
+    private var presentations: [String: MapResourcePresentation] = [:]
+    private var layouts: [String: MapCanvasLayout] = [:]
+    private var routes: [String: [(MapConnection, [CGPoint])]] = [:]
+
+    func reset() {
+        presentations.removeAll(keepingCapacity: true)
+        layouts.removeAll(keepingCapacity: true)
+        routes.removeAll(keepingCapacity: true)
+    }
+
+    func presentation(key: String, make: () -> MapResourcePresentation) -> MapResourcePresentation {
+        if let cached = presentations[key] { return cached }
+        let value = make(); presentations[key] = value; return value
+    }
+
+    func layout(key: String, make: () -> MapCanvasLayout) -> MapCanvasLayout {
+        if let cached = layouts[key] { return cached }
+        let value = make()
+        if layouts.count > 24 { layouts.removeAll(keepingCapacity: true) }
+        layouts[key] = value; return value
+    }
+
+    func routes(key: String, make: () -> [(MapConnection, [CGPoint])]) -> [(MapConnection, [CGPoint])] {
+        if let cached = routes[key] { return cached }
+        let value = make()
+        if routes.count > 24 { routes.removeAll(keepingCapacity: true) }
+        routes[key] = value; return value
     }
 }

@@ -103,6 +103,7 @@ struct HCPWorkspaceViewer: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
             if !connectionOnly && model.isConnected {
+              QuietToolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button { showingWorkspaces.toggle() } label: {
                         Label(model.selectedWorkspace?.name ?? "Choose workspace", systemImage: "square.grid.2x2")
@@ -130,6 +131,7 @@ struct HCPWorkspaceViewer: View {
                     .help("Show or hide workspace variables")
                     .accessibilityLabel("Show workspace variables")
                 }
+              }
             }
         }
         .onChange(of: model.mapRequestKey) { _ in inspectorRequest = nil }
@@ -449,24 +451,28 @@ struct HCPWorkspaceViewer: View {
                 Spacer()
                 Button { Task { await model.refreshRuns(force: false) } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).help("Refresh run history")
+                    .accessibilityLabel("Refresh run history")
                     .disabled(model.isLoading || model.selectedWorkspaceID == nil)
             }
             if let workspace = model.selectedWorkspace {
-                Text(workspace.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(workspace.name).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
             }
             List(selection: runSelection) {
                 ForEach(model.runs) { run in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(run.status.replacingOccurrences(of: "_", with: " ").capitalized).font(.subheadline.weight(.medium))
-                            Spacer()
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(run.message?.isEmpty == false ? run.message! : run.operation ?? "Terraform run")
+                                .font(.system(size: 13, weight: .medium)).lineLimit(2)
+                            Spacer(minLength: 0)
                             if run.isDestroy { Image(systemName: "trash").foregroundStyle(.orange).help("Destroy run") }
                         }
-                        Text(run.message?.isEmpty == false ? run.message! : run.operation ?? "Terraform run")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        if let date = run.createdAt {
-                            Text(date, style: .date).font(.caption2).foregroundStyle(.tertiary)
+                        HStack(spacing: 6) {
+                            HCPRunStatusLabel(status: run.status)
+                            if let date = run.createdAt {
+                                Text("· \(hcpRelativeDate(date))").foregroundStyle(.secondary)
+                            }
                         }
+                        .font(.system(size: 12))
                     }
                     .padding(.vertical, 3)
                     .tag(Optional(run.id))
@@ -483,40 +489,7 @@ struct HCPWorkspaceViewer: View {
 
     @ViewBuilder private var runDetail: some View {
         if let details = model.selectedRunDetails {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(details.run.message?.isEmpty == false ? details.run.message! : "Remote run")
-                            .font(.title3.weight(.semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("\(details.run.id) · \(details.run.status)")
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let url = details.runURL { Link("Open in HCP Terraform", destination: url).font(.callout) }
-                    }
-                    Divider()
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)],
-                              alignment: .leading, spacing: 12) {
-                        phase(label: "Plan", status: details.planStatus ?? (details.run.planID == nil ? "Not available" : "Available"))
-                        phase(label: "Apply", status: details.applyStatus ?? (details.run.applyID == nil ? "Not part of this run" : "Available"))
-                        if let changes = details.run.hasChanges {
-                            Label(changes ? "Changes" : "No changes", systemImage: changes ? "arrow.triangle.2.circlepath" : "checkmark")
-                                .font(.callout)
-                        }
-                    }
-                    if let plan = details.planReviewURL { Link("Review plan in HCP Terraform", destination: plan).font(.callout) }
-                    if let logs = details.planLogs { logSection("Plan output", text: logs) }
-                    if let logs = details.applyLogs { logSection("Apply output", text: logs) }
-                    if details.planLogs == nil && details.applyLogs == nil {
-                        Text("Run output is unavailable for this account or run phase. Open the run in HCP Terraform for the full event timeline.")
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .textSelection(.enabled)
-            }
+            HCPRunDetailView(details: details)
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "list.bullet.rectangle").font(.system(size: 30)).foregroundStyle(.secondary)
@@ -529,20 +502,270 @@ struct HCPWorkspaceViewer: View {
         }
     }
 
-    private func phase(label: String, status: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(status.replacingOccurrences(of: "_", with: " ").capitalized).font(.subheadline)
+}
+
+// MARK: - Remote run detail
+
+private func hcpRelativeDate(_ date: Date) -> String {
+    RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+}
+
+private func hcpStatusColor(_ status: String) -> Color {
+    switch status {
+    case "applied": return .green
+    case "errored": return .red
+    case "planned", "planned_and_finished", "planned_and_saved", "discarded", "canceled", "force_canceled": return .secondary
+    default: return .orange
+    }
+}
+
+private let hcpReplaceColor = Color(red: 0.86, green: 0.25, blue: 0.55)
+
+private func hcpActionStyle(_ action: ChangeActions) -> (word: String, color: Color) {
+    switch action {
+    case .Create: return ("Create", .green)
+    case .Update: return ("Update", .orange)
+    case .Replace: return ("Replace", hcpReplaceColor)
+    case .Delete: return ("Delete", .red)
+    case .Read: return ("Read", .blue)
+    case .NoOp: return ("No-op", .secondary)
+    }
+}
+
+private struct HCPRunStatusLabel: View {
+    let status: String
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(hcpStatusColor(status)).frame(width: 8, height: 8)
+            Text(status.replacingOccurrences(of: "_", with: " ").capitalized)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Status \(status.replacingOccurrences(of: "_", with: " "))")
+    }
+}
+
+private func hcpCopy(_ text: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
+}
+
+private struct HCPRunDetailView: View {
+    let details: HCPRunDetails
+    @State private var plan: HCPRunLogPresentation?
+    @State private var apply: HCPRunLogPresentation?
+
+    private var statusWord: String { details.run.status.replacingOccurrences(of: "_", with: " ").capitalized }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                if let summary = plan?.summary ?? apply?.summary {
+                    consequences(summary, replaces: plan?.replaceCount ?? apply?.replaceCount ?? 0)
+                }
+                phases
+                if let plan, !plan.plannedChanges.isEmpty { plannedChanges(plan.plannedChanges) }
+                if let apply, !apply.applyEvents.isEmpty { applyActivity(apply.applyEvents) }
+                diagnosticsSection
+                otherOutput
+                if let logs = details.planLogs { rawSection("Raw plan output", text: logs) }
+                if let logs = details.applyLogs { rawSection("Raw apply output", text: logs) }
+                if details.planLogs == nil && details.applyLogs == nil {
+                    Text("Run output is unavailable for this account or run phase. Open the run in HCP Terraform for the full event timeline.")
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .textSelection(.enabled)
+        }
+        // Parse once per details change, not on every render.
+        .task(id: details) {
+            plan = details.planLogs.map(HCPRunLogPresentation.parse)
+            apply = details.applyLogs.map(HCPRunLogPresentation.parse)
         }
     }
 
-    private func logSection(_ title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            Text(text).font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                .padding(12).background(Color(nsColor: .textBackgroundColor))
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(details.run.message?.isEmpty == false ? details.run.message! : "Remote run")
+                .font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 4) {
+                Text(([statusWord] + [details.run.operation].compactMap { $0 }
+                      + [details.run.createdAt.map(hcpRelativeDate)].compactMap { $0 }).joined(separator: " · "))
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                if let url = details.runURL {
+                    Text("·").foregroundStyle(.secondary)
+                    Link("Open in HCP Terraform", destination: url).font(.system(size: 13))
+                }
+            }
+            .accessibilityElement(children: .contain)
+            Text(details.run.id).font(.system(size: 12, design: .monospaced)).foregroundStyle(.tertiary)
         }
+    }
+
+    private func consequences(_ summary: HCPRunLogPresentation.Summary, replaces: Int) -> some View {
+        // Terraform's change_summary counts a replace as 1 add + 1 remove, so
+        // subtract replaces from both to show them as their own column.
+        let add = max(0, summary.add - replaces)
+        let remove = max(0, summary.remove - replaces)
+        return HStack(alignment: .top, spacing: 28) {
+            stat(add, "to add", .green)
+            stat(summary.change, "to change", .orange)
+            stat(replaces, "to replace", hcpReplaceColor)
+            stat(remove, "to remove", .red)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func stat(_ value: Int, _ label: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)").font(.title2.weight(.semibold)).monospacedDigit()
+                .foregroundStyle(value == 0 ? Color.secondary : color)
+            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(value) \(label)")
+    }
+
+    private var phases: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
+            phase("Plan", details.planStatus ?? (details.run.planID == nil ? "Not available" : "Available"))
+            phase("Apply", details.applyStatus ?? (details.run.applyID == nil ? "Not part of this run" : "Available"))
+            changeStateLabel
+            if let review = details.planReviewURL {
+                Link("Review plan in HCP Terraform", destination: review).font(.system(size: 13))
+            }
+        }
+    }
+
+    /// Never shows "No changes" for a failed run; that is only claimed when a parsed summary says zero.
+    @ViewBuilder private var changeStateLabel: some View {
+        let status = details.run.status
+        let summary = plan?.summary ?? apply?.summary
+        if ["errored", "canceled", "force_canceled", "discarded"].contains(status) {
+            Label(statusWord, systemImage: status == "errored" ? "xmark.octagon.fill" : "minus.circle")
+                .font(.system(size: 13)).foregroundStyle(status == "errored" ? Color.red : Color.secondary)
+        } else if let summary {
+            let zero = summary.add + summary.change + summary.remove + summary.import == 0
+            Label(zero ? "No changes" : "Changes", systemImage: zero ? "checkmark" : "arrow.triangle.2.circlepath")
+                .font(.system(size: 13))
+        } else if details.run.hasChanges == true {
+            Label("Changes", systemImage: "arrow.triangle.2.circlepath").font(.system(size: 13))
+        }
+    }
+
+    private func phase(_ label: String, _ status: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(status.replacingOccurrences(of: "_", with: " ").capitalized).font(.system(size: 13))
+        }
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+    }
+
+    private func plannedChanges(_ changes: [HCPRunLogPresentation.Change]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionTitle("Planned changes")
+            ForEach(changes) { change in
+                let style = hcpActionStyle(change.action)
+                HStack(spacing: 8) {
+                    Text(style.word)
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(style.color)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Capsule().fill(style.color.opacity(0.15)))
+                        .frame(minWidth: 64)
+                    Text(change.address).font(.system(size: 13, design: .monospaced))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Button { hcpCopy(change.address) } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(.borderless).help("Copy address")
+                        .accessibilityLabel("Copy address \(change.address)")
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func applyActivity(_ events: [HCPRunLogPresentation.ApplyEvent]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionTitle("Apply activity")
+            ForEach(events) { event in
+                let failed = event.outcome == "errored"
+                HStack(spacing: 8) {
+                    Text(event.address).font(.system(size: 13, design: .monospaced))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Text(([event.outcome.capitalized] + [event.elapsedSeconds.map { "\($0)s" }].compactMap { $0 })
+                        .joined(separator: " · "))
+                        .font(.system(size: 12)).monospacedDigit()
+                }
+                .foregroundStyle(failed ? Color.red : Color.primary)
+            }
+        }
+    }
+
+    @ViewBuilder private var diagnosticsSection: some View {
+        let all = (plan?.diagnostics ?? []).map { ("plan", $0) } + (apply?.diagnostics ?? []).map { ("apply", $0) }
+        if !all.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionTitle("Diagnostics")
+                ForEach(Array(all.enumerated()), id: \.offset) { _, entry in
+                    let (phaseName, diagnostic) = entry
+                    let isError = diagnostic.severity.lowercased() == "error"
+                    let color: Color = isError ? .red : .orange
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: isError ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(color)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(diagnostic.summary).font(.system(size: 13, weight: .medium))
+                            if let detail = diagnostic.detail {
+                                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
+                            }
+                            if let address = diagnostic.address {
+                                Text(address).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                            }
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(color.opacity(0.10)))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(diagnostic.severity) in \(phaseName): \(diagnostic.summary)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var otherOutput: some View {
+        let lines = (plan.map { $0.messages + $0.unparsedLines } ?? []) + (apply.map { $0.messages + $0.unparsedLines } ?? [])
+        if !lines.isEmpty {
+            DisclosureGroup("Other output") {
+                Text(lines.joined(separator: "\n"))
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10).background(Color(nsColor: .textBackgroundColor))
+            }
+            .font(.system(size: 13, weight: .semibold))
+        }
+    }
+
+    private func rawSection(_ title: String, text: String) -> some View {
+        DisclosureGroup(title) {
+            ScrollView {
+                Text(text).font(.system(size: 12, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(maxHeight: 320)
+            .background(Color(nsColor: .textBackgroundColor))
+        }
+        .font(.system(size: 13, weight: .semibold))
     }
 }
 
@@ -601,149 +824,6 @@ private struct HCPMapResourceSheet: View {
 
 }
 
-
-private struct HCPMapVariablesPanel: View {
-    @ObservedObject var model: HCPWorkspaceViewerModel
-    @State private var editing: HCPWorkspaceVariable?
-    @State private var query = ""
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(model.selectedWorkspace?.name ?? "Workspace").font(.headline)
-                Text("Changes affect future runs").font(.callout).foregroundStyle(.secondary)
-                Spacer()
-                TextField("Filter variables", text: $query).textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260).accessibilityLabel("Filter workspace variables")
-                Button { Task { await model.refreshVariables() } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless).accessibilityLabel("Refresh workspace variables")
-                    .disabled(model.isLoadingVariables || model.savingVariableID != nil)
-            }
-            if model.isLoadingVariables { ProgressView("Loading variables…") }
-            if let error = model.variablesError {
-                Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(["terraform", "env"], id: \.self) { category in
-                        let rows = model.workspaceVariables.filter {
-                            $0.category == category && (query.isEmpty || $0.key.localizedCaseInsensitiveContains(query))
-                        }
-                        if !rows.isEmpty {
-                            Text(category == "terraform" ? "Terraform" : "Environment").font(.headline)
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .topLeading)], alignment: .leading, spacing: 16) {
-                            ForEach(rows) { variable in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(alignment: .top) {
-                                        Text(variable.key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        MapCopyButton(value: variable.key, label: "variable name")
-                                        Button("Edit") { editing = variable }
-                                            .buttonStyle(.borderless)
-                                            .accessibilityLabel("Edit variable \(variable.key)")
-                                            .disabled(model.savingVariableID != nil)
-                                    }
-                                    if variable.isMaskedForDisplay {
-                                        Label("Private value · hidden", systemImage: "lock.fill")
-                                            .font(.callout).foregroundStyle(.secondary)
-                                    } else {
-                                        HStack(alignment: .top) {
-                                            Text(variable.value?.isEmpty == false ? variable.value! : "Empty value")
-                                                .font(.system(.body, design: .monospaced)).lineLimit(3)
-                                                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                                            if let value = variable.value { MapCopyButton(value: value, label: "variable value") }
-                                        }
-                                    }
-                                    if variable.isHCL { Text("HCL expression").font(.callout).foregroundStyle(.secondary) }
-                                    if !variable.description.isEmpty {
-                                        Text(variable.description).font(.callout).foregroundStyle(.secondary).lineLimit(3)
-                                    }
-                                }.padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
-                                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-                            }
-                            }
-                        }
-                    }
-                    if !query.isEmpty && !model.workspaceVariables.contains(where: { $0.key.localizedCaseInsensitiveContains(query) }) {
-                        Text("No matching variables").font(.headline)
-                        Button("Clear filter") { query = "" }.buttonStyle(.borderless)
-                    }
-                    if !model.isLoadingVariables && model.workspaceVariables.isEmpty && model.variablesError == nil {
-                        Text("No workspace-specific variables").font(.headline)
-                    }
-                    Text("Inherited variable sets and values from configuration files are not included here.")
-                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if let url = model.selectedWorkspace?.htmlURL {
-                        Link("Open workspace in HCP Terraform", destination: url)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(16).frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .task { await model.refreshVariables() }
-        .sheet(item: $editing) { variable in
-            HCPMapVariableEditor(model: model, variable: variable, sourceKey: model.mapRequestKey)
-        }
-    }
-}
-
-private struct HCPMapVariableEditor: View {
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject var model: HCPWorkspaceViewerModel
-    let variable: HCPWorkspaceVariable
-    let sourceKey: String
-    @State private var value: String
-    @State private var didEdit = false
-    @State private var isSaving = false
-    @State private var saveError: String?
-
-    init(model: HCPWorkspaceViewerModel, variable: HCPWorkspaceVariable, sourceKey: String) {
-        self.model = model; self.variable = variable; self.sourceKey = sourceKey
-        _value = State(initialValue: variable.isMaskedForDisplay ? "" : (variable.value ?? ""))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Edit \(variable.key)").font(.title2.weight(.semibold))
-            Text(model.selectedWorkspace?.name ?? "Workspace").foregroundStyle(.secondary)
-            Text("Saving updates this workspace variable in HCP Terraform. It does not start a run or change the current state.")
-                .font(.body).fixedSize(horizontal: false, vertical: true)
-            if variable.isMaskedForDisplay {
-                Text("The current value is hidden. Enter a replacement only if you intend to change it.")
-                    .font(.callout).foregroundStyle(.secondary)
-                SecureField("Replacement value", text: $value).textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Replacement sensitive variable value")
-            } else {
-                Text(variable.isHCL ? "HCL value" : "Value").font(.headline)
-                TextEditor(text: $value).font(.system(.body, design: .monospaced))
-                    .frame(height: 140).border(Color.secondary.opacity(0.3))
-                    .accessibilityLabel("Variable value")
-            }
-            if let saveError { Text(saveError).foregroundStyle(.red).font(.callout) }
-            HStack {
-                if isSaving { ProgressView().controlSize(.small) }
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(isSaving)
-                Button("Save to HCP Terraform") {
-                    guard sourceKey == model.mapRequestKey else { return }
-                    isSaving = true; saveError = nil
-                    Task {
-                        let saved = await model.updateVariable(variableID: variable.id, value: value)
-                        isSaving = false
-                        if saved { dismiss() } else { saveError = model.variablesError ?? "The variable could not be saved." }
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(isSaving || !didEdit || sourceKey != model.mapRequestKey || (!variable.isMaskedForDisplay && value == (variable.value ?? "")))
-            }
-        }
-        .padding(24).frame(width: 510)
-        .onChange(of: value) { _ in didEdit = true }
-        .onChange(of: model.mapRequestKey) { _ in dismiss() }
-        .interactiveDismissDisabled(isSaving)
-    }
-}
 
 private struct LocalCloudConnectionCard: View {
     let connection: LocalCloudConnection

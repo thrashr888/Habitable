@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC21000000000000000002 /* MapConnectionRoute.swift */; };
+		AA60400000000000000000B4 /* HCPVariablesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B5 /* HCPVariablesPanel.swift */; };
+		AA60400000000000000000B6 /* HCPRunLogPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B7 /* HCPRunLogPresentation.swift */; };
 		AA60400000000000000000B2 /* RunPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B3 /* RunPresentation.swift */; };
 		AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC20000000000000000002 /* MapResourcePresentation.swift */; };
 		AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC10000000000000000002 /* LocalCloudConnections.swift */; };
@@ -89,6 +91,8 @@
 
 /* Begin PBXFileReference section */
 		AACC21000000000000000002 /* MapConnectionRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapConnectionRoute.swift; sourceTree = "<group>"; };
+		AA60400000000000000000B5 /* HCPVariablesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPVariablesPanel.swift; sourceTree = "<group>"; };
+		AA60400000000000000000B7 /* HCPRunLogPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPRunLogPresentation.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B3 /* RunPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPresentation.swift; sourceTree = "<group>"; };
 		AACC20000000000000000002 /* MapResourcePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapResourcePresentation.swift; sourceTree = "<group>"; };
 		AACC10000000000000000002 /* LocalCloudConnections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCloudConnections.swift; sourceTree = "<group>"; };
@@ -206,6 +210,7 @@
 				AACC10000000000000000002 /* LocalCloudConnections.swift */,
 				AACC20000000000000000002 /* MapResourcePresentation.swift */,
 				AACC21000000000000000002 /* MapConnectionRoute.swift */,
+				AA60400000000000000000B7 /* HCPRunLogPresentation.swift */,
 				AA60400000000000000000B3 /* RunPresentation.swift */,
 				0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */,
 				B1EAA330000000000000002 /* TerraformProviderSchema.swift */,
@@ -264,6 +269,7 @@
 				8AA12B0D264260570048A4A9 /* RunListPage.swift */,
 				8A926B65264E4A5500FDBA5C /* RunPage.swift */,
 				AA6040000000000000000021 /* ResourceMapPage.swift */,
+				AA60400000000000000000B5 /* HCPVariablesPanel.swift */,
 				AA60400000000000000000B1 /* MapTimelineStrip.swift */,
 				8AA12B0F264260820048A4A9 /* ResourceListPage.swift */,
 				8A926B74264FA12400FDBA5C /* ResourcePage.swift */,
@@ -413,6 +419,8 @@
 				AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */,
 				AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */,
 				AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */,
+				AA60400000000000000000B4 /* HCPVariablesPanel.swift in Sources */,
+				AA60400000000000000000B6 /* HCPRunLogPresentation.swift in Sources */,
 				AA60400000000000000000B2 /* RunPresentation.swift in Sources */,
 				903CDE668045415297D22E75 /* HCPWorkspaceViewerPage.swift in Sources */,
 				4C2E594417E941249EC613A0 /* AgentsSettingsPage.swift in Sources */,
