@@ -46,6 +46,55 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
     }
 
+    @MainActor
+    func testOpenLinkedWorkspaceSearchesBoundedPagesAndSelectsExactName() async throws {
+        let path = "/api/v2/organizations/pthrasher_v2/workspaces"
+        HCPURLProtocolStub.responses[path + "#page=1"] = try workspacePage(
+            [workspaceRecord(id: "ws-near", name: "production-copy")], hasNext: true)
+        HCPURLProtocolStub.responses[path + "#page=2"] = try workspacePage(
+            [workspaceRecord(id: "ws-exact", name: "production")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-exact/runs"] = emptyRunPage()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(),
+            selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        let link = TerraformRemoteWorkspaceLink(hostname: "app.terraform.io", organization: "pthrasher_v2",
+            workspaceName: "production", url: URL(string: "https://app.terraform.io/app/pthrasher_v2/workspaces/production")!)
+
+        await model.openLinkedWorkspace(link)
+
+        XCTAssertTrue(model.isConnected)
+        XCTAssertEqual(model.selectedWorkspaceID, "ws-exact")
+        XCTAssertEqual(model.selectedWorkspace?.name, "production")
+        XCTAssertNil(model.errorMessage)
+        XCTAssertTrue(HCPURLProtocolStub.requests.contains {
+            guard $0.url?.path == path else { return false }
+            return URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems?
+                .contains(where: { $0.name == "page[number]" && $0.value == "2" }) == true
+        })
+        XCTAssertTrue(HCPURLProtocolStub.requests.contains { $0.url?.path == "/api/v2/workspaces/ws-exact/runs" })
+        XCTAssertFalse(HCPURLProtocolStub.requests.contains { $0.url?.path == "/api/v2/workspaces/ws-near/runs" })
+    }
+
+    @MainActor
+    func testOpenLinkedWorkspaceDoesNotSelectFallbackWhenExactNameIsMissing() async throws {
+        let path = "/api/v2/organizations/pthrasher_v2/workspaces"
+        HCPURLProtocolStub.responses[path] = try workspacePage(
+            [workspaceRecord(id: "ws-other", name: "another-workspace")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(),
+            selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        let link = TerraformRemoteWorkspaceLink(hostname: "app.terraform.io", organization: "pthrasher_v2",
+            workspaceName: "production", url: URL(string: "https://app.terraform.io/app/pthrasher_v2/workspaces/production")!)
+
+        await model.openLinkedWorkspace(link)
+
+        XCTAssertTrue(model.isConnected)
+        XCTAssertNil(model.selectedWorkspaceID)
+        XCTAssertNil(model.selectedWorkspace)
+        XCTAssertTrue(model.errorMessage?.contains("configured HCP workspace wasn’t found") == true)
+        XCTAssertFalse(HCPURLProtocolStub.requests.contains { $0.url?.path.contains("/runs") == true })
+    }
+
     func testRunHistoryPreservesRemoteRunIDAndReadsSignedLogsWithoutForwardingAPIToken() async throws {
         let signedURL = "https://archivist.terraform.io/v1/object/signed?token=do-not-store-this-url"
         HCPURLProtocolStub.responses = [

@@ -9,21 +9,42 @@ import SwiftUI
 
 @main
 struct HabitableApp: App {
+    @StateObject private var cloud = HCPWorkspaceViewerModel()
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer") {
-            ContentView()
+            ContentView(onOpenRemoteWorkspace: { link in
+                Task { await cloud.openLinkedWorkspace(link) }
+            })
                 .frame(minWidth: 900, minHeight: 560)
         }
         .windowToolbarStyle(.unifiedCompact)
         .commands { WorkspaceCommands() }
+
+        Window("HCP Terraform", id: "HCP.browser") {
+            CloudWorkspaceWindow(model: cloud)
+                .frame(minWidth: 900, minHeight: 560)
+        }.windowToolbarStyle(.unifiedCompact).defaultSize(width: 1400, height: 880)
+
+        Window("Settings", id: "App.settings") {
+            ConnectionsSettingsWindow(model: cloud)
+                .frame(minWidth: 660, minHeight: 560)
+        }.windowToolbarStyle(.unifiedCompact)
     }
 }
 
 private struct WorkspaceCommands: Commands {
     @FocusedValue(\.workspaceWindowActions) private var actions
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { openWindow(id: "App.settings") }
+                .keyboardShortcut(",", modifiers: .command)
+        }
         CommandGroup(after: .newItem) {
+            Button("New Local Workspace Window") { openWindow(id: "Workspace.viewer") }
+            Button("HCP Terraform Window") { openWindow(id: "HCP.browser") }
+            Divider()
             Button { actions?.openFolder() } label: { Label("Open…", systemImage: "folder") }
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(actions == nil)
@@ -52,5 +73,42 @@ private struct WorkspaceCommands: Commands {
                 .keyboardShortcut("v", modifiers: [.command, .shift])
                 .disabled(actions == nil || actions?.canValidate != true)
         }
+    }
+}
+
+private struct CloudWorkspaceWindow: View {
+    @ObservedObject var model: HCPWorkspaceViewerModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        HCPWorkspaceViewer(model: model,
+            onOpenConnections: { openWindow(id: "App.settings") })
+            .navigationTitle(model.selectedWorkspace.map { "\($0.name) · \(model.selectedOrganization)" } ?? "HCP Terraform")
+            .toolbar {
+                ToolbarItemGroup {
+                    Button { openWindow(id: "Workspace.viewer") } label: { Label("Local workspace", systemImage: "folder") }
+                    Button { openWindow(id: "App.settings") } label: { Label("Connections", systemImage: "network") }
+                }
+            }
+            .onAppear { model.setVisible(true) }
+            .onDisappear { model.setVisible(false) }
+            .task { if !model.isConnected && !model.isLoading && model.hasStoredCredential { await model.connect() } }
+    }
+}
+
+private struct ConnectionsSettingsWindow: View {
+    @ObservedObject var model: HCPWorkspaceViewerModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        HCPWorkspaceViewer(model: model, connectionOnly: true,
+            onOpenWorkspaces: { openWindow(id: "HCP.browser") })
+            .navigationTitle("Settings · Connections")
+            .toolbar {
+                ToolbarItemGroup {
+                    Button { openWindow(id: "HCP.browser") } label: { Label("Cloud workspaces", systemImage: "cloud") }
+                    Button { openWindow(id: "Workspace.viewer") } label: { Label("Local workspace", systemImage: "folder") }
+                }
+            }
     }
 }

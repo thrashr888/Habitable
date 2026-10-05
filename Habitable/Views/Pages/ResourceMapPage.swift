@@ -57,22 +57,7 @@ struct ResourceMapPage: View {
             refresh: workspace.refreshResources, onShowList: onShowList, onOpenResource: onOpenResource,
             workspaceDirectory: workspace.workingDirectory,
             onShowHistory: onShowHistory,
-            variablesPanel: AnyView(VStack(alignment: .leading, spacing: 12) {
-                Text("Variables").font(.headline)
-                Text("Local workspace inputs").foregroundStyle(.secondary)
-                Button("Manage variables", action: onShowVariables).buttonStyle(.bordered)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(workspace.terraformVariables, id: \.id) { variable in
-                            TerraformVariableSummaryView(variable: variable)
-                            Divider()
-                        }
-                        if workspace.terraformVariables.isEmpty {
-                            Text("No Terraform inputs found in this workspace.").foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }.padding(16).frame(maxHeight: .infinity, alignment: .topLeading)))
+            onShowVariables: onShowVariables)
     }
 }
 
@@ -96,6 +81,7 @@ struct ResourceMapContent: View {
     var stateCreatedAt: Date? = nil
     var stateSerial: Int? = nil
     var onShowHistory: (() -> Void)? = nil
+    var onShowVariables: (() -> Void)? = nil
     var variablesPanel: AnyView? = nil
     @State private var showingVariables = false
     @State private var showingInventory = true
@@ -220,7 +206,10 @@ struct ResourceMapContent: View {
                 Button(action: refresh) { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.bordered).disabled(!canRefresh)
                     .accessibilityLabel("Refresh map").help("Refresh map from Terraform state")
-                if variablesPanel != nil {
+                if let onShowVariables {
+                    Button(action: onShowVariables) { Label("Variables", systemImage: "slider.horizontal.3") }
+                        .buttonStyle(.bordered).accessibilityLabel("Open workspace variables")
+                } else if variablesPanel != nil {
                     Toggle(isOn: $showingVariables) { Label("Variables", systemImage: "rectangle.bottomthird.inset.filled") }
                         .toggleStyle(.button).help("Show or hide workspace variables")
                         .accessibilityLabel("Show workspace variables")

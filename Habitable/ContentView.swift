@@ -29,7 +29,7 @@ extension FocusedValues {
 
 struct ContentView: View {
     enum NavigationItem: String {
-        case map, workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings, hcpTerraform, hcpConnection
+        case map, workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings
 
         var title: String {
             switch self {
@@ -43,8 +43,6 @@ struct ContentView: View {
             case .variables: "Variables"
             case .envVariables: "Environment Variables"
             case .settings: "Settings"
-            case .hcpTerraform: "HCP Terraform"
-            case .hcpConnection: "Terraform connection"
             }
         }
 
@@ -55,11 +53,13 @@ struct ContentView: View {
 
     @StateObject var workspace: Workspace
 
-    init() {
-        let restoreHCP = UserDefaults.standard.bool(forKey: "lastWorkspaceSourceWasHCP")
-        _workspace = StateObject(wrappedValue: Workspace(restoreLastDirectory: !restoreHCP))
-        _selection = State(initialValue: .map)
-        _workspaceSourceIsHCP = State(initialValue: restoreHCP)
+    @Environment(\.openWindow) private var openWindow
+    private let onOpenRemoteWorkspace: (TerraformRemoteWorkspaceLink) -> Void
+    @State private var remoteWorkspaceLink: TerraformRemoteWorkspaceLink?
+
+    init(onOpenRemoteWorkspace: @escaping (TerraformRemoteWorkspaceLink) -> Void = { _ in }) {
+        self.onOpenRemoteWorkspace = onOpenRemoteWorkspace
+        _workspace = StateObject(wrappedValue: Workspace(restoreLastDirectory: true))
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
@@ -67,14 +67,9 @@ struct ContentView: View {
     @StateObject private var editors = ExternalEditorStore()
     @StateObject private var readme = WorkspaceReadmePresentation()
     @StateObject private var navigationTrace = NavigationTrace()
-    @StateObject private var hcpViewer = HCPWorkspaceViewerModel()
     @StateObject private var agentAccess = HabitableAgentAccess()
     @StateObject private var windowIdentity = WorkspaceTitlebarController()
-    private var isHCPSelection: Bool {
-        selection == .hcpTerraform || selection == .hcpConnection || (selection == .map && workspaceSourceIsHCP)
-    }
     @State private var selection: NavigationItem? = .map
-    @State private var workspaceSourceIsHCP = false
     @State private var selectedRun: UUID?
     @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
@@ -87,6 +82,15 @@ struct ContentView: View {
 
     var body: some View {
         configuredWindowContent
+        .task(id: workspace.workingDirectory) {
+            remoteWorkspaceLink = nil
+            guard let directory = workspace.workingDirectory else { return }
+            let link = await Task.detached(priority: .utility) {
+                TerraformRemoteWorkspaceLink.resolve(workingDirectory: directory)
+            }.value
+            guard !Task.isCancelled, directory == workspace.workingDirectory else { return }
+            remoteWorkspaceLink = link
+        }
         .onChange(of: workspace.workspaceOpenError) { error in
             if let error {
                 presentedOpenError = error
@@ -96,7 +100,6 @@ struct ContentView: View {
         .onChange(of: workspace.workingDirectory) { directory in
             agentAccess.workspaceChanged(in: workspace)
             if let directory, isAvailableDirectory(directory) {
-                setWorkspaceSource(isHCP: false)
                 recentWorkspaces.recordSuccessfulOpen(directory)
                 navigationSelection.wrappedValue = .map
             }
@@ -123,9 +126,6 @@ struct ContentView: View {
             selectedOutput = nil
         }
         .onDisappear { agentAccess.setEnabled(false, in: workspace) }
-        .onChange(of: selection) { page in
-            if isHCPSelection { agentAccess.setEnabled(false, in: workspace) }
-        }
         .onChange(of: selectedRun) { id in
             selectedRunDetail = workspace.runs.first { $0.id == id }
                 ?? (workspace.latestOverviewRun?.id == id ? workspace.latestOverviewRun : nil)
@@ -151,8 +151,8 @@ struct ContentView: View {
     private var configuredWindowContent: some View {
         windowContent
         .background(WorkspaceWindowIdentity(controller: windowIdentity, title: workspaceName,
-                                            sidebarVisible: sidebarVisible && (workspace.workingDirectory != nil || isHCPSelection),
-                                            hasWorkspace: workspace.workingDirectory != nil || isHCPSelection,
+                                            sidebarVisible: sidebarVisible && (workspace.workingDirectory != nil),
+                                            hasWorkspace: workspace.workingDirectory != nil,
                                             toggleSidebar: { sidebarVisible.toggle() }))
         .environmentObject(workspace)
         .environmentObject(editors)
@@ -163,15 +163,29 @@ struct ContentView: View {
             .allowsHitTesting(false))
         .disclosureGroupStyle(FullHeaderDisclosureStyle())
         .focusedSceneValue(\.workspaceWindowActions, windowActions)
+        .toolbar {
+            ToolbarItemGroup(placement: .automatic) {
+                if let link = remoteWorkspaceLink {
+                    Button {
+                        onOpenRemoteWorkspace(link)
+                        openWindow(id: "HCP.browser")
+                    } label: { Label("Open in HCP Terraform", systemImage: "cloud") }
+                    .help("Open \(link.organization) / \(link.workspaceName) on \(link.hostname)")
+                } else {
+                    Button { openWindow(id: "HCP.browser") } label: { Label("Cloud workspaces", systemImage: "cloud") }
+                }
+                Button { openWindow(id: "App.settings") } label: { Label("Settings", systemImage: "gear") }
+            }
+        }
     }
 
     private var windowContent: some View {
         Group {
-            if workspace.workingDirectory == nil && !isHCPSelection {
+            if workspace.workingDirectory == nil {
                 BlankSlateView(recentFolders: recentWorkspaces.folders,
                                onChooseFolder: openFolder,
                                onOpenRecent: openRecent,
-                               onOpenHCP: { navigationSelection.wrappedValue = .hcpTerraform })
+                               onOpenHCP: { openWindow(id: "HCP.browser") })
             } else {
                 HSplitView {
                     if sidebarVisible {
@@ -211,27 +225,22 @@ struct ContentView: View {
             openRecent: openRecent,
             clearRecents: recentWorkspaces.clear,
             plan: {
-                guard !isHCPSelection else { return }
                 workspace.validateAndQueueRun(onCreated: { id in
                     selectedRun = id
                     navigationSelection.wrappedValue = .runs
                 })
             },
-            initialize: { if !isHCPSelection { workspace.initialize() } },
-            validate: { if !isHCPSelection { workspace.validate() } },
-            canPlan: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
+            initialize: { workspace.initialize() },
+            validate: { workspace.validate() },
+            canPlan: workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
                 && workspace.historyError == nil && !workspace.isInspectingInputs && !workspace.hasUnavailableRememberedInputs,
-            canInitialize: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked,
-            canValidate: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
+            canInitialize: workspace.workingDirectory != nil && !workspace.locked,
+            canValidate: workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
             planTitle: workspace.autoApply ? "Plan and apply automatically" : "Plan"
         )
     }
 
     private var workspaceName: String {
-        if selection == .hcpConnection { return "Connections" }
-        if isHCPSelection {
-            return hcpViewer.selectedWorkspace.map { "\($0.name) · \(hcpViewer.selectedOrganization)" } ?? "HCP Terraform"
-        }
         guard let directory = workspace.workingDirectory else { return "Habitable" }
         return directory.lastPathComponent.isEmpty ? directory.path : directory.lastPathComponent
     }
@@ -247,17 +256,12 @@ struct ContentView: View {
             sidebarRow("Outputs", symbol: "chevron.right.square", count: workspace.state?.outputs.count ?? 0).tag(NavigationItem.outputs)
             sidebarRow("Variables", symbol: "dollarsign.circle", count: workspace.terraformVariables.count).tag(NavigationItem.variables)
             sidebarRow("Environment", symbol: "terminal", count: workspace.environmentVariables.count).tag(NavigationItem.envVariables)
-            Label("Settings", systemImage: "gear").tag(NavigationItem.settings)
-            Divider()
-            Label("HCP Terraform", systemImage: "cloud").tag(NavigationItem.hcpTerraform)
-            Label("Connections", systemImage: "network").tag(NavigationItem.hcpConnection)
+            Label("Workspace settings", systemImage: "gear").tag(NavigationItem.settings)
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
-                if isHCPSelection {
-                    Label(hcpViewer.isConnected ? "HCP · Connected" : "HCP disconnected", systemImage: "cloud")
-                } else if workspace.locked {
+                if workspace.locked {
                     ProgressView().controlSize(.small)
                     Text("Running Terraform").lineLimit(1)
                 } else if workspace.isInspectingInputs {
@@ -331,11 +335,19 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
-        case .map where workspaceSourceIsHCP:
-            HCPWorkspaceViewer(model: hcpViewer,
-                onOpenConnections: { navigationSelection.wrappedValue = .hcpConnection })
-                .onAppear { hcpViewer.setVisible(true) }
-                .onDisappear { hcpViewer.setVisible(false) }
+        case .map where remoteWorkspaceLink != nil && workspace.state == nil && !workspace.locked:
+            VStack(spacing: 16) {
+                Image(systemName: "cloud").font(.system(size: 36)).foregroundStyle(.secondary)
+                Text("State managed in HCP Terraform").font(.title2.weight(.semibold))
+                Text("Open the remote workspace to view its Map. Local configuration and inputs remain available in this window.")
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 470)
+                if let link = remoteWorkspaceLink {
+                    Button("Open \(link.workspaceName) in HCP Terraform") {
+                        onOpenRemoteWorkspace(link)
+                        openWindow(id: "HCP.browser")
+                    }.buttonStyle(.borderedProminent)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .map: ResourceMapPage(onShowVariables: { navigationSelection.wrappedValue = .variables },
                                     onShowList: { navigationSelection.wrappedValue = .resources },
                                     onOpenResource: { address in
@@ -348,12 +360,6 @@ struct ContentView: View {
         case .variables: VariableListPage(showMissingOnly: showMissingInputs)
         case .envVariables: EnvVarListPage()
         case .settings: SettingsListPage(catalog: releaseCatalog, agentAccess: agentAccess)
-        case .hcpConnection: HCPWorkspaceViewer(model: hcpViewer, connectionOnly: true,
-                onOpenWorkspaces: { navigationSelection.wrappedValue = .hcpTerraform })
-        case .hcpTerraform: HCPWorkspaceViewer(model: hcpViewer,
-                onOpenConnections: { navigationSelection.wrappedValue = .hcpConnection })
-                .onAppear { hcpViewer.setVisible(true) }
-                .onDisappear { hcpViewer.setVisible(false) }
         default: WorkspacePage(onReviewRun: { id in
             selectedRun = id
             navigationSelection.wrappedValue = .runs
@@ -371,22 +377,12 @@ struct ContentView: View {
     private var navigationSelection: Binding<NavigationItem?> {
         Binding(get: { selection }, set: { page in
             guard page != selection else { return }
-            if page == .hcpTerraform {
-                setWorkspaceSource(isHCP: true)
-            } else if page != .map, page != .hcpConnection, page != nil {
-                setWorkspaceSource(isHCP: false)
-            }
             if page != .variables { showMissingInputs = false }
             navigationTrace.begin(page: page?.rawValue ?? "workspace")
             var transaction = Transaction(animation: nil)
             transaction.disablesAnimations = true
             withTransaction(transaction) { selection = page }
         })
-    }
-
-    private func setWorkspaceSource(isHCP: Bool) {
-        workspaceSourceIsHCP = isHCP
-        UserDefaults.standard.set(isHCP, forKey: "lastWorkspaceSourceWasHCP")
     }
 
     private func openDeclaration(_ file: String, _ line: Int) {

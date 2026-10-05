@@ -3,6 +3,29 @@ import XCTest
 @testable import HabitableCore
 
 final class TerraformConfigurationInspectorTests: XCTestCase {
+    func testRemoteWorkspaceLinkUsesExactTerraformSelectorAndDefaultHostname() throws {
+        // Mirrors Terraform's initialized backend serialization: omitted optional
+        // cloud attributes are retained as JSON null.
+        let metadata = Data(#"{"backend":{"type":"cloud","config":{"hostname":null,"organization":"example-org","token":null,"workspaces":{"name":"prod","project":null,"tags":null}}}}"#.utf8)
+        let link = try XCTUnwrap(TerraformRemoteWorkspaceLink.resolve(backendMetadata: metadata))
+        XCTAssertEqual(link.hostname, "app.terraform.io")
+        XCTAssertEqual(link.organization, "example-org")
+        XCTAssertEqual(link.workspaceName, "prod")
+        XCTAssertEqual(link.url.absoluteString, "https://app.terraform.io/app/example-org/workspaces/prod")
+    }
+
+    func testRemoteWorkspaceLinkRejectsAmbiguousOrMalformedSelectors() {
+        let base = #"{"backend":{"type":"remote","config":{"organization":"example-org","workspaces":{"name":"prod","tags":null,"prefix":null}}}}"#
+        XCTAssertNotNil(TerraformRemoteWorkspaceLink.resolve(backendMetadata: Data(base.utf8)))
+        for invalid in [
+            #"{"backend":{"type":"remote","config":{"organization":"example-org","workspaces":{"name":"prod","tags":{"env":"prod"}}}}}"#,
+            #"{"backend":{"type":"remote","config":{"organization":"example-org","workspaces":{"name":"prod","prefix":"prod-"}}}}}"#,
+            #"{"backend":{"type":"remote","config":{"hostname":17,"organization":"example-org","workspaces":{"name":"prod"}}}}"#
+        ] {
+            XCTAssertNil(TerraformRemoteWorkspaceLink.resolve(backendMetadata: Data(invalid.utf8)))
+        }
+    }
+
     private func helper() throws -> URL {
         guard let path = ProcessInfo.processInfo.environment["HABITABLE_CONFIG_INSPECT_PATH"],
               FileManager.default.isExecutableFile(atPath: path) else {
