@@ -38,6 +38,18 @@ This pass is the **current-state Map + Inspector** review target (Habitable-9gp)
 
 Validation: final native build installed into the single stable preview; full Swift suite executed 280 tests, 8 skipped, zero failures with the pinned configuration-inspector helper. Earlier missing-helper failures and a stale layout-width expectation were resolved before the final pass. Live QA covered real workspace switching both ways, exact-type search, no-results recovery, empty-band omission, inventory/endpoint selection, panel resizing, Variables hide/show without writes, full resource drilldown and return. Visual inspection caught and fixed the attribute-path mismatch, selection scroll positioning, and workspace-list click handling. Infrastructure and variable values were not changed.
 
+## Inspector review follow-up, October 4, 2026
+
+Compared the user's 9:53 PM Inspector mock with the installed real Rookery map. Rounded orthogonal connector corners now retain exact attachment points. Opposing dependencies produced by collapsing different resources into tiles appear once as a grouped connection, without an arrowhead; expandable evidence preserves every exact directed resource pair. A synthetic acyclic resource graph verifies this case.
+
+Variables now has its own resizable bottom drawer and can remain open alongside the Inspector. Copy controls cover displayed facts, endpoints, Terraform addresses, types, state versions and non-private variable values. Credential-like variable names are hidden even when HCP does not mark them sensitive; their editor starts with an empty replacement field. This changes presentation only, not the HCP sensitivity setting.
+
+The Inspector now includes At a glance (database engine/version/class, storage/encryption, availability, backups, protection and last recorded status when present), endpoints, connected resources, Defined in, and History. Local source declarations can open in the default editor. Remote source file/line remains unavailable and is tracked in Habitable-s1c. History shows the recorded state date/revision/version and opens workspace Runs; per-resource history and the timeline remain Habitable-g20. State status is not presented as a live health or drift check. CPU/RAM values are not guessed from instance class names.
+
+Final native build succeeded; full Swift suite: **288 tests, 8 skipped, 0 failures** with the configuration-inspector helper. Exactly one stable Preview process was running. Live QA verified real Rookery load, rounded paths, Certificate/DNS grouped-link evidence, copying a database fact and pasting it into Map search, independent drawer/Inspector visibility and retained selection, masked variable editor plus disabled Save and cancel, and History navigation to Runs and back. No cloud variable writes or infrastructure operations were performed. Local source opening is implemented but not exercised against a local workspace in this pass.
+
+Final screenshots inspected locally: `/tmp/habitable-map-review/inspector-facts-final.jpg`, `/tmp/habitable-map-review/inspector-provenance-final.jpg`, `/tmp/habitable-map-review/variables-inspector-final.jpg`, `/tmp/habitable-map-review/grouped-connections-final.jpg`. These contain private workspace context and stay out of the repository. User visual acceptance remains pending on Habitable-9gp.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

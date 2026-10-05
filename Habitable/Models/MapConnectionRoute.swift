@@ -1,9 +1,49 @@
 import Foundation
 
+enum MapConnectionPathSegment: Equatable {
+    case move(to: CGPoint)
+    case line(to: CGPoint)
+    case quadCurve(control: CGPoint, to: CGPoint)
+}
+
 /// Computes deterministic orthogonal paths between map cards without depending on SwiftUI.
 enum MapConnectionRoute {
     private static let clearance = 10.0
     private static let epsilon = 0.001
+
+    /// Converts an orthogonal polyline into drawing commands with rounded, bounded corners.
+    /// The first and last points remain exact so connectors retain their card ports and arrow direction.
+    static func roundedSegments(for points: [CGPoint], radius requestedRadius: Double = 10) -> [MapConnectionPathSegment] {
+        let points = normalize(points)
+        guard let first = points.first else { return [] }
+        guard points.count > 1 else { return [.move(to: first)] }
+
+        var segments: [MapConnectionPathSegment] = [.move(to: first)]
+        for index in 1..<(points.count - 1) {
+            let previous = points[index - 1]
+            let corner = points[index]
+            let next = points[index + 1]
+            let incomingLength = distance(previous, corner)
+            let outgoingLength = distance(corner, next)
+            let incoming = unit(from: previous, to: corner)
+            let outgoing = unit(from: corner, to: next)
+            let isRightAngle = abs(dot(incoming, outgoing)) < epsilon
+            let radius = isRightAngle
+                ? max(0, min(requestedRadius, incomingLength / 2, outgoingLength / 2))
+                : 0
+
+            guard radius > epsilon else {
+                segments.append(.line(to: corner))
+                continue
+            }
+            let entry = CGPoint(x: corner.x - incoming.x * radius, y: corner.y - incoming.y * radius)
+            let exit = CGPoint(x: corner.x + outgoing.x * radius, y: corner.y + outgoing.y * radius)
+            segments.append(.line(to: entry))
+            segments.append(.quadCurve(control: corner, to: exit))
+        }
+        segments.append(.line(to: points[points.count - 1]))
+        return segments
+    }
 
     static func points(from source: MapCanvasTile, to target: MapCanvasTile,
                        avoiding placements: [MapCanvasTile], canvasWidth: Double) -> [CGPoint] {
@@ -101,6 +141,35 @@ enum MapConnectionRoute {
     private static func unique(_ values: [Double]) -> [Double] {
         Array(Set(values.filter(\.isFinite))).sorted()
     }
+    private static func normalize(_ points: [CGPoint]) -> [CGPoint] {
+        var result: [CGPoint] = []
+        for point in points where point.x.isFinite && point.y.isFinite {
+            guard let last = result.last else { result.append(point); continue }
+            if distance(last, point) < epsilon { continue }
+            if result.count >= 2 {
+                let before = result[result.count - 2]
+                let incoming = unit(from: before, to: last)
+                let outgoing = unit(from: last, to: point)
+                // Collapse only continuing collinear segments. Keep a reversal as a sharp turn.
+                if abs(cross(incoming, outgoing)) < epsilon && dot(incoming, outgoing) > 0 {
+                    result[result.count - 1] = point
+                    continue
+                }
+            }
+            result.append(point)
+        }
+        return result
+    }
+    private static func distance(_ a: CGPoint, _ b: CGPoint) -> Double {
+        hypot(b.x - a.x, b.y - a.y)
+    }
+    private static func unit(from a: CGPoint, to b: CGPoint) -> CGPoint {
+        let length = distance(a, b)
+        guard length > epsilon else { return .zero }
+        return CGPoint(x: (b.x - a.x) / length, y: (b.y - a.y) / length)
+    }
+    private static func dot(_ a: CGPoint, _ b: CGPoint) -> Double { a.x * b.x + a.y * b.y }
+    private static func cross(_ a: CGPoint, _ b: CGPoint) -> Double { a.x * b.y - a.y * b.x }
     private static func simplify(_ points: [CGPoint]) -> [CGPoint] {
         var result: [CGPoint] = []
         for point in points where result.last != point { result.append(point) }

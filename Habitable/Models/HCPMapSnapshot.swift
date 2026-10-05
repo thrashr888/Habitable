@@ -13,8 +13,21 @@ struct HCPMapSnapshot: Equatable, Sendable {
     let map: ResourceMap
     let resources: [MapDisplayResource]
     let notice: String?
+    let stateCreatedAt: Date?
+    let stateSerial: Int?
 
-    static func decode(versionID: String, raw: Data, shown: Data?) throws -> HCPMapSnapshot {
+    init(versionID: String, map: ResourceMap, resources: [MapDisplayResource], notice: String?,
+         stateCreatedAt: Date? = nil, stateSerial: Int? = nil) {
+        self.versionID = versionID
+        self.map = map
+        self.resources = resources
+        self.notice = notice
+        self.stateCreatedAt = stateCreatedAt
+        self.stateSerial = stateSerial
+    }
+
+    static func decode(versionID: String, raw: Data, shown: Data?,
+                       stateCreatedAt: Date? = nil, stateSerial: Int? = nil) throws -> HCPMapSnapshot {
         let metadata = try ResourceMapStateReader.read(raw)
         let map = try ResourceMapClassifier().classify(metadata)
         var details: [String: MapDisplayResource] = [:]
@@ -42,6 +55,7 @@ struct HCPMapSnapshot: Equatable, Sendable {
         let resources = metadata.map {
             details[$0.address] ?? MapDisplayResource(address: $0.address, type: $0.type, displayAttributes: [])
         }
-        return HCPMapSnapshot(versionID: versionID, map: map, resources: resources, notice: notice)
+        return HCPMapSnapshot(versionID: versionID, map: map, resources: resources, notice: notice,
+                              stateCreatedAt: stateCreatedAt, stateSerial: stateSerial)
     }
 }

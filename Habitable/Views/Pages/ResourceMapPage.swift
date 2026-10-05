@@ -41,6 +41,7 @@ struct ResourceMapPage: View {
     let onShowVariables: () -> Void
     let onShowList: () -> Void
     let onOpenResource: (String) -> Void
+    var onShowHistory: (() -> Void)? = nil
 
     var body: some View {
         ResourceMapContent(
@@ -54,6 +55,8 @@ struct ResourceMapPage: View {
             notice: workspace.mapNotice, errorMessage: workspace.errorMessage,
             isLoading: workspace.locked, canRefresh: !workspace.locked && !workspace.isMapDemo,
             refresh: workspace.refreshResources, onShowList: onShowList, onOpenResource: onOpenResource,
+            workspaceDirectory: workspace.workingDirectory,
+            onShowHistory: onShowHistory,
             variablesPanel: AnyView(VStack(alignment: .leading, spacing: 12) {
                 Text("Variables").font(.headline)
                 Text("Local workspace inputs").foregroundStyle(.secondary)
@@ -87,6 +90,12 @@ struct ResourceMapContent: View {
     let onShowList: () -> Void
     let onOpenResource: (String) -> Void
     var emptyDetail = "Resources appear here after they are recorded in Terraform state. You can still inspect configuration, inputs, and outputs in the sidebar."
+    var workspaceDirectory: URL? = nil
+    var workspaceURL: URL? = nil
+    var stateVersionID: String? = nil
+    var stateCreatedAt: Date? = nil
+    var stateSerial: Int? = nil
+    var onShowHistory: (() -> Void)? = nil
     var variablesPanel: AnyView? = nil
     @State private var showingVariables = false
     @State private var showingInventory = true
@@ -96,6 +105,9 @@ struct ResourceMapContent: View {
     @State private var showsConnections = true
     @State private var selectedReference: String?
     @State private var canvasZoom = 1.0
+    @State private var sourceDeclaration: TerraformResourceDeclaration?
+    @State private var sourceDeclarationIdentity = ""
+    private var sourceIdentity: String { identity + "|" + (selectedMember ?? "") }
 
     private var tiles: [MapTile] { map?.tiles ?? [] }
     private var selectedTile: MapTile? { tiles.first { $0.id == selectedTileID } }
@@ -112,15 +124,29 @@ struct ResourceMapContent: View {
         VStack(spacing: 0) {
             header
             Divider()
-            HSplitView {
-                if showingInventory, !tiles.isEmpty {
-                    inventory.frame(minWidth: 170, idealWidth: 195, maxWidth: 235, minHeight: 0, maxHeight: .infinity)
-                }
-                canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                if selectedTile != nil {
-                    inspector.frame(minWidth: 270, idealWidth: 310, maxWidth: 390, maxHeight: .infinity)
-                } else if showingVariables, let variablesPanel {
-                    variablesPanel.frame(minWidth: 280, idealWidth: 320, maxWidth: 390, maxHeight: .infinity)
+            VSplitView {
+                HSplitView {
+                    if showingInventory, !tiles.isEmpty {
+                        inventory.frame(minWidth: 170, idealWidth: 195, maxWidth: 235, minHeight: 0, maxHeight: .infinity)
+                    }
+                    canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    if selectedTile != nil {
+                        inspector.frame(minWidth: 280, idealWidth: 330, maxWidth: 390, maxHeight: .infinity)
+                    }
+                }.frame(minHeight: 220, maxHeight: .infinity)
+                if showingVariables, let variablesPanel {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Label("Workspace variables", systemImage: "slider.horizontal.3").font(.headline)
+                            Spacer()
+                            Button { showingVariables = false } label: { Image(systemName: "xmark") }
+                                .buttonStyle(.plain).accessibilityLabel("Close workspace variables")
+                        }.padding(.horizontal, 16).padding(.vertical, 10)
+                        Divider()
+                        variablesPanel
+                    }
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .frame(minHeight: 190, idealHeight: 240, maxHeight: 280)
                 }
             }.frame(minHeight: 0, maxHeight: .infinity)
             Divider()
@@ -139,6 +165,19 @@ struct ResourceMapContent: View {
                 }
             }
             .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 10)
+        }
+        .task(id: sourceIdentity) {
+            sourceDeclaration = nil
+            sourceDeclarationIdentity = ""
+            let requestIdentity = sourceIdentity
+            guard let address = selectedMember, let directory = workspaceDirectory else { return }
+            let task = Task.detached(priority: .utility) {
+                TerraformConfigurationInspector.declarations(for: [address], directory: directory)[address]
+            }
+            let declaration = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
+            guard !Task.isCancelled, sourceIdentity == requestIdentity else { return }
+            sourceDeclaration = declaration
+            sourceDeclarationIdentity = requestIdentity
         }
         .onChange(of: identity) { _ in search = ""; selectedTileID = nil; selectedMember = nil; selectedReference = nil }
         .onChange(of: search) { _ in
@@ -182,10 +221,7 @@ struct ResourceMapContent: View {
                     .buttonStyle(.bordered).disabled(!canRefresh)
                     .accessibilityLabel("Refresh map").help("Refresh map from Terraform state")
                 if variablesPanel != nil {
-                    Toggle(isOn: Binding(get: { showingVariables && selectedTileID == nil }, set: { show in
-                        showingVariables = show
-                        if show { selectedTileID = nil; selectedMember = nil }
-                    })) { Label("Variables", systemImage: "sidebar.right") }
+                    Toggle(isOn: $showingVariables) { Label("Variables", systemImage: "rectangle.bottomthird.inset.filled") }
                         .toggleStyle(.button).help("Show or hide workspace variables")
                         .accessibilityLabel("Show workspace variables")
                 }
@@ -403,9 +439,9 @@ struct ResourceMapContent: View {
             for (connection, points) in routes {
                 let emphasized = connection.source == selectedTileID || connection.target == selectedTileID
                 let color = emphasized ? Color.accentColor : Color.secondary.opacity(selectedTileID == nil ? 0.28 : 0.10)
-                var line = Path()
-                line.addLines(points)
+                let line = roundedPath(points)
                 context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: emphasized ? 1.8 : 1, lineCap: .round, lineJoin: .round))
+                guard connection.relationship == .dependency else { continue }
                 let end = points[points.count - 1], previous = points[points.count - 2]
                 let angle = atan2(end.y - previous.y, end.x - previous.x)
                 let length = 5.0
@@ -419,6 +455,18 @@ struct ResourceMapContent: View {
         }
     }
 
+    private func roundedPath(_ points: [CGPoint]) -> Path {
+        var path = Path()
+        for segment in MapConnectionRoute.roundedSegments(for: points, radius: 12) {
+            switch segment {
+            case .move(let point): path.move(to: point)
+            case .line(let point): path.addLine(to: point)
+            case .quadCurve(let control, let point): path.addQuadCurve(to: point, control: control)
+            }
+        }
+        return path
+    }
+
     private func referenceLines(_ layout: MapCanvasLayout) -> some View {
         Canvas { context, _ in
             let positions = Dictionary(uniqueKeysWithValues: layout.tiles.map { ($0.id, $0) })
@@ -429,13 +477,11 @@ struct ResourceMapContent: View {
                     guard let tile = positions[consumer] else { continue }
                     let start = CGPoint(x: tile.x + tile.width / 2, y: tile.y)
                     let gutter = layout.width - 12 - Double(index % 3) * 3
-                    var path = Path()
-                    path.move(to: start)
-                    path.addLine(to: CGPoint(x: start.x, y: start.y - 8))
-                    path.addLine(to: CGPoint(x: gutter, y: start.y - 8))
-                    path.addLine(to: CGPoint(x: gutter, y: end.y - 8))
-                    path.addLine(to: CGPoint(x: end.x, y: end.y - 8))
-                    path.addLine(to: end)
+                    let path = roundedPath([start,
+                        CGPoint(x: start.x, y: start.y - 8),
+                        CGPoint(x: gutter, y: start.y - 8),
+                        CGPoint(x: gutter, y: end.y - 8),
+                        CGPoint(x: end.x, y: end.y - 8), end])
                     context.stroke(path, with: .color(Color.accentColor.opacity(selectedTileID == nil || selectedTileID == consumer ? 0.65 : 0.15)),
                                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round, dash: [4, 4]))
                 }
@@ -506,113 +552,212 @@ struct ResourceMapContent: View {
     private var inspector: some View {
         ScrollView {
             if let tile = selectedTile {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 18) {
                     HStack {
-                        Text("Inspector").font(.caption).foregroundStyle(.secondary)
+                        Text("Inspector").font(.callout).foregroundStyle(.secondary)
                         Spacer()
                         Button { selectedTileID = nil; selectedMember = nil } label: { Image(systemName: "xmark") }
                             .buttonStyle(.plain).accessibilityLabel("Close inspector")
                     }
-                    HStack(spacing: 12) {
-                        Image(systemName: symbol(for: tile)).font(.title).foregroundStyle(tile.kind.color)
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: symbol(for: tile)).font(.title2).foregroundStyle(.white)
+                            .frame(width: 44, height: 44).background(tile.kind.color, in: RoundedRectangle(cornerRadius: 12))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(tile.title).font(.title3.weight(.semibold))
-                            Text(tile.kind.title).font(.caption).foregroundStyle(.secondary)
+                            Text(presentation(for: tile).subtitle).font(.callout).foregroundStyle(.secondary)
                         }
                     }
-                    Text(presentation(for: tile).subtitle).font(.body).foregroundStyle(.secondary)
+                    Label("Recorded in Terraform state", systemImage: "checkmark.circle")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .help("This describes the loaded state. Live health and configuration drift have not been checked.")
+                    Divider()
+                    Text("At a glance").font(.headline)
+                    if presentation(for: tile).facts.isEmpty {
+                        Text("\(tile.resources.count) managed resources · \(tile.kind.title)").font(.callout).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
                     ForEach(presentation(for: tile).facts) { fact in
-                        HStack(alignment: .firstTextBaseline) {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(fact.label).foregroundStyle(.secondary)
-                            Spacer()
+                            Spacer(minLength: 4)
                             Text(fact.value).multilineTextAlignment(.trailing).textSelection(.enabled)
+                            MapCopyButton(value: fact.value, label: fact.label)
                         }.font(.callout)
+                    }
                     }
                     if !presentation(for: tile).endpoints.isEmpty {
                         Divider()
                         Text("Endpoints").font(.headline)
                         ForEach(presentation(for: tile).endpoints) { endpoint in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(endpoint.label).font(.callout).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(endpoint.label).font(.callout).foregroundStyle(.secondary)
+                                    Spacer()
+                                    MapCopyButton(value: endpoint.value, label: endpoint.label)
+                                }
                                 if let url = endpoint.url {
                                     Link(endpoint.value, destination: url).lineLimit(3)
                                 } else {
                                     Text(endpoint.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
                                 }
-                                Button("Copy endpoint") {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(endpoint.value, forType: .string)
-                                }.buttonStyle(.link)
                             }
                         }
                     }
                     connections(for: tile)
                     Divider()
+                    sourceSection
+                    Divider()
+                    historySection
+                    Divider()
                     DisclosureGroup("Resources · \(tile.resources.count)") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Resources").font(.headline)
-                        ForEach(tile.resources, id: \.self) { address in
-                            Button { selectedMember = address } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(tile.resources, id: \.self) { address in
                                 HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: selectedMember == address ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selectedMember == address ? Color.accentColor : Color.secondary)
-                                    Text(address).font(.system(.caption, design: .monospaced))
-                                        .multilineTextAlignment(.leading).textSelection(.disabled)
-                                    Spacer(minLength: 0)
-                                }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                                    Button { selectedMember = address } label: {
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Image(systemName: selectedMember == address ? "checkmark.circle.fill" : "circle")
+                                                .foregroundStyle(selectedMember == address ? Color.accentColor : Color.secondary)
+                                            Text(address).font(.system(.callout, design: .monospaced)).multilineTextAlignment(.leading)
+                                        }.frame(maxWidth: .infinity, alignment: .leading)
+                                    }.buttonStyle(.plain)
+                                    MapCopyButton(value: address, label: "resource address")
+                                }.padding(8)
                                     .background(selectedMember == address ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                            }.buttonStyle(.plain)
-                        }
-                    }
+                            }
+                        }.padding(.top, 8)
                     }
                     if let resource = selectedResource {
-                        Divider()
                         HStack {
-                            Text("Details").font(.headline)
+                            Text("Resource details").font(.headline)
                             Spacer()
-                            Button("Full inspector") { onOpenResource(selectedMember!) }.buttonStyle(.link)
+                            Button("Full inspector") { onOpenResource(resource.address) }.buttonStyle(.link)
                         }
-                        Text(resource.type).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        HStack {
+                            Text(resource.type).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                            Spacer()
+                            MapCopyButton(value: resource.type, label: "resource type")
+                        }
                         DisclosureGroup("Attributes") {
-                        ForEach(Array(resource.displayAttributes.prefix(14))) { attribute in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(attribute.path).font(.caption).foregroundStyle(.secondary)
-                                Text(attribute.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        }
-                        if resource.displayAttributes.count > 14 {
-                            Text("Open the full inspector for all attributes and source links.").font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(resource.displayAttributes.prefix(14))) { attribute in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(attribute.path).font(.callout).foregroundStyle(.secondary)
+                                        Spacer()
+                                        if !attribute.value.contains("(sensitive value)") {
+                                            MapCopyButton(value: attribute.value, label: "attribute value")
+                                        }
+                                    }
+                                    Text(attribute.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                            }
+                            if resource.displayAttributes.count > 14 {
+                                Text("Open the full inspector for all attributes.").font(.callout).foregroundStyle(.secondary)
+                            }
                         }
                     }
-                }.padding(20)
-            } else {
-                empty("Your infrastructure, explained", detail: "Select a group to see its resources, connections, and details.", symbol: "sidebar.right")
+                }.padding(18)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .id(selectedMember)
+        .id(selectedTileID)
+    }
+
+    private var sourceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Defined in").font(.headline)
+            if let resource = selectedResource {
+                HStack(alignment: .top) {
+                    Text(resource.address).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Spacer(minLength: 4)
+                    MapCopyButton(value: resource.address, label: "resource address")
+                }
+                if sourceDeclarationIdentity == sourceIdentity, let declaration = sourceDeclaration, let directory = workspaceDirectory,
+                   let filename = TerraformDiagnosticSource.currentWorkspaceFile(filename: declaration.sourceFile, workspaceDirectory: directory) {
+                    HStack {
+                        Button {
+                            NSWorkspace.shared.open(directory.appendingPathComponent(filename))
+                        } label: { Label(declaration.sourceLocation, systemImage: "chevron.left.forwardslash.chevron.right") }
+                            .buttonStyle(.link).help("Open declaration in your default editor")
+                        Spacer()
+                        MapCopyButton(value: declaration.sourceLocation, label: "source location")
+                    }
+                } else {
+                    Text(workspaceDirectory == nil ? "File and line are not included in remote Terraform state." : "No matching source declaration found in this folder.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            if let workspaceURL { Link("Open workspace in HCP Terraform", destination: workspaceURL).font(.callout) }
+        }
+    }
+
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("History").font(.headline)
+            if let stateCreatedAt {
+                Text("State recorded \(stateCreatedAt.formatted(date: .abbreviated, time: .shortened))").font(.callout)
+            }
+            if let stateSerial { Text("State revision \(stateSerial)").font(.callout).foregroundStyle(.secondary) }
+            if let stateVersionID {
+                HStack(alignment: .top) {
+                    Text(stateVersionID).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Spacer(minLength: 4)
+                    MapCopyButton(value: stateVersionID, label: "state version")
+                }
+            }
+            Text("Current state does not include this resource’s creation or last-change history.")
+                .font(.callout).foregroundStyle(.secondary)
+            if let onShowHistory { Button("Open workspace runs", action: onShowHistory).buttonStyle(.link) }
+        }
     }
 
     @ViewBuilder private func connections(for tile: MapTile) -> some View {
-        let dependencies = map?.connections.filter { $0.source == tile.id }.map(\.target) ?? []
-        let dependents = map?.connections.filter { $0.target == tile.id }.map(\.source) ?? []
-        if !dependencies.isEmpty || !dependents.isEmpty {
+        let outgoing = map?.connections.filter { $0.relationship == .dependency && $0.source == tile.id } ?? []
+        let incoming = map?.connections.filter { $0.relationship == .dependency && $0.target == tile.id } ?? []
+        let mixed = map?.connections.filter { $0.relationship == .mixed && ($0.source == tile.id || $0.target == tile.id) } ?? []
+        if !outgoing.isEmpty || !incoming.isEmpty || !mixed.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
-                Text("Connections").font(.headline)
-                connectionGroup("Depends on", ids: dependencies)
-                connectionGroup("Used by", ids: dependents)
+                Text("Connected to").font(.headline)
+                connectionGroup("Depends on", connections: outgoing, selected: tile.id)
+                connectionGroup("Used by", connections: incoming, selected: tile.id)
+                if !mixed.isEmpty {
+                    Text("Grouped connections").font(.callout).foregroundStyle(.secondary)
+                    Text("Different resources inside these groups have dependencies in both directions. A two-way group link does not imply a circular resource dependency.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    connectionGroup(nil, connections: mixed, selected: tile.id)
+                }
             }
         }
     }
 
-    @ViewBuilder private func connectionGroup(_ label: String, ids: [String]) -> some View {
-        if !ids.isEmpty {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            ForEach(ids, id: \.self) { id in
-                if let tile = tiles.first(where: { $0.id == id }) {
-                    Button { select(tile) } label: { Label(tile.title, systemImage: tile.kind.symbol) }.buttonStyle(.link)
+    @ViewBuilder private func connectionGroup(_ label: String?, connections: [MapConnection], selected: String) -> some View {
+        if !connections.isEmpty {
+            if let label { Text(label).font(.callout).foregroundStyle(.secondary) }
+            ForEach(connections, id: \.self) { connection in
+                let neighbor = connection.source == selected ? connection.target : connection.source
+                if let tile = tiles.first(where: { $0.id == neighbor }) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button { select(tile) } label: { Label(tile.title, systemImage: tile.kind.symbol) }.buttonStyle(.link)
+                        if !connection.evidence.isEmpty {
+                            DisclosureGroup("Resource dependencies · \(connection.evidence.count)") {
+                                ForEach(connection.evidence, id: \.self) { evidence in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(alignment: .top) {
+                                            Text(evidence.sourceResource).textSelection(.enabled)
+                                            Spacer(minLength: 4)
+                                            MapCopyButton(value: evidence.sourceResource, label: "dependent resource address")
+                                        }
+                                        Label("depends on", systemImage: "arrow.down").foregroundStyle(.secondary)
+                                        HStack(alignment: .top) {
+                                            Text(evidence.targetResource).textSelection(.enabled)
+                                            Spacer(minLength: 4)
+                                            MapCopyButton(value: evidence.targetResource, label: "dependency resource address")
+                                        }
+                                    }.font(.system(.caption, design: .monospaced)).padding(.vertical, 6)
+                                }
+                            }.font(.callout)
+                        }
+                    }
                 }
             }
         }
@@ -629,5 +774,32 @@ struct ResourceMapContent: View {
             Text(title).font(.headline)
             Text(detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.padding(28).frame(maxWidth: .infinity).padding(.top, 60)
+    }
+}
+
+/// Copies only the displayed, already-redacted value supplied by a presentation view.
+struct MapCopyButton: View {
+    let value: String
+    let label: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+            copied = true
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 12)).frame(width: 20, height: 20)
+        }
+        .buttonStyle(.borderless).foregroundStyle(copied ? Color.accentColor : Color.secondary)
+        .accessibilityLabel(copied ? "Copied \(label)" : "Copy \(label)")
+        .help(copied ? "Copied" : "Copy \(label)")
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            copied = false
+        }
     }
 }

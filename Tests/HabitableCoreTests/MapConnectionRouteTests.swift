@@ -62,6 +62,47 @@ final class MapConnectionRouteTests: XCTestCase {
         }
     }
 
+    func testRoundedStraightRouteRemainsOneLineAndPreservesEndpoints() {
+        let start = CGPoint(x: 2, y: 3), end = CGPoint(x: 20, y: 3)
+        XCTAssertEqual(MapConnectionRoute.roundedSegments(for: [start, end]), [.move(to: start), .line(to: end)])
+    }
+
+    func testRoundedLeftAndRightTurnsUseQuadraticCorners() {
+        for points in [[CGPoint(x: 0, y: 0), CGPoint(x: 20, y: 0), CGPoint(x: 20, y: 20)],
+                       [CGPoint(x: 20, y: 0), CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 20)]] {
+            let segments = MapConnectionRoute.roundedSegments(for: points, radius: 8)
+            XCTAssertTrue(segments.contains { if case .quadCurve = $0 { return true }; return false })
+            if case .move(let start) = segments.first { XCTAssertEqual(start, points[0]) }
+            else { XCTFail("expected a move segment") }
+            if case .line(let end) = segments.last { XCTAssertEqual(end, points[2]) }
+            else { XCTFail("expected an exact terminal line") }
+        }
+    }
+
+    func testShortSegmentClampsCornerRadiusAndNeverOvershoots() {
+        let points = [CGPoint(x: 0, y: 0), CGPoint(x: 6, y: 0), CGPoint(x: 6, y: 30)]
+        let segments = MapConnectionRoute.roundedSegments(for: points, radius: 20)
+        XCTAssertEqual(segments, [
+            .move(to: points[0]), .line(to: CGPoint(x: 3, y: 0)),
+            .quadCurve(control: points[1], to: CGPoint(x: 6, y: 3)), .line(to: points[2])
+        ])
+    }
+
+    func testDuplicateCollinearAndReversingPointsStayFiniteAndOrdered() {
+        let p0 = CGPoint(x: 0, y: 0), p1 = CGPoint(x: 10, y: 0), p2 = CGPoint(x: 0, y: 0)
+        let segments = MapConnectionRoute.roundedSegments(for: [p0, p0, p1, CGPoint(x: 20, y: 0), p2])
+        XCTAssertEqual(segments.first, .move(to: p0))
+        XCTAssertEqual(segments.last, .line(to: p2))
+        XCTAssertFalse(segments.isEmpty)
+        for segment in segments {
+            switch segment {
+            case .move(let point), .line(let point): XCTAssertTrue(point.x.isFinite && point.y.isFinite)
+            case .quadCurve(let control, let point): XCTAssertTrue(control.x.isFinite && control.y.isFinite && point.x.isFinite && point.y.isFinite)
+            }
+        }
+        XCTAssertFalse(segments.contains { if case .quadCurve = $0 { return true }; return false }, "a 180 degree reversal must remain sharp")
+    }
+
     private func segment(_ a: CGPoint, _ b: CGPoint, intersects tile: MapCanvasTile) -> Bool {
         if a.y == b.y {
             return a.y > tile.y && a.y < tile.y + tile.height && max(min(a.x, b.x), tile.x) < min(max(a.x, b.x), tile.x + tile.width)

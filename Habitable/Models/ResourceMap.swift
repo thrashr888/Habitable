@@ -34,9 +34,35 @@ struct MapTile: Equatable, Sendable {
     let resources: [String]
 }
 
+enum MapConnectionRelationship: Equatable, Hashable, Sendable {
+    /// The source tile contains a resource that depends on the target tile.
+    case dependency
+    /// Different resources in the two tiles depend on each other across the group boundary.
+    /// This is a grouped relationship and does not imply a resource-level cycle.
+    case mixed
+}
+
+struct MapConnectionEvidence: Equatable, Hashable, Sendable {
+    /// Terraform resource address that declares the dependency.
+    let sourceResource: String
+    /// Terraform resource address that it depends on.
+    let targetResource: String
+}
+
 struct MapConnection: Equatable, Hashable, Sendable {
     let source: String
     let target: String
+    let relationship: MapConnectionRelationship
+    let evidence: [MapConnectionEvidence]
+
+    init(source: String, target: String,
+         relationship: MapConnectionRelationship = .dependency,
+         evidence: [MapConnectionEvidence] = []) {
+        self.source = source
+        self.target = target
+        self.relationship = relationship
+        self.evidence = evidence
+    }
 }
 
 struct MapWorkspaceReference: Equatable, Sendable {
@@ -123,7 +149,8 @@ struct MapCanvasLayout: Equatable, Sendable {
         let byID = Dictionary(uniqueKeysWithValues: tiles.map { ($0.id, $0) })
         var outgoing: [String: Set<String>] = [:]
         var indegree = Dictionary(uniqueKeysWithValues: tiles.map { ($0.id, 0) })
-        for connection in connections where byID[connection.source] != nil && byID[connection.target] != nil {
+        for connection in connections where connection.relationship == .dependency &&
+            byID[connection.source] != nil && byID[connection.target] != nil {
             guard outgoing[connection.source, default: []].insert(connection.target).inserted else { continue }
             indegree[connection.target, default: 0] += 1
         }
@@ -422,13 +449,47 @@ struct ResourceMapClassifier {
                            anchors: anchorMembers, resources: members.sorted())
         }.sorted { $0.kind == $1.kind ? $0.id < $1.id : $0.kind.rawValue < $1.kind.rawValue }
         let tileForResource = Dictionary(uniqueKeysWithValues: tiles.flatMap { tile in tile.resources.map { ($0, tile.id) } })
-        var connections = Set<MapConnection>()
+        var evidenceByPair: [String: [MapConnectionEvidence]] = [:]
+        var pairEndpoints: [String: (String, String)] = [:]
         for (source, targets) in refs {
             for target in targets {
                 if let a = tileForResource[source], let b = tileForResource[target], a != b {
-                    connections.insert(MapConnection(source: a, target: b))
+                    let first = min(a, b), second = max(a, b)
+                    let key = first + "\u{0}" + second
+                    pairEndpoints[key] = (first, second)
+                    evidenceByPair[key, default: []].append(
+                        MapConnectionEvidence(sourceResource: source, targetResource: target))
                 }
             }
+        }
+        let connections = evidenceByPair.compactMap { key, evidence -> MapConnection? in
+            guard let (first, second) = pairEndpoints[key] else { return nil }
+            let orderedEvidence = evidence.sorted {
+                $0.sourceResource == $1.sourceResource
+                    ? $0.targetResource < $1.targetResource
+                    : $0.sourceResource < $1.sourceResource
+            }
+            let hasFirstToSecond = orderedEvidence.contains {
+                tileForResource[$0.sourceResource] == first && tileForResource[$0.targetResource] == second
+            }
+            let hasSecondToFirst = orderedEvidence.contains {
+                tileForResource[$0.sourceResource] == second && tileForResource[$0.targetResource] == first
+            }
+            guard hasFirstToSecond || hasSecondToFirst else { return nil }
+            let relationship: MapConnectionRelationship = hasFirstToSecond && hasSecondToFirst ? .mixed : .dependency
+            let source: String
+            let target: String
+            if relationship == .mixed || hasFirstToSecond {
+                source = first
+                target = second
+            } else {
+                source = second
+                target = first
+            }
+            return MapConnection(source: source, target: target,
+                                 relationship: relationship, evidence: orderedEvidence)
+        }.sorted {
+            $0.source == $1.source ? $0.target < $1.target : $0.source < $1.source
         }
         let workspaceData = all.filter {
             $0.isData && ["terraform_remote_state", "tfe_outputs"].contains($0.type)
@@ -454,8 +515,7 @@ struct ResourceMapClassifier {
             MapWorkspaceReference(address: resource.address, name: resource.name,
                                   consumers: (consumersByWorkspace[resource.address] ?? []).sorted())
         }.sorted { $0.address < $1.address }
-        return ResourceMap(tiles: tiles, connections: connections.sorted {
-            $0.source == $1.source ? $0.target < $1.target : $0.source < $1.source
-        }, dataSources: all.filter(\.isData).map(\.address), workspaceReferences: workspaceReferences)
+        return ResourceMap(tiles: tiles, connections: connections,
+                           dataSources: all.filter(\.isData).map(\.address), workspaceReferences: workspaceReferences)
     }
 }
