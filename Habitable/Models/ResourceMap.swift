@@ -92,13 +92,11 @@ struct MapCanvasLayout: Equatable, Sendable {
         var bands: [MapCanvasBand] = []
         var positionedTiles: [MapCanvasTile] = []
 
-        let kinds = MapKind.allCases.filter { $0 != .other || !(groupedTiles[.other] ?? []).isEmpty }
+        let kinds = MapKind.allCases.filter { !(groupedTiles[$0] ?? []).isEmpty }
         for (bandIndex, kind) in kinds.enumerated() {
             let orderedTiles = Self.orderedTiles(groupedTiles[kind] ?? [], connections: map.connections)
             let rowCount = (orderedTiles.count + columns - 1) / columns
-            let bandHeight = orderedTiles.isEmpty
-                ? 54.0
-                : topPadding + Double(rowCount) * tileHeight + Double(max(0, rowCount - 1)) * rowGap + bottomPadding
+            let bandHeight = topPadding + Double(rowCount) * tileHeight + Double(max(0, rowCount - 1)) * rowGap + bottomPadding
             bands.append(MapCanvasBand(kind: kind, y: y, height: bandHeight))
 
             for (index, tile) in orderedTiles.enumerated() {

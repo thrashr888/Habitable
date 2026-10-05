@@ -181,15 +181,11 @@ final class ResourceMapTests: XCTestCase {
         XCTAssertEqual(layout.tiles.map(\.id), ["c", "z", "a", "b"])
     }
 
-    func testCanvasLayoutKeepsSixEmptyBandsAndOmitsEmptyOtherBand() {
+    func testCanvasLayoutOmitsAllEmptyBands() {
         let layout = MapCanvasLayout(map: ResourceMap(tiles: [], connections: [], dataSources: []), width: 300)
         XCTAssertEqual(layout.width, 680)
-        XCTAssertEqual(layout.bands.map(\.kind), Array(MapKind.allCases.dropLast()))
-        XCTAssertTrue(layout.bands.allSatisfy { $0.height == 54 })
-        XCTAssertEqual(layout.height, 6 * 54 + 5 * 12)
-        for pair in zip(layout.bands, layout.bands.dropFirst()) {
-            XCTAssertEqual(pair.1.y - pair.0.y - pair.0.height, 12)
-        }
+        XCTAssertTrue(layout.bands.isEmpty)
+        XCTAssertEqual(layout.height, 0)
         XCTAssertTrue(layout.tiles.isEmpty)
 
         let withOther = MapCanvasLayout(
@@ -197,7 +193,8 @@ final class ResourceMapTests: XCTestCase {
                              connections: [], dataSources: []),
             width: 680
         )
-        XCTAssertEqual(withOther.bands.map(\.kind), MapKind.allCases)
+        XCTAssertEqual(withOther.bands.map(\.kind), [.other])
+        XCTAssertEqual(withOther.bands.first?.y, 0)
         XCTAssertEqual(withOther.bands.last?.height, 178)
     }
 

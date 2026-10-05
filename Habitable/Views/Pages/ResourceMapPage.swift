@@ -317,11 +317,6 @@ struct ResourceMapContent: View {
                 Text(band.kind.title.uppercased())
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                     .offset(x: 20, y: band.y + 10)
-                if !visibleTiles.contains(where: { $0.kind == band.kind }) {
-                    Text(search.isEmpty ? "No resources of this kind in this workspace." : "No matches in this row.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                        .offset(x: 210, y: band.y + 28)
-                }
             }
         }
     }
