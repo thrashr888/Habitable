@@ -4,6 +4,7 @@ struct HCPWorkspaceViewer: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
     @State private var workspaceSearch = ""
     @State private var showingMap = true
+    @State private var showingWorkspaces = false
     @State private var inspectorRequest: HCPMapInspectorRequest?
 
     init(model: HCPWorkspaceViewerModel) { self.model = model }
@@ -18,14 +19,27 @@ struct HCPWorkspaceViewer: View {
         VStack(spacing: 0) {
             connectionPanel
             if model.isConnected {
+                HStack {
+                    if showingMap {
+                        Toggle(isOn: $showingWorkspaces) { Label("Workspaces", systemImage: "sidebar.left") }
+                            .toggleStyle(.button).accessibilityLabel("Show workspace list")
+                    }
+                    Spacer()
                 Picker("Workspace view", selection: $showingMap) {
                     Text("Map").tag(true)
                     Text("Runs").tag(false)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 180).padding(.bottom, 8)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                }.padding(.bottom, 8)
                 if showingMap {
-                    compactSelection
+                    if !showingWorkspaces { compactSelection }
                     Divider()
-                    cloudMap
+                    HSplitView {
+                        if showingWorkspaces {
+                            workspaceColumn.frame(minWidth: 200, idealWidth: 230, maxWidth: 300)
+                                .padding(.top, 12)
+                        }
+                        cloudMap.frame(minWidth: 550, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    }.frame(minHeight: 0, maxHeight: .infinity)
                 } else {
                 GeometryReader { geometry in
                     if geometry.size.width >= 960 {
@@ -224,7 +238,8 @@ struct HCPWorkspaceViewer: View {
             refresh: { Task { await model.refreshMap() } },
             onShowList: { inspectorRequest = HCPMapInspectorRequest(address: nil) },
             onOpenResource: { address in inspectorRequest = HCPMapInspectorRequest(address: address) },
-            emptyDetail: "This workspace has no managed resources in its current state. Data sources remain available in List; remote run history is available in Runs.")
+            emptyDetail: "This workspace has no managed resources in its current state. Data sources remain available in List; remote run history is available in Runs.",
+            variablesPanel: AnyView(HCPMapVariablesPanel(model: model).id(model.mapRequestKey)))
         .task(id: model.mapRequestKey) { await model.refreshMap() }
         }
     }
@@ -234,7 +249,7 @@ struct HCPWorkspaceViewer: View {
             Image(systemName: "cloud").font(.system(size: 34)).foregroundStyle(.secondary)
             Text(model.hasStoredCredential ? "Connect to load your organization" : "Import a credential to get started")
                 .font(.headline)
-            Text("Habitable uses read-only HCP Terraform API requests. It does not queue or apply remote runs.")
+            Text("Browse workspace state and runs. Workspace variables are updated only when you choose Save; Habitable does not queue or apply remote runs.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
             if let error = model.errorMessage { Text(error).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480) }
             if model.isLoading { ProgressView().controlSize(.small) }
@@ -432,4 +447,144 @@ private struct HCPMapResourceSheet: View {
         }.frame(minWidth: 700, idealWidth: 850, minHeight: 500)
     }
 
+}
+
+
+private struct HCPMapVariablesPanel: View {
+    @ObservedObject var model: HCPWorkspaceViewerModel
+    @State private var editing: HCPWorkspaceVariable?
+    @State private var query = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Variables").font(.headline)
+                Spacer()
+                Button { Task { await model.refreshVariables() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless).accessibilityLabel("Refresh workspace variables")
+                    .disabled(model.isLoadingVariables || model.savingVariableID != nil)
+            }
+            Text(model.selectedWorkspace?.name ?? "Workspace").font(.subheadline).foregroundStyle(.secondary)
+            Text("Workspace-specific inputs · Changes affect future runs, not the current Map.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            TextField("Filter variables", text: $query).textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Filter workspace variables")
+            if model.isLoadingVariables { ProgressView("Loading variables…") }
+            if let error = model.variablesError {
+                Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(["terraform", "env"], id: \.self) { category in
+                        let rows = model.workspaceVariables.filter {
+                            $0.category == category && (query.isEmpty || $0.key.localizedCaseInsensitiveContains(query))
+                        }
+                        if !rows.isEmpty {
+                            Text(category == "terraform" ? "Terraform" : "Environment").font(.headline)
+                            ForEach(rows) { variable in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(alignment: .top) {
+                                        Text(variable.key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Button("Edit") { editing = variable }
+                                            .buttonStyle(.borderless)
+                                            .accessibilityLabel("Edit variable \(variable.key)")
+                                            .disabled(model.savingVariableID != nil)
+                                    }
+                                    if variable.isSensitive {
+                                        Label("Sensitive · value hidden", systemImage: "lock.fill")
+                                            .font(.callout).foregroundStyle(.secondary)
+                                    } else {
+                                        Text(variable.value?.isEmpty == false ? variable.value! : "Empty value")
+                                            .font(.system(.body, design: .monospaced)).lineLimit(3)
+                                            .textSelection(.enabled)
+                                    }
+                                    if variable.isHCL { Text("HCL expression").font(.callout).foregroundStyle(.secondary) }
+                                    if !variable.description.isEmpty {
+                                        Text(variable.description).font(.callout).foregroundStyle(.secondary).lineLimit(3)
+                                    }
+                                }
+                                Divider()
+                            }
+                        }
+                    }
+                    if !query.isEmpty && !model.workspaceVariables.contains(where: { $0.key.localizedCaseInsensitiveContains(query) }) {
+                        Text("No matching variables").font(.headline)
+                        Button("Clear filter") { query = "" }.buttonStyle(.borderless)
+                    }
+                    if !model.isLoadingVariables && model.workspaceVariables.isEmpty && model.variablesError == nil {
+                        Text("No workspace-specific variables").font(.headline)
+                    }
+                    Text("Inherited variable sets and values from configuration files are not included here.")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let url = model.selectedWorkspace?.htmlURL {
+                        Link("Open workspace in HCP Terraform", destination: url)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16).frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .task { await model.refreshVariables() }
+        .sheet(item: $editing) { variable in
+            HCPMapVariableEditor(model: model, variable: variable, sourceKey: model.mapRequestKey)
+        }
+    }
+}
+
+private struct HCPMapVariableEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var model: HCPWorkspaceViewerModel
+    let variable: HCPWorkspaceVariable
+    let sourceKey: String
+    @State private var value: String
+    @State private var didEdit = false
+    @State private var isSaving = false
+    @State private var saveError: String?
+
+    init(model: HCPWorkspaceViewerModel, variable: HCPWorkspaceVariable, sourceKey: String) {
+        self.model = model; self.variable = variable; self.sourceKey = sourceKey
+        _value = State(initialValue: variable.isSensitive ? "" : (variable.value ?? ""))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Edit \(variable.key)").font(.title2.weight(.semibold))
+            Text(model.selectedWorkspace?.name ?? "Workspace").foregroundStyle(.secondary)
+            Text("Saving updates this workspace variable in HCP Terraform. It does not start a run or change the current state.")
+                .font(.body).fixedSize(horizontal: false, vertical: true)
+            if variable.isSensitive {
+                Text("The current sensitive value cannot be read. Enter a replacement only if you intend to change it.")
+                    .font(.callout).foregroundStyle(.secondary)
+                SecureField("Replacement value", text: $value).textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Replacement sensitive variable value")
+            } else {
+                Text(variable.isHCL ? "HCL value" : "Value").font(.headline)
+                TextEditor(text: $value).font(.system(.body, design: .monospaced))
+                    .frame(height: 140).border(Color.secondary.opacity(0.3))
+                    .accessibilityLabel("Variable value")
+            }
+            if let saveError { Text(saveError).foregroundStyle(.red).font(.callout) }
+            HStack {
+                if isSaving { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(isSaving)
+                Button("Save to HCP Terraform") {
+                    guard sourceKey == model.mapRequestKey else { return }
+                    isSaving = true; saveError = nil
+                    Task {
+                        let saved = await model.updateVariable(variableID: variable.id, value: value)
+                        isSaving = false
+                        if saved { dismiss() } else { saveError = model.variablesError ?? "The variable could not be saved." }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(isSaving || !didEdit || sourceKey != model.mapRequestKey || (!variable.isSensitive && value == (variable.value ?? "")))
+            }
+        }
+        .padding(24).frame(width: 510)
+        .onChange(of: value) { _ in didEdit = true }
+        .onChange(of: model.mapRequestKey) { _ in dismiss() }
+        .interactiveDismissDisabled(isSaving)
+    }
 }

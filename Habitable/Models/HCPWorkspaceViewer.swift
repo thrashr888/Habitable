@@ -44,6 +44,16 @@ struct HCPRun: Identifiable, Equatable, Sendable {
     }
 }
 
+struct HCPWorkspaceVariable: Identifiable, Equatable, Sendable {
+    let id: String
+    let key: String
+    let value: String?
+    let category: String?
+    let description: String
+    let isSensitive: Bool
+    let isHCL: Bool
+}
+
 struct HCPRunDetails: Equatable, Sendable {
     let run: HCPRun
     let planStatus: String?
@@ -200,6 +210,36 @@ struct HCPAPIClient: Sendable {
         return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
     }
 
+    func workspaceVariables(hostname: String, workspaceID: String, token: String, page: Int) async throws -> HCPPage<HCPWorkspaceVariable> {
+        let path = "/api/v2/workspaces/\(pathComponent(workspaceID))/vars"
+        let object = try await get(path: path, hostname: hostname, token: token, query: pagination(page))
+        let items = array(object["data"]).compactMap(decodeWorkspaceVariable)
+        return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
+    }
+
+    func updateWorkspaceVariable(hostname: String, workspaceID: String, variableID: String, value: String, token: String) async throws {
+        guard let host = Self.normalizedHostname(hostname), let base = URL(string: "https://\(host)"),
+              let url = URL(string: "/api/v2/workspaces/\(pathComponent(workspaceID))/vars/\(pathComponent(variableID))", relativeTo: base)?.absoluteURL else {
+            throw HCPViewerError.invalidHost
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Accept")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 25
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["data": ["type": "vars", "id": variableID, "attributes": ["value": value]]])
+        do {
+            let (data, response) = try await boundedData(for: request, limit: Self.apiResponseLimit)
+            guard let http = response as? HTTPURLResponse else { throw HCPViewerError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else { throw variableResponseError(status: http.statusCode) }
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let row = object["data"] as? [String: Any], row["type"] as? String == "vars",
+                  row["id"] as? String == variableID else { throw HCPViewerError.invalidResponse }
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
+    }
+
     func runDetails(hostname: String, organization: String, run: HCPRun, token: String) async throws -> HCPRunDetails {
         let object = try await get(path: "/api/v2/runs/\(pathComponent(run.id))", hostname: hostname, token: token,
                                   query: [URLQueryItem(name: "include", value: "plan,apply")])
@@ -350,6 +390,16 @@ struct HCPAPIClient: Sendable {
                             locked: attributes["locked"] as? Bool ?? false, htmlURL: url)
     }
 
+    private func decodeWorkspaceVariable(_ row: [String: Any]) -> HCPWorkspaceVariable? {
+        guard row["type"] as? String == "vars", let id = row["id"] as? String,
+              let attributes = row["attributes"] as? [String: Any], let key = attributes["key"] as? String else { return nil }
+        let sensitive = attributes["sensitive"] as? Bool ?? false
+        return HCPWorkspaceVariable(id: id, key: key, value: sensitive ? nil : attributes["value"] as? String,
+                                    category: attributes["category"] as? String,
+                                    description: attributes["description"] as? String ?? "",
+                                    isSensitive: sensitive, isHCL: attributes["hcl"] as? Bool ?? false)
+    }
+
     private func decodeRun(_ row: [String: Any], hostname: String, organization: String,
                            workspaceID: String, workspaceName: String) -> HCPRun? {
         guard let id = row["id"] as? String, let attributes = row["attributes"] as? [String: Any],
@@ -377,6 +427,18 @@ struct HCPAPIClient: Sendable {
         }
         _ = data // API error details are intentionally omitted because they can echo secrets.
         return .response(status: status, message: fallback)
+    }
+
+    private func variableResponseError(status: Int) -> HCPViewerError {
+        let message: String
+        switch status {
+        case 401: message = "The token was rejected. Reimport a user or team token."
+        case 403: message = "This account cannot edit that workspace variable. Check its permissions and entitlements."
+        case 404: message = "The workspace variable is unavailable to this account."
+        case 429: message = "HCP Terraform is limiting requests. Wait before trying again."
+        default: message = "The request could not be completed."
+        }
+        return .response(status: status, message: message)
     }
 
     private func pagination(_ page: Int) -> [URLQueryItem] {
@@ -514,6 +576,11 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     @Published private(set) var isLoadingMap = false
     @Published private(set) var mapError: String?
     private var mapOperation = UUID()
+    @Published private(set) var workspaceVariables: [HCPWorkspaceVariable] = []
+    @Published private(set) var isLoadingVariables = false
+    @Published private(set) var variablesError: String?
+    @Published private(set) var savingVariableID: String?
+    private var variablesOperation = UUID()
 
     var mapRequestKey: String {
         "\(isConnected)|\(hostname)|\(selectedOrganization)|\(selectedWorkspaceID ?? "")"
@@ -524,6 +591,78 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         mapSnapshot = nil
         mapError = nil
         isLoadingMap = false
+        invalidateVariables()
+    }
+
+    private func invalidateVariables() {
+        variablesOperation = UUID()
+        workspaceVariables = []
+        variablesError = nil
+        isLoadingVariables = false
+        savingVariableID = nil
+    }
+
+    func refreshVariables() async {
+        guard !isSample, isConnected, let workspace = selectedWorkspace,
+              let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else {
+            invalidateVariables()
+            return
+        }
+        let operation = UUID()
+        variablesOperation = operation
+        let host = hostname, organization = selectedOrganization, workspaceID = workspace.id
+        workspaceVariables = []
+        variablesError = nil
+        isLoadingVariables = true
+        defer { if variablesOperation == operation { isLoadingVariables = false } }
+        do {
+            var page = 1
+            var loaded: [HCPWorkspaceVariable] = []
+            while true {
+                let result = try await client.workspaceVariables(hostname: host, workspaceID: workspaceID, token: token, page: page)
+                guard !Task.isCancelled, variablesOperation == operation, isConnected, hostname == host,
+                      selectedOrganization == organization, selectedWorkspaceID == workspaceID else { return }
+                loaded.append(contentsOf: result.items)
+                guard result.hasNextPage, page < 100 else { break }
+                page += 1
+            }
+            workspaceVariables = loaded
+        } catch {
+            guard variablesOperation == operation, isConnected, hostname == host,
+                  selectedOrganization == organization, selectedWorkspaceID == workspaceID else { return }
+            variablesError = "Couldn’t load workspace variables. Check access and refresh to try again."
+        }
+    }
+
+    @discardableResult
+    func updateVariable(variableID: String, value: String) async -> Bool {
+        guard !isSample, isConnected, let workspace = selectedWorkspace,
+              workspaceVariables.contains(where: { $0.id == variableID }),
+              let token = try? tokenStore.read(hostname: hostname), !token.isEmpty,
+              savingVariableID == nil else { return false }
+        let operation = variablesOperation
+        let host = hostname, organization = selectedOrganization, workspaceID = workspace.id
+        savingVariableID = variableID
+        variablesError = nil
+        defer { if variablesOperation == operation { savingVariableID = nil } }
+        do {
+            try await client.updateWorkspaceVariable(hostname: host, workspaceID: workspaceID,
+                variableID: variableID, value: value, token: token)
+            guard !Task.isCancelled, variablesOperation == operation, isConnected, hostname == host,
+                  selectedOrganization == organization, selectedWorkspaceID == workspaceID,
+                  workspaceVariables.contains(where: { $0.id == variableID }) else { return false }
+            if let index = workspaceVariables.firstIndex(where: { $0.id == variableID }), !workspaceVariables[index].isSensitive {
+                let old = workspaceVariables[index]
+                workspaceVariables[index] = HCPWorkspaceVariable(id: old.id, key: old.key, value: value,
+                    category: old.category, description: old.description, isSensitive: old.isSensitive, isHCL: old.isHCL)
+            }
+            return true
+        } catch {
+            guard variablesOperation == operation, isConnected, hostname == host,
+                  selectedOrganization == organization, selectedWorkspaceID == workspaceID else { return false }
+            variablesError = "Couldn’t save this variable. Check access and try again."
+            return false
+        }
     }
 
     func refreshMap() async {
