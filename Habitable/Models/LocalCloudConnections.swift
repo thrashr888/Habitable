@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Darwin
+import AppKit
 
 struct LocalCloudConnection: Identifiable, Sendable, Equatable {
     let id: String
@@ -34,6 +35,9 @@ private final class BoundedOutput: @unchecked Sendable {
 final class LocalCloudConnectionsModel: ObservableObject {
     @Published private(set) var connections: [LocalCloudConnection]
     @Published private(set) var isRefreshing = false
+    @Published private(set) var connectingID: String?
+    @Published private(set) var loginMessages: [String: String] = [:]
+    private let loginRunner: CloudCommandRunner
 
     private let runner: CloudCommandRunner
     private let environment: [String: String]
@@ -41,6 +45,7 @@ final class LocalCloudConnectionsModel: ObservableObject {
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment,
          runner: @escaping CloudCommandRunner = LocalCloudConnectionsModel.runCommand,
+         loginRunner: @escaping CloudCommandRunner = LocalCloudConnectionsModel.runInteractiveLogin,
          executableLookup: @escaping @Sendable (String, [String: String]) -> URL? = LocalCloudConnectionsModel.findExecutable) {
         self.environment = environment
         self.connections = [
@@ -49,11 +54,12 @@ final class LocalCloudConnectionsModel: ObservableObject {
             LocalCloudConnection(id: "gcp", name: "Google Cloud", status: "Not checked", isAuthenticated: false, details: [], loginCommand: "gcloud auth login --update-adc")
         ]
         self.runner = runner
+        self.loginRunner = loginRunner
         self.executableLookup = executableLookup
     }
 
     func refresh() async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing, connectingID == nil else { return }
         isRefreshing = true
         defer { isRefreshing = false }
         async let aws = discoverAWS()
@@ -61,6 +67,97 @@ final class LocalCloudConnectionsModel: ObservableObject {
         async let gcp = discoverGCP()
         let results = await [aws, azure, gcp]
         connections = results
+        for connection in results where connection.isAuthenticated { loginMessages[connection.id] = nil }
+    }
+
+    private func loginConfiguration(_ id: String) -> (String, [String])? {
+        switch id {
+        case "aws": return ("aws", ["login"])
+        case "azure": return ("az", ["login"])
+        case "gcp": return ("gcloud", ["auth", "login", "--update-adc"])
+        default: return nil
+        }
+    }
+
+    func canConnect(_ id: String) -> Bool {
+        guard !isRefreshing, connectingID == nil,
+              let connection = connections.first(where: { $0.id == id }),
+              !connection.isAuthenticated, connection.status != "Not checked",
+              let (command, _) = loginConfiguration(id) else { return false }
+        return executable(command) != nil
+    }
+
+    func connect(_ id: String) async {
+        guard canConnect(id), let (command, arguments) = loginConfiguration(id),
+              let cli = executable(command) else { return }
+        connectingID = id
+        loginMessages[id] = "Finish sign-in in Terminal and your browser. Habitable will check the connection when it finishes."
+        let result = await loginRunner(cli, arguments, normalizedEnvironment(), 600)
+        connectingID = nil
+        await refresh()
+        if connections.first(where: { $0.id == id })?.isAuthenticated == true {
+            loginMessages[id] = nil
+        } else if result.timedOut {
+            loginMessages[id] = "Still waiting for sign-in. Finish or cancel it in Terminal, then refresh connections."
+        } else if result.exitCode != 0 {
+            loginMessages[id] = "Sign-in did not finish. Check the Terminal window for details, then try again."
+        } else {
+            loginMessages[id] = "Sign-in finished, but credentials could not be verified. Check the selected account in Terminal and refresh."
+        }
+    }
+
+    /// Only CLI paths, fixed arguments and non-secret routing preferences are written here.
+    nonisolated static func loginScript(executable: URL, arguments: [String], environment: [String: String], resultFile: URL) -> String {
+        func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'" }
+        let routingKeys = ["PATH", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AZURE_CONFIG_DIR", "CLOUDSDK_CONFIG"]
+        let exports = routingKeys.compactMap { key in environment[key].map { "export " + key + "=" + quote($0) } }.joined(separator: "\n")
+        let invocation = ([executable.path] + arguments).map(quote).joined(separator: " ")
+        return """
+        #!/bin/bash
+        umask 077
+        \(exports)
+        printf '%s\\n' 'Habitable cloud sign-in. Complete the prompts below and in your browser.'
+        habitable_login_cancel() {
+            printf '%s\\n' '130' > \(quote(resultFile.path))
+            exit 130
+        }
+        trap habitable_login_cancel HUP INT TERM
+        \(invocation)
+        habitable_login_status=$?
+        printf '%s\\n' "$habitable_login_status" > \(quote(resultFile.path))
+        printf '%s\\n' 'Sign-in command finished. You can return to Habitable and close this window.'
+        exit "$habitable_login_status"
+        """
+    }
+
+    nonisolated private static func runInteractiveLogin(executable: URL, arguments: [String], environment: [String: String], timeout: TimeInterval) async -> CloudCommandResult {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Habitable-sign-in-" + UUID().uuidString, isDirectory: true)
+        let script = folder.appendingPathComponent("Connect.command")
+        let result = folder.appendingPathComponent("result")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            try loginScript(executable: executable, arguments: arguments, environment: environment, resultFile: result).write(to: script, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        } catch { return CloudCommandResult(exitCode: -1, output: "", timedOut: false) }
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let opened: Bool = await withCheckedContinuation { continuation in
+            Task { @MainActor in
+                NSWorkspace.shared.open([script], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"), configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                    continuation.resume(returning: error == nil)
+                }
+            }
+        }
+        guard opened else { return CloudCommandResult(exitCode: -1, output: "", timedOut: false) }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: result, encoding: .utf8),
+               let code = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return CloudCommandResult(exitCode: code, output: "", timedOut: false)
+            }
+            do { try await Task.sleep(nanoseconds: 500_000_000) }
+            catch { return CloudCommandResult(exitCode: -1, output: "", timedOut: true) }
+        }
+        return CloudCommandResult(exitCode: -1, output: "", timedOut: true)
     }
 
     private func executable(_ name: String) -> URL? {

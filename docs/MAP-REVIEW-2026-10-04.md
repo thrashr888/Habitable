@@ -80,3 +80,11 @@ Connections now includes local AWS, Azure and Google Cloud cards alongside HCP/T
 Validation: native Debug build passed and 4 focused cloud discovery tests passed, covering successful metadata, missing CLIs, failures, timeout, malformed AWS/Azure success and partial GCP authentication. Live final-build inspection showed all three real cloud accounts authenticated, including Google ADC. Exercised Refresh and Google command Copy, reviewed top and bottom layout with readable cards and footer. Screenshot `/tmp/habitable-map-review/local-cloud-connections.png` remains local. No Terraform plan/apply was run; this verifies local authentication, not resource permissions for each workspace.
 
 User test route: Connections, scroll to Local cloud access, Refresh cloud connections, verify the displayed identity/subscription/project and copy a sign-in command. Account switching and workspace-specific connection binding are not part of this read-only status page.
+
+## Cloud Connect actions
+
+Disconnected cloud cards now offer Connect. The action opens the installed CLI in Terminal for interactive browser sign-in and account/subscription prompts: AWS login, Azure login, or Google login with ADC update. Habitable checks credentials after command completion, prevents duplicate/connected logins, and shows generic failure or timeout guidance. Temporary scripts contain only quoted command arguments and non-secret routing preferences; CLI auth output stays in Terminal. Interrupt signals write a completion code; a ten-minute wait limit returns control with refresh guidance.
+
+Validation: native build and eight focused cloud tests passed, including all provider commands, verified refresh after success, connected/missing-CLI guards, failed/timed-out login, and executing a generated script with hostile quoting inputs without injection or secret-environment persistence. Live final-build inspection confirmed all three existing connections remain authenticated and their Connected buttons are disabled. Screenshot: `/tmp/habitable-map-review/cloud-connect-buttons.png`. Fresh browser login from Connect has not been exercised against real accounts because all three are already signed in; no account was logged out for QA.
+
+When a connection expires, test Connect, complete Terminal/browser prompts, and verify the card changes to Connected without manual refresh.
