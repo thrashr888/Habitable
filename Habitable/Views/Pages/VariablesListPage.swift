@@ -223,7 +223,7 @@ struct VariableListPage: View {
             if !workspace.terraformInputDiagnostics.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("Some Terraform inputs could not be inspected", systemImage: "exclamationmark.triangle")
-                        .font(.callout.weight(.medium))
+                        .font(.system(size: 13, weight: .medium))
                     ForEach(Array(workspace.terraformInputDiagnostics.enumerated()), id: \.offset) { _, message in
                         Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -256,7 +256,7 @@ struct VariableListPage: View {
                         .help("Show required root inputs without an app value or resolved workspace value")
                 }
             }
-            .font(.callout).padding(.horizontal, 16).padding(.vertical, 8)
+            .font(.system(size: 13)).padding(.horizontal, 16).padding(.vertical, 8)
             TextField("Search names and descriptions", text: $searchText)
                 .textFieldStyle(.roundedBorder).padding(.horizontal, 16).padding(.bottom, 6)
             ScrollView {
@@ -288,7 +288,7 @@ struct VariableListPage: View {
                         Text((requiredOnly || missingOnly || !searchText.isEmpty) && !workspace.terraformVariables.isEmpty
                              ? "Change the filters or search to see other Terraform inputs."
                              : "Declared root inputs appear here with their type, default, and source. Add an app value only when you want Habitable to override Terraform’s own inputs.")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.system(size: 13)).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                         if !requiredOnly && !missingOnly || workspace.terraformVariables.isEmpty {
@@ -445,7 +445,7 @@ private struct TerraformVariableEditor: View {
                     LabeledContent("Terraform type", value: type)
                 }
                 if let details = variable.declaration?.description, !details.isEmpty {
-                    Text(details).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(details).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Text("Value").font(.system(size: 12)).foregroundColor(.secondary)
                 Picker("Entry format", selection: $editorMode) {

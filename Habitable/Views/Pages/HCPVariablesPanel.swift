@@ -65,7 +65,7 @@ struct HCPMapVariablesPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(model.selectedWorkspace?.name ?? "Workspace").font(.headline)
-                Text("Changes affect future runs").font(.callout).foregroundStyle(.secondary)
+                Text("Changes affect future runs").font(.system(size: 13)).foregroundStyle(.secondary)
                 Spacer()
                 TextField("Filter variables", text: $query).textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 260).accessibilityLabel("Filter workspace variables")
@@ -75,7 +75,7 @@ struct HCPMapVariablesPanel: View {
             }
             if model.isLoadingVariables { ProgressView("Loading variables…") }
             if let error = model.variablesError {
-                Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                Text(error).font(.system(size: 13)).foregroundStyle(.red).textSelection(.enabled)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -102,7 +102,7 @@ struct HCPMapVariablesPanel: View {
                         Text("No workspace-specific variables").font(.headline)
                     }
                     Text("Inherited variable sets and values from configuration files are not included here.")
-                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if let url = model.selectedWorkspace?.htmlURL {
                         Link("Open workspace in HCP Terraform", destination: url)
                     }
@@ -227,7 +227,7 @@ struct HCPMapVariableEditor: View {
                 .font(.body).fixedSize(horizontal: false, vertical: true)
             if variable.isMaskedForDisplay {
                 Text("The current value is hidden. Enter a replacement only if you intend to change it.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
                 SecureField("Replacement value", text: $value).textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Replacement sensitive variable value")
             } else {
@@ -236,7 +236,7 @@ struct HCPMapVariableEditor: View {
                     .frame(height: 140).border(Color.secondary.opacity(0.3))
                     .accessibilityLabel("Variable value")
             }
-            if let saveError { Text(saveError).foregroundStyle(.red).font(.callout) }
+            if let saveError { Text(saveError).foregroundStyle(.red).font(.system(size: 13)) }
             HStack {
                 if isSaving { ProgressView().controlSize(.small) }
                 Spacer()

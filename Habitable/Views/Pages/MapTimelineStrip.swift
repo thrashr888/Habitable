@@ -9,7 +9,7 @@ struct MapTimelineStrip: View {
     let onSelect: (MapChangeClip) -> Void
     var onShowAll: (() -> Void)? = nil
 
-    private static let height: CGFloat = 136
+    private static let height: CGFloat = 142
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -32,11 +32,11 @@ struct MapTimelineStrip: View {
             Text("Changes").font(.headline)
             Text(MapTimelinePresentation.summary(for: clips)).foregroundStyle(.secondary)
             Spacer()
-            Text(hint).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(hint).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
             if let onShowAll {
                 Button("All changes", action: onShowAll)
                     .buttonStyle(.link)
-                    .font(.caption)
+                    .font(.system(size: 13))
             }
         }
     }
@@ -51,8 +51,8 @@ struct MapTimelineStrip: View {
                     ForEach(Array(groups.enumerated()), id: \.offset) { groupIndex, group in
                         ForEach(Array(group.clips.enumerated()), id: \.element.id) { clipIndex, clip in
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(group.label).font(.caption).foregroundStyle(.secondary)
-                                    .opacity(clipIndex == 0 ? 1 : 0.4)
+                                Text(group.label).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                                    .opacity(clipIndex == 0 ? 1 : 0.7)
                                 card(for: clip)
                             }
                             .id(clip.id)
@@ -76,7 +76,7 @@ struct MapTimelineStrip: View {
         return Button { onSelect(clip) } label: {
             VStack(alignment: .leading, spacing: 3) {
                 Text(clip.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                     .opacity(clip.isApplied ? 1 : 0.75)
                 countsLine(for: clip)
@@ -114,7 +114,7 @@ struct MapTimelineStrip: View {
                 Text("· by \(author)").foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .font(.system(size: 12))
+        .font(.system(size: 13))
         .lineLimit(1)
     }
 
