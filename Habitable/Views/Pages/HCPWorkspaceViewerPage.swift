@@ -290,6 +290,11 @@ struct HCPWorkspaceViewer: View {
             onShowList: { inspectorRequest = HCPMapInspectorRequest(address: nil) },
             onOpenResource: { address in inspectorRequest = HCPMapInspectorRequest(address: address) },
             emptyDetail: "This workspace has no managed resources in its current state. Data sources remain available in List; remote run history is available in Runs.",
+            workspaceURL: model.selectedWorkspace?.htmlURL,
+            stateVersionID: model.mapSnapshot?.versionID,
+            stateCreatedAt: model.mapSnapshot?.stateCreatedAt,
+            stateSerial: model.mapSnapshot?.stateSerial,
+            onShowHistory: { showingMap = false },
             variablesPanel: AnyView(HCPMapVariablesPanel(model: model).id(model.mapRequestKey)))
         .task(id: model.mapRequestKey) { await model.refreshMap() }
         }
@@ -523,17 +528,15 @@ private struct HCPMapVariablesPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Variables").font(.headline)
+                Text(model.selectedWorkspace?.name ?? "Workspace").font(.headline)
+                Text("Changes affect future runs").font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                TextField("Filter variables", text: $query).textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 260).accessibilityLabel("Filter workspace variables")
                 Button { Task { await model.refreshVariables() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).accessibilityLabel("Refresh workspace variables")
                     .disabled(model.isLoadingVariables || model.savingVariableID != nil)
             }
-            Text(model.selectedWorkspace?.name ?? "Workspace").font(.subheadline).foregroundStyle(.secondary)
-            Text("Workspace-specific inputs · Changes affect future runs, not the current Map.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            TextField("Filter variables", text: $query).textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Filter workspace variables")
             if model.isLoadingVariables { ProgressView("Loading variables…") }
             if let error = model.variablesError {
                 Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
@@ -546,30 +549,36 @@ private struct HCPMapVariablesPanel: View {
                         }
                         if !rows.isEmpty {
                             Text(category == "terraform" ? "Terraform" : "Environment").font(.headline)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .topLeading)], alignment: .leading, spacing: 16) {
                             ForEach(rows) { variable in
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack(alignment: .top) {
                                         Text(variable.key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
                                             .frame(maxWidth: .infinity, alignment: .leading)
+                                        MapCopyButton(value: variable.key, label: "variable name")
                                         Button("Edit") { editing = variable }
                                             .buttonStyle(.borderless)
                                             .accessibilityLabel("Edit variable \(variable.key)")
                                             .disabled(model.savingVariableID != nil)
                                     }
-                                    if variable.isSensitive {
-                                        Label("Sensitive · value hidden", systemImage: "lock.fill")
+                                    if variable.isMaskedForDisplay {
+                                        Label("Private value · hidden", systemImage: "lock.fill")
                                             .font(.callout).foregroundStyle(.secondary)
                                     } else {
-                                        Text(variable.value?.isEmpty == false ? variable.value! : "Empty value")
-                                            .font(.system(.body, design: .monospaced)).lineLimit(3)
-                                            .textSelection(.enabled)
+                                        HStack(alignment: .top) {
+                                            Text(variable.value?.isEmpty == false ? variable.value! : "Empty value")
+                                                .font(.system(.body, design: .monospaced)).lineLimit(3)
+                                                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                                            if let value = variable.value { MapCopyButton(value: value, label: "variable value") }
+                                        }
                                     }
                                     if variable.isHCL { Text("HCL expression").font(.callout).foregroundStyle(.secondary) }
                                     if !variable.description.isEmpty {
                                         Text(variable.description).font(.callout).foregroundStyle(.secondary).lineLimit(3)
                                     }
-                                }
-                                Divider()
+                                }.padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                            }
                             }
                         }
                     }
@@ -609,7 +618,7 @@ private struct HCPMapVariableEditor: View {
 
     init(model: HCPWorkspaceViewerModel, variable: HCPWorkspaceVariable, sourceKey: String) {
         self.model = model; self.variable = variable; self.sourceKey = sourceKey
-        _value = State(initialValue: variable.isSensitive ? "" : (variable.value ?? ""))
+        _value = State(initialValue: variable.isMaskedForDisplay ? "" : (variable.value ?? ""))
     }
 
     var body: some View {
@@ -618,8 +627,8 @@ private struct HCPMapVariableEditor: View {
             Text(model.selectedWorkspace?.name ?? "Workspace").foregroundStyle(.secondary)
             Text("Saving updates this workspace variable in HCP Terraform. It does not start a run or change the current state.")
                 .font(.body).fixedSize(horizontal: false, vertical: true)
-            if variable.isSensitive {
-                Text("The current sensitive value cannot be read. Enter a replacement only if you intend to change it.")
+            if variable.isMaskedForDisplay {
+                Text("The current value is hidden. Enter a replacement only if you intend to change it.")
                     .font(.callout).foregroundStyle(.secondary)
                 SecureField("Replacement value", text: $value).textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Replacement sensitive variable value")
@@ -644,7 +653,7 @@ private struct HCPMapVariableEditor: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(isSaving || !didEdit || sourceKey != model.mapRequestKey || (!variable.isSensitive && value == (variable.value ?? "")))
+                .disabled(isSaving || !didEdit || sourceKey != model.mapRequestKey || (!variable.isMaskedForDisplay && value == (variable.value ?? "")))
             }
         }
         .padding(24).frame(width: 510)

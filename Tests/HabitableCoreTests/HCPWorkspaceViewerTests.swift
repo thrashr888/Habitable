@@ -13,6 +13,23 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         super.tearDown()
     }
 
+    func testWorkspaceVariableDisplayMaskUsesSensitivityAndConservativeCredentialKeyNames() {
+        func variable(_ key: String, sensitive: Bool = false) -> HCPWorkspaceVariable {
+            HCPWorkspaceVariable(id: key, key: key, value: "sample", category: "env", description: "test",
+                                 isSensitive: sensitive, isHCL: false)
+        }
+
+        for key in ["API_KEY", "CLIENT_SECRET", "AUTH_SECRET_KEY", "database_password", "refresh_token", "ssh_private_key"] {
+            let candidate = variable(key)
+            XCTAssertFalse(candidate.isSensitive, "API sensitivity remains unchanged for \(key)")
+            XCTAssertTrue(candidate.isMaskedForDisplay, "Expected display masking for \(key)")
+        }
+        for key in ["github_owner", "admin_ips", "ssh_public_key", "GITHUB_OAUTH_CLIENT_ID"] {
+            XCTAssertFalse(variable(key).isMaskedForDisplay, "Expected value to remain visible for \(key)")
+        }
+        XCTAssertTrue(variable("ORDINARY_NAME", sensitive: true).isMaskedForDisplay)
+    }
+
     func testWorkspaceListingUsesEncodedPaginationAndMapsWorkspaceIdentity() async throws {
         HCPURLProtocolStub.responses = [
             "/api/v2/organizations/pthrasher_v2/workspaces": #"{"data":[{"id":"ws-1","type":"workspaces","attributes":{"name":"habitable-prod","terraform-version":"1.10.0","execution-mode":"remote","locked":false}}],"links":{"next":"https://app.terraform.io/api/v2/organizations/pthrasher_v2/workspaces?page[number]=2"},"meta":{"pagination":{"total-count":51}}}"#.data(using: .utf8)!
@@ -601,9 +618,12 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         Data(#"{"format_version":"1.0","values":{"root_module":{"resources":[{"address":"aws_db_instance.orders","mode":"managed","type":"aws_db_instance","name":"orders","values":{"engine":"postgres","nested":{"password":"NEVER_DISPLAY_THIS"},"url":"db://NEVER_DISPLAY_THIS@host"},"sensitive_values":{"nested":{"password":true}}}]}}}"#.utf8)
     }
 
-    private func installMapResponses(workspaceID: String = "ws-1", json: Bool = true) throws {
+    private func installMapResponses(workspaceID: String = "ws-1", json: Bool = true,
+                                    stateCreatedAt: String? = nil, stateSerial: Int? = nil) throws {
         var attrs: [String: Any] = ["hosted-state-download-url": "https://archivist.terraform.io/map/raw?signature=private"]
         if json { attrs["hosted-json-state-download-url"] = "https://archivist.terraform.io/map/show?signature=private" }
+        if let stateCreatedAt { attrs["created-at"] = stateCreatedAt }
+        if let stateSerial { attrs["serial"] = stateSerial }
         HCPURLProtocolStub.responses["/api/v2/workspaces/\(workspaceID)/current-state-version"] = try JSONSerialization.data(withJSONObject:
             ["data": ["id": "sv-\(workspaceID)", "type": "state-versions", "attributes": attrs,
                       "relationships": ["workspace": ["data": ["id": workspaceID]]]]])
@@ -612,9 +632,11 @@ final class HCPWorkspaceViewerTests: XCTestCase {
     }
 
     func testCurrentMapUsesOneVersionAndRedactsNestedAndRepeatedSecrets() async throws {
-        try installMapResponses()
+        try installMapResponses(stateCreatedAt: "2026-10-03T12:00:00.000Z", stateSerial: 42)
         let result = try await makeClient().currentMap(hostname: "app.terraform.io", workspaceID: "ws-1", token: "api-secret")
         XCTAssertEqual(result.versionID, "sv-ws-1")
+        XCTAssertEqual(result.stateCreatedAt, ISO8601DateFormatter().date(from: "2026-10-03T12:00:00Z"))
+        XCTAssertEqual(result.stateSerial, 42)
         XCTAssertEqual(result.map.tiles.count, 1)
         XCTAssertNil(result.notice)
         XCTAssertFalse(String(describing: result).contains("NEVER_DISPLAY_THIS"))
@@ -626,6 +648,16 @@ final class HCPWorkspaceViewerTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "GET")
         }
         XCTAssertEqual(HCPURLProtocolStub.requests.count, 3)
+    }
+
+    func testCurrentMapToleratesMalformedOptionalStateDateAndSerial() async throws {
+        try installMapResponses(stateCreatedAt: "not-a-date", stateSerial: nil)
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/current-state-version"] = Data(#"{"data":{"id":"sv-ws-1","type":"state-versions","attributes":{"hosted-state-download-url":"https://archivist.terraform.io/map/raw?signature=private","hosted-json-state-download-url":"https://archivist.terraform.io/map/show?signature=private","created-at":"not-a-date","serial":"not-a-number"}}}"#.utf8)
+        let result = try await makeClient().currentMap(hostname: "app.terraform.io", workspaceID: "ws-1", token: "api-secret")
+        XCTAssertEqual(result.versionID, "sv-ws-1")
+        XCTAssertNil(result.stateCreatedAt)
+        XCTAssertNil(result.stateSerial)
+        XCTAssertEqual(result.map.tiles.count, 1)
     }
 
     func testOlderStateWithoutJSONKeepsMapButNeverExposesRawAttributes() async throws {

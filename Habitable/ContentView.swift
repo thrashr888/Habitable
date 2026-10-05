@@ -341,7 +341,7 @@ struct ContentView: View {
                                     onOpenResource: { address in
                                         selectedResource = address
                                         navigationSelection.wrappedValue = .resources
-                                    })
+                                    }, onShowHistory: { navigationSelection.wrappedValue = .runs })
         case .readme: WorkspaceReadmePage(directory: workspace.workingDirectory, presentation: readme)
         case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel,
                                                declarationRequest: $declarationRequest)

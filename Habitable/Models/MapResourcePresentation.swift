@@ -34,9 +34,12 @@ struct MapResourcePresentation: Equatable, Sendable {
             let schema = schema(for: resource.type)
             for field in schema.facts {
                 if let value = attribute(field.path, in: resource), !isRedactedOrEmpty(value) {
-                    let rendered = field.path == "allocated_storage" && Int(value) != nil ? "\(value) GiB" : value
+                    let rendered = factValue(field.path, value: value)
                     facts.append(MapResourceFact(id: "\(resource.address):\(field.path)", label: field.label, value: rendered))
                 }
+            }
+            if resource.type == "aws_db_instance", let status = attribute("status", in: resource), !isRedactedOrEmpty(status) {
+                facts.append(MapResourceFact(id: "\(resource.address):recorded-status", label: "Last recorded status", value: status))
             }
             for field in schema.endpoints {
                 if let value = attribute(field.path, in: resource), !isRedactedOrEmpty(value) {
@@ -62,18 +65,42 @@ struct MapResourcePresentation: Equatable, Sendable {
     private static func schema(for type: String) -> (facts: [(path: String, label: String)], endpoints: [(path: String, label: String)]) {
         switch type {
         case "aws_db_instance":
-            return ([ ("engine", "Engine"), ("engine_version", "Version"), ("instance_class", "Class"), ("allocated_storage", "Storage") ], [("address", "Database address")])
+            return ([ ("engine", "Engine"), ("engine_version", "Version"), ("instance_class", "Class"), ("allocated_storage", "Storage"),
+                      ("storage_encrypted", "Storage encryption"), ("multi_az", "Availability"), ("availability_zone", "Availability zone"),
+                      ("backup_retention_period", "Backup retention"), ("backup_window", "Backup window"),
+                      ("deletion_protection", "Deletion protection") ], [("address", "Database address")])
         case "aws_elasticache_cluster", "aws_elasticache_replication_group":
-            return ([ ("engine", "Engine"), ("engine_version", "Version"), ("node_type", "Node type") ], [("primary_endpoint_address", "Primary endpoint")])
+            return ([ ("engine", "Engine"), ("engine_version", "Version"), ("node_type", "Node type"), ("num_cache_nodes", "Cache nodes"),
+                      ("at_rest_encryption_enabled", "At-rest encryption"), ("transit_encryption_enabled", "Transit encryption") ], [("primary_endpoint_address", "Primary endpoint")])
         case "aws_autoscaling_group":
             return ([ ("min_size", "Minimum"), ("max_size", "Maximum"), ("desired_capacity", "Desired") ], [])
-        case "aws_instance": return ([("instance_type", "Instance type")], [])
-        case "aws_s3_bucket": return ([("bucket", "Bucket")], [("website_endpoint", "Website")])
-        case "aws_cloudfront_distribution": return ([], [("domain_name", "Domain")])
-        case "aws_route53_zone": return ([("zone_id", "Zone")], [("name", "DNS name")])
-        case "aws_vpc": return ([("cidr_block", "CIDR")], [])
+        case "aws_instance": return ([("instance_type", "Instance type"), ("availability_zone", "Availability zone"), ("private_ip", "Private IP"), ("public_ip", "Public IP")], [])
+        case "aws_s3_bucket": return ([("bucket", "Bucket"), ("region", "Region"), ("object_lock_enabled", "Object lock")], [("website_endpoint", "Website")])
+        case "aws_cloudfront_distribution": return ([("enabled", "Enabled"), ("price_class", "Price class")], [("domain_name", "Domain")])
+        case "aws_route53_zone": return ([("zone_id", "Zone"), ("private_zone", "Private zone")], [("name", "DNS name")])
+        case "aws_vpc": return ([("cidr_block", "CIDR"), ("enable_dns_support", "DNS support"), ("enable_dns_hostnames", "DNS hostnames")], [])
+        case "aws_subnet": return ([("cidr_block", "CIDR"), ("availability_zone", "Availability zone"), ("map_public_ip_on_launch", "Public IPs on launch")], [])
         default: return ([], [])
         }
+    }
+
+    private static func factValue(_ path: String, value: String) -> String {
+        if path == "allocated_storage", Int(value) != nil { return "\(value) GiB" }
+        if path == "backup_retention_period", Int(value) != nil { return "\(value) days" }
+        if ["storage_encrypted", "at_rest_encryption_enabled", "transit_encryption_enabled"].contains(path) {
+            if value == "true" { return "Encrypted" }
+            if value == "false" { return "Not encrypted" }
+        }
+        if path == "multi_az" {
+            if value == "true" { return "Multi-AZ" }
+            if value == "false" { return "Single-AZ" }
+        }
+        if ["deletion_protection", "enabled", "private_zone", "object_lock_enabled", "enable_dns_support",
+            "enable_dns_hostnames", "map_public_ip_on_launch"].contains(path) {
+            if value == "true" { return "Enabled" }
+            if value == "false" { return "Disabled" }
+        }
+        return value
     }
 
     private static func anchorPriority(_ type: String) -> Int {

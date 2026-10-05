@@ -11,6 +11,9 @@ final class MapResourcePresentationTests: XCTestCase {
         let resource = MapDisplayResource(address: "aws_db_instance.main", type: "aws_db_instance", displayAttributes: attributes([
             "engine": JSON("postgres"), "engine_version": JSON("16.2"),
             "instance_class": JSON("db.t4g.medium"), "allocated_storage": JSON(40),
+            "storage_encrypted": JSON(true), "multi_az": JSON(true), "availability_zone": JSON("us-west-2a"),
+            "backup_retention_period": JSON(7), "backup_window": JSON("03:00-04:00"),
+            "deletion_protection": JSON(false), "status": JSON("available"),
             "address": JSON("db.internal.example")
         ]))
         let tile = MapTile(id: resource.address, title: "Database", kind: .data, anchors: [resource.address], resources: [resource.address])
@@ -18,8 +21,10 @@ final class MapResourcePresentationTests: XCTestCase {
         let result = MapResourcePresentation.summarize(tile: tile, resources: [resource])
 
         XCTAssertEqual(result.subtitle, "RDS · Postgres")
-        XCTAssertEqual(result.facts.map(\.label), ["Engine", "Version", "Class", "Storage"])
-        XCTAssertEqual(result.facts.last?.value, "40 GiB")
+        XCTAssertEqual(result.facts.map(\.label), ["Engine", "Version", "Class", "Storage", "Storage encryption", "Availability",
+                                                     "Availability zone", "Backup retention", "Backup window", "Deletion protection", "Last recorded status"])
+        XCTAssertEqual(result.facts.map(\.value), ["postgres", "16.2", "db.t4g.medium", "40 GiB", "Encrypted", "Multi-AZ",
+                                                    "us-west-2a", "7 days", "03:00-04:00", "Disabled", "available"])
         XCTAssertEqual(result.endpoints.map(\.value), ["db.internal.example"])
         XCTAssertNil(result.endpoints.first?.url, "Database hostnames must not be turned into HTTPS links")
     }
@@ -86,6 +91,17 @@ final class MapResourcePresentationTests: XCTestCase {
         let result = MapResourcePresentation.summarize(tile: tile, resources: [gateway, routeTable, subnet, vpc])
 
         XCTAssertEqual(result.subtitle, "VPC · 10.0.0.0/16")
+    }
+
+    func testMissingRecordedStatusIsNotInvented() {
+        let resource = MapDisplayResource(address: "aws_db_instance.main", type: "aws_db_instance", displayAttributes: attributes([
+            "engine": JSON("postgres"), "status": JSON("(sensitive value)")
+        ]))
+        let tile = MapTile(id: resource.address, title: "Database", kind: .data, anchors: [resource.address], resources: [resource.address])
+
+        let result = MapResourcePresentation.summarize(tile: tile, resources: [resource])
+
+        XCTAssertFalse(result.facts.contains { $0.label.localizedCaseInsensitiveContains("status") })
     }
 
     func testUnknownAndCommonAWSTypesHaveReadableNamesWithoutAttributeDump() {

@@ -139,7 +139,37 @@ final class ResourceMapTests: XCTestCase {
         let b = MapResource(address: "aws_s3_bucket.main[1]", type: "aws_s3_bucket", name: "main")
         let app = r("aws_lambda_function", deps: ["aws_s3_bucket.main"])
         let map = try classifier.classify([a, app, b])
-        XCTAssertEqual(map.connections, [MapConnection(source: app.address, target: a.address)])
+        XCTAssertEqual(map.connections, [MapConnection(source: app.address, target: a.address,
+            evidence: [MapConnectionEvidence(sourceResource: app.address, targetResource: a.address),
+                       MapConnectionEvidence(sourceResource: app.address, targetResource: b.address)])])
+    }
+
+    func testGroupedReciprocalEdgesAreMixedWithAcyclicResourceEvidence() throws {
+        let firstApp = r("aws_lambda_function", "orders_api_primary", deps: ["aws_s3_bucket.state"])
+        let secondApp = r("aws_lambda_function", "orders_api_secondary")
+        let bucket = r("aws_s3_bucket", "state", deps: [secondApp.address])
+        let map = try classifier.classify([firstApp, secondApp, bucket])
+
+        XCTAssertEqual(map.tiles.count, 2)
+        XCTAssertEqual(map.connections.count, 1)
+        let connection = try XCTUnwrap(map.connections.first)
+        XCTAssertEqual(connection.relationship, .mixed)
+        XCTAssertEqual(Set(connection.evidence), [
+            MapConnectionEvidence(sourceResource: firstApp.address, targetResource: bucket.address),
+            MapConnectionEvidence(sourceResource: bucket.address, targetResource: secondApp.address)
+        ])
+        // The quotient edge is mixed, even though the two raw edges form a DAG.
+        XCTAssertEqual(connection.source, min(firstApp.address, bucket.address))
+        XCTAssertEqual(connection.target, max(firstApp.address, bucket.address))
+
+        let tiles = [
+            MapTile(id: "a", title: "A", kind: .data, anchors: [], resources: []),
+            MapTile(id: "b", title: "B", kind: .data, anchors: [], resources: [])
+        ]
+        let layout = MapCanvasLayout(
+            map: ResourceMap(tiles: tiles, connections: [MapConnection(source: "b", target: "a", relationship: .mixed)], dataSources: []),
+            width: 680)
+        XCTAssertEqual(layout.tiles.map(\.id), ["a", "b"])
     }
 
     func testShowJSONNestedModulesDoesNotInventDependencies() throws {

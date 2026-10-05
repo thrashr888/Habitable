@@ -52,6 +52,15 @@ struct HCPWorkspaceVariable: Identifiable, Equatable, Sendable {
     let description: String
     let isSensitive: Bool
     let isHCL: Bool
+
+    /// UI-only conservative mask for variables whose key looks credential-like.
+    /// Keep `isSensitive` as the API's explicit value for write/editor policy.
+    var isMaskedForDisplay: Bool {
+        guard !isSensitive else { return true }
+        let normalizedKey = key.lowercased().filter { $0.isLetter || $0.isNumber }
+        return ["secret", "password", "passwd", "token", "apikey", "accesskey", "privatekey",
+                "credential", "authorization", "bearer"].contains { normalizedKey.contains($0) }
+    }
 }
 
 struct HCPRunDetails: Equatable, Sendable {
@@ -291,7 +300,12 @@ struct HCPAPIClient: Sendable {
             guard let url = secureArtifactURL(value) else { throw HCPViewerError.invalidResponse }
             shown = try await fetchStateArtifact(url, hostname: hostname, token: token)
         }
-        do { return try HCPMapSnapshot.decode(versionID: id, raw: raw, shown: shown) }
+        let stateCreatedAt = (attributes["created-at"] as? String).flatMap(isoDate)
+        let stateSerial = attributes["serial"] as? Int
+        do {
+            return try HCPMapSnapshot.decode(versionID: id, raw: raw, shown: shown,
+                                             stateCreatedAt: stateCreatedAt, stateSerial: stateSerial)
+        }
         catch { throw HCPViewerError.invalidResponse }
     }
 
