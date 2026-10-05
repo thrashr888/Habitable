@@ -93,6 +93,18 @@ Paul's review of the Exploration B build: much closer to the mocks; inventory sh
 
 Validation: full Swift suite re-run after these changes (see commit message for the count); native build installed into the stable Preview. Screenshots stay local.
 
+## Inspector faces and Settings, October 5, 2026
+
+Taken from Alchemy's inspector and System Settings shapes (see `DESIGN.md` §2).
+
+| Area | Change | Verified |
+| --- | --- | --- |
+| Inspector faces | The Map's right pane is always present when faces exist: a segmented control (Inspector · Changes N · Inputs N locally; Inspector · Runs N · Variables N in the cloud window) above the chosen face. Selecting a tile returns to Inspector. With nothing selected the Inspector shows the workspace name and state provenance. Changes/Runs is a compact newest-first list of recorded runs (status dot, title, relative date, counts or status); Inputs/Variables is a compact key/value list with the page's own masking and an Open link. | Live in the cloud window: Runs 50 and Variables 19 faces, masked credential-like values, Open Variables link. Local window: Changes and Inputs 43 faces present on the remote-state Rookery folder. |
+| Remote-state folders | The local window keeps the Map shape: the canvas shows "State managed in HCP Terraform" with the Open button as the Map's empty state, so Inputs and Changes stay on the right. | Fixed after a first pass showed the state-read error instead; re-checked live. |
+| Settings | `Window("Settings")` is a 220pt sidebar (identity block with version, General · Connections · Terraform rows with colored symbol tiles, accent wash on the selected row, selection remembered) and a pane with a centered header tile and grouped forms. General holds Windows and Links groups; Connections is the restyled HCP/TFE and local cloud groups; Terraform shows the active version, executable and latest stable read-only with a link to Workspace settings, because version switching is per workspace. | Live: all three panes; Connect/Refresh/Disconnect controls present; local cloud rows with disclosures. |
+
+Open: the two General toggles are stored but not yet read by the windows (TODO PAUL-169 in `SettingsWindow.swift`); Terraform version changes stay in Workspace settings.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

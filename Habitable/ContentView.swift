@@ -232,6 +232,24 @@ struct ContentView: View {
         })
     }
 
+    /// Changes and Inputs ride the Map's inspector as faces (DESIGN.md §2).
+    private var localSideFaces: [MapSideFace] {
+        [
+            MapSideFace(id: "changes", title: "Changes", count: workspace.runs.isEmpty ? nil : workspace.runs.count) {
+                MapChangesList(clips: localChangeClips, selectedID: selectedRun?.uuidString,
+                               onSelect: { clip in
+                                   selectedRun = UUID(uuidString: clip.id)
+                                   navigationSelection.wrappedValue = .runs
+                               }, onShowAll: { navigationSelection.wrappedValue = .runs })
+            },
+            MapSideFace(id: "inputs", title: "Inputs", count: workspace.terraformVariables.isEmpty ? nil : workspace.terraformVariables.count) {
+                LocalInputsFace(variables: workspace.terraformVariables,
+                                onOpen: { showMissingInputs = false; navigationSelection.wrappedValue = .variables },
+                                onOpenMissing: { showMissingInputs = true; navigationSelection.wrappedValue = .variables })
+            }
+        ]
+    }
+
     /// Recorded local runs, oldest first. Counts come only from each run's own
     /// recorded plan summary; nothing is inferred from current state.
     private var localChangeClips: [MapChangeClip] {
@@ -413,28 +431,28 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
-        case .map where remoteWorkspaceLink != nil && workspace.state == nil && !workspace.locked:
-            VStack(spacing: 16) {
-                Image(systemName: "cloud").font(.system(size: 36)).foregroundStyle(.secondary)
-                if let link = remoteWorkspaceLink {
-                    Text(link.isInitialized ? "State managed in HCP Terraform" : "Configured for HCP Terraform")
-                        .font(.title2.weight(.semibold))
-                    Text(remoteLinkDetail(link))
-                        .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 470)
-                    Button(link.workspaceName.map { "Open \($0) in HCP Terraform" } ?? "Choose the workspace in HCP Terraform") {
-                        onOpenRemoteWorkspace(link)
-                        openWindow(id: "HCP.browser")
-                    }.buttonStyle(.borderedProminent)
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .map:
+            // A folder whose state lives in HCP Terraform keeps the Map window shape:
+            // the canvas explains and links to the remote workspace, while Inputs and
+            // Changes stay on the right.
+            let remote = (remoteWorkspaceLink != nil && workspace.state == nil && !workspace.locked) ? remoteWorkspaceLink : nil
             VStack(spacing: 0) {
                 ResourceMapPage(onShowVariables: { navigationSelection.wrappedValue = .variables },
                                 onShowList: { navigationSelection.wrappedValue = .resources },
                                 onOpenResource: { address in
                                     selectedResource = address
                                     navigationSelection.wrappedValue = .resources
-                                }, onShowHistory: { navigationSelection.wrappedValue = .runs })
+                                }, onShowHistory: { navigationSelection.wrappedValue = .runs },
+                                sideFaces: localSideFaces,
+                                emptyTitle: remote.map { $0.isInitialized ? "State managed in HCP Terraform" : "Configured for HCP Terraform" },
+                                emptyDetail: remote.map(remoteLinkDetail),
+                                emptySymbol: remote == nil ? nil : "cloud",
+                                emptyAction: remote.map { link in
+                                    MapEmptyAction(title: link.workspaceName.map { "Open \($0) in HCP Terraform" } ?? "Choose the workspace in HCP Terraform") {
+                                        onOpenRemoteWorkspace(link)
+                                        openWindow(id: "HCP.browser")
+                                    }
+                                })
                 Divider()
                 MapTimelineStrip(clips: localChangeClips, selectedID: selectedRun?.uuidString,
                                  hint: "Select a change to review its run",
@@ -590,5 +608,75 @@ struct QuietGroupBoxStyle: GroupBoxStyle {
         .background(Color(nsColor: .controlBackgroundColor))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor), lineWidth: 0.5))
         .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+/// Compact Inputs face: one row per declared or supplied input. Values follow
+/// the same masking rules as the Inputs page; nothing sensitive is previewed.
+private struct LocalInputsFace: View {
+    let variables: [TerraformVariable]
+    let onOpen: () -> Void
+    let onOpenMissing: () -> Void
+
+    private var missingCount: Int { variables.filter(\.isMissingRequiredInput).count }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if missingCount > 0 {
+                Button { onOpenMissing() } label: {
+                    Label("\(missingCount) required input\(missingCount == 1 ? "" : "s") not set", systemImage: "exclamationmark.circle")
+                        .font(.system(size: 13)).foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain).padding(.horizontal, 16).padding(.vertical, 10)
+                Divider()
+            }
+            if variables.isEmpty {
+                Text("No inputs declared or supplied for this folder.")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(variables.sorted { $0.key < $1.key }, id: \.id) { variable in
+                            InputRow(variable: variable).onTapGesture(perform: onOpen)
+                            Divider().padding(.leading, 16)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Open Inputs", action: onOpen).buttonStyle(.link).font(.system(size: 13))
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 10)
+        }
+    }
+
+    private struct InputRow: View {
+        @ObservedObject var variable: TerraformVariable
+
+        private var hasValue: Bool { variable.isUserInput || variable.discoveredSource != nil }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(variable.key).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .lineLimit(1).truncationMode(.middle)
+                if variable.rememberedSecretUnavailable || variable.sensitive {
+                    Label(variable.rememberedSecretUnavailable ? "Remembered value unavailable" : "Sensitive value hidden", systemImage: "lock.fill")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                } else if hasValue {
+                    Text(variable.value.isEmpty ? "(empty)" : variable.value)
+                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                } else if variable.isMissingRequiredInput {
+                    Text("Required · not set").font(.system(size: 12)).foregroundStyle(.orange)
+                } else {
+                    Text(variable.declaration?.hasDefault == true ? "Uses Terraform default" : "Not set")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+        }
     }
 }

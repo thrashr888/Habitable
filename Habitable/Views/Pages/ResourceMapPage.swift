@@ -45,6 +45,11 @@ struct ResourceMapPage: View {
     let onShowList: () -> Void
     let onOpenResource: (String) -> Void
     var onShowHistory: (() -> Void)? = nil
+    var sideFaces: [MapSideFace] = []
+    var emptyTitle: String? = nil
+    var emptyDetail: String? = nil
+    var emptySymbol: String? = nil
+    var emptyAction: MapEmptyAction? = nil
 
     var body: some View {
         ResourceMapContent(
@@ -55,16 +60,43 @@ struct ResourceMapPage: View {
                 guard let address = resource.address, let type = resource.type else { return nil }
                 return MapDisplayResource(address: address, type: type, displayAttributes: resource.displayAttributes)
             },
-            notice: workspace.mapNotice, errorMessage: workspace.errorMessage,
+            notice: workspace.mapNotice,
+            // A remote-state handoff is the explanation; the local state-read error
+            // would only restate that there is nothing to read here.
+            errorMessage: emptyTitle == nil ? workspace.errorMessage : nil,
             isLoading: workspace.locked, canRefresh: !workspace.locked && !workspace.isMapDemo,
             refresh: workspace.refreshResources, onShowList: onShowList, onOpenResource: onOpenResource,
+            emptyDetail: emptyDetail ?? "Resources appear here after they are recorded in Terraform state. Inputs and Changes stay available on the right.",
+            emptyTitle: emptyTitle, emptySymbol: emptySymbol ?? "square.dashed", emptyAction: emptyAction,
             workspaceDirectory: workspace.workingDirectory,
             onShowHistory: onShowHistory,
-            onShowVariables: onShowVariables)
+            onShowVariables: onShowVariables,
+            sideFaces: sideFaces)
     }
 }
 
 /// Shared presentation has no local runner or cloud credentials.
+/// One face of the Map's right pane besides the Inspector (Changes, Inputs,
+/// Runs, Variables). The pane is an inspector with segmented faces, like a
+/// Studio or Finder inspector; the Map never grows a second sidebar.
+struct MapSideFace: Identifiable {
+    let id: String
+    let title: String
+    var count: Int? = nil
+    let content: AnyView
+
+    init<Content: View>(id: String, title: String, count: Int? = nil, @ViewBuilder content: () -> Content) {
+        self.id = id; self.title = title; self.count = count; self.content = AnyView(content())
+    }
+}
+
+/// One prominent action offered by the Map's empty state (e.g. opening the
+/// remote workspace that holds this folder's state).
+struct MapEmptyAction {
+    let title: String
+    let run: () -> Void
+}
+
 struct ResourceMapContent: View {
     let title: String
     let identity: String
@@ -77,7 +109,10 @@ struct ResourceMapContent: View {
     let refresh: () -> Void
     let onShowList: () -> Void
     let onOpenResource: (String) -> Void
-    var emptyDetail = "Resources appear here after they are recorded in Terraform state. You can still inspect configuration, inputs, and outputs in the sidebar."
+    var emptyDetail = "Resources appear here after they are recorded in Terraform state. Inputs and Changes stay available on the right."
+    var emptyTitle: String? = nil
+    var emptySymbol = "square.dashed"
+    var emptyAction: MapEmptyAction? = nil
     var workspaceDirectory: URL? = nil
     var workspaceURL: URL? = nil
     var stateVersionID: String? = nil
@@ -86,6 +121,8 @@ struct ResourceMapContent: View {
     var onShowHistory: (() -> Void)? = nil
     var onShowVariables: (() -> Void)? = nil
     var variablesPanel: AnyView? = nil
+    var sideFaces: [MapSideFace] = []
+    @State private var sideFaceID = "inspector"
     @State private var showingVariables = false
     @State private var showingInventory = true
     @StateObject private var renderCache = MapRenderCache()
@@ -124,8 +161,8 @@ struct ResourceMapContent: View {
                     }
                     HSplitView {
                         canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                        if selectedTile != nil {
-                            inspector.frame(minWidth: 280, idealWidth: 330, maxWidth: 390, maxHeight: .infinity)
+                        if selectedTile != nil || !sideFaces.isEmpty {
+                            sidePane.frame(minWidth: 280, idealWidth: 330, maxWidth: 390, maxHeight: .infinity)
                         }
                     }
                 }
@@ -182,6 +219,7 @@ struct ResourceMapContent: View {
             renderCache.reset()
             search = ""; selectedTileID = nil; selectedMember = nil; selectedReference = nil
         }
+        .onChange(of: selectedTileID) { id in if id != nil { sideFaceID = "inspector" } }
         .onChange(of: map) { _ in renderCache.reset() }
         .onChange(of: search) { _ in
             if let selectedTileID, !visibleTiles.contains(where: { $0.id == selectedTileID }) {
@@ -322,8 +360,12 @@ struct ResourceMapContent: View {
                         ProgressView("Reading your infrastructure…")
                             .frame(width: viewport.size.width, height: 180)
                     } else if tiles.isEmpty {
-                        empty("No managed resources yet", detail: emptyDetail, symbol: "square.dashed")
-                            .frame(width: viewport.size.width)
+                        VStack(spacing: 14) {
+                            empty(emptyTitle ?? "No managed resources yet", detail: emptyDetail, symbol: emptySymbol)
+                            if let emptyAction {
+                                Button(emptyAction.title, action: emptyAction.run).buttonStyle(.borderedProminent)
+                            }
+                        }.frame(width: viewport.size.width)
                     } else if visibleTiles.isEmpty {
                         VStack {
                             empty("No matching resources", detail: "Try a group name, resource type, or Terraform address.", symbol: "magnifyingglass")
@@ -580,6 +622,30 @@ struct ResourceMapContent: View {
         .help(tile.resources.joined(separator: "\n"))
     }
 
+    /// The right pane: a segmented control first, then the chosen face. With no
+    /// extra faces it is the plain Inspector.
+    private var sidePane: some View {
+        VStack(spacing: 0) {
+            if !sideFaces.isEmpty {
+                Picker("Inspector face", selection: $sideFaceID) {
+                    Text("Inspector").tag("inspector")
+                    ForEach(sideFaces) { face in
+                        Text(face.count.map { "\(face.title) \($0)" } ?? face.title).tag(face.id)
+                    }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                Divider()
+            }
+            if sideFaceID == "inspector" || sideFaces.first(where: { $0.id == sideFaceID }) == nil {
+                inspector
+            } else if let face = sideFaces.first(where: { $0.id == sideFaceID }) {
+                face.content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
     private var inspector: some View {
         ScrollView {
             if let tile = selectedTile {
@@ -588,7 +654,8 @@ struct ResourceMapContent: View {
                         Text("Inspector").font(.system(size: 13)).foregroundStyle(.secondary)
                         Spacer()
                         Button { selectedTileID = nil; selectedMember = nil } label: { Image(systemName: "xmark") }
-                            .buttonStyle(.plain).accessibilityLabel("Close inspector")
+                            .buttonStyle(.plain).accessibilityLabel("Deselect resource")
+                            .help("Deselect")
                     }
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: symbol(for: tile)).font(.title2).foregroundStyle(.white)
@@ -687,6 +754,18 @@ struct ResourceMapContent: View {
                         }
                     }
                 }.padding(18)
+            } else {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title).font(.title3.weight(.semibold))
+                        Text("Select a resource on the Map or in the inventory to inspect it.")
+                            .font(.system(size: 13)).foregroundStyle(.secondary)
+                    }
+                    if map != nil {
+                        Divider()
+                        historySection
+                    }
+                }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
