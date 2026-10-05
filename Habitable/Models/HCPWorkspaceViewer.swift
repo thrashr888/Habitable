@@ -24,6 +24,14 @@ struct HCPWorkspace: Identifiable, Equatable, Sendable {
     let executionMode: String?
     let locked: Bool
     let htmlURL: URL?
+    let tagNames: [String]
+
+    init(id: String, name: String, terraformVersion: String?, executionMode: String?,
+         locked: Bool, htmlURL: URL?, tagNames: [String] = []) {
+        self.id = id; self.name = name; self.terraformVersion = terraformVersion
+        self.executionMode = executionMode; self.locked = locked; self.htmlURL = htmlURL
+        self.tagNames = tagNames
+    }
 }
 
 struct HCPRun: Identifiable, Equatable, Sendable {
@@ -201,9 +209,10 @@ struct HCPAPIClient: Sendable {
         return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
     }
 
-    func workspaces(hostname: String, organization: String, token: String, page: Int) async throws -> HCPPage<HCPWorkspace> {
+    func workspaces(hostname: String, organization: String, token: String, page: Int,
+                    search: [URLQueryItem] = []) async throws -> HCPPage<HCPWorkspace> {
         let path = "/api/v2/organizations/\(pathComponent(organization))/workspaces"
-        let object = try await get(path: path, hostname: hostname, token: token, query: pagination(page))
+        let object = try await get(path: path, hostname: hostname, token: token, query: pagination(page) + search)
         let items = array(object["data"]).compactMap { decodeWorkspace($0, hostname: hostname, organization: organization) }
         return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
     }
@@ -401,7 +410,8 @@ struct HCPAPIClient: Sendable {
         let url = URL(string: "https://\(hostname)/app/\(pathComponent(organization))/workspaces/\(pathComponent(name))")
         return HCPWorkspace(id: id, name: name, terraformVersion: attributes["terraform-version"] as? String,
                             executionMode: attributes["execution-mode"] as? String,
-                            locked: attributes["locked"] as? Bool ?? false, htmlURL: url)
+                            locked: attributes["locked"] as? Bool ?? false, htmlURL: url,
+                            tagNames: attributes["tag-names"] as? [String] ?? [])
     }
 
     private func decodeWorkspaceVariable(_ row: [String: Any]) -> HCPWorkspaceVariable? {
@@ -728,9 +738,16 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             }
         }
     }
+    @Published private(set) var linkedWorkspaceCandidates: [HCPWorkspace]?
+    @Published private(set) var linkedWorkspaceNotice: String?
+    func clearLinkedWorkspaceCandidates() {
+        linkedWorkspaceCandidates = nil
+        linkedWorkspaceNotice = nil
+    }
     @Published var selectedWorkspaceID: String? {
         didSet {
             guard oldValue != selectedWorkspaceID else { return }
+            if selectedWorkspaceID != nil { clearLinkedWorkspaceCandidates() }
             invalidateMap()
             currentOperation = UUID()
             isLoading = false
@@ -896,6 +913,28 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         }
     }
 
+    private static func isValidSelector(_ selector: TerraformRemoteWorkspaceLink.Selector) -> Bool {
+        switch selector {
+        case .name(let name): return !name.isEmpty
+        case .tags(let tags): return !tags.isEmpty && !tags.contains(where: \.isEmpty)
+        case .prefix(let prefix): return !prefix.isEmpty
+        }
+    }
+
+    /// Client-side verification of server search results. Never returns a
+    /// workspace that does not satisfy the selector.
+    private static func linkedCandidates(from loaded: [HCPWorkspace],
+                                         selector: TerraformRemoteWorkspaceLink.Selector) -> [HCPWorkspace] {
+        switch selector {
+        case .name(let name): return loaded.filter { $0.name == name }
+        case .prefix(let prefix): return loaded.filter { $0.name.hasPrefix(prefix) }
+        case .tags(let tags):
+            // If the API omitted tag-names for every item, trust the server-side filter.
+            if loaded.allSatisfy({ $0.tagNames.isEmpty }) { return loaded }
+            return loaded.filter { workspace in tags.allSatisfy { workspace.tagNames.contains($0) } }
+        }
+    }
+
     /// Opens only the exact workspace identified by initialized Terraform
     /// backend metadata. This deliberately avoids `connect()` because its normal
     /// first-workspace selection would be misleading when the named workspace
@@ -904,13 +943,14 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         guard !isSample,
               let host = HCPAPIClient.normalizedHostname(link.hostname),
               host == link.hostname,
-              !link.organization.isEmpty, !link.workspaceName.isEmpty else {
+              !link.organization.isEmpty, Self.isValidSelector(link.selector) else {
             errorMessage = "This Terraform backend does not identify a valid HCP workspace."
             return
         }
 
         hostname = host
         selectedOrganization = link.organization
+        clearLinkedWorkspaceCandidates()
         selectedWorkspaceID = nil
         workspaces = []
         runs = []
@@ -932,20 +972,27 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         defer { if currentOperation == operation { isLoading = false } }
 
         let organization = link.organization
+        var search: [URLQueryItem] = []
+        switch link.selector {
+        case .name: break
+        case .tags(let tags): search = [URLQueryItem(name: "search[tags]", value: tags.joined(separator: ","))]
+        case .prefix(let prefix): search = [URLQueryItem(name: "search[name]", value: prefix)]
+        }
         do {
             var result = try await client.workspaces(hostname: host, organization: organization,
-                                                     token: token, page: 1)
+                                                     token: token, page: 1, search: search)
             guard !Task.isCancelled, currentOperation == operation,
                   hostname == host, selectedOrganization == organization else { return }
             var loaded = result.items
-            var match = loaded.first { $0.name == link.workspaceName }
-            while match == nil, result.hasNextPage, result.page < 5 {
+            let exactName = link.workspaceName
+            var match = exactName.flatMap { name in loaded.first { $0.name == name } }
+            while (exactName == nil || match == nil), result.hasNextPage, result.page < 5 {
                 result = try await client.workspaces(hostname: host, organization: organization,
-                                                     token: token, page: result.page + 1)
+                                                     token: token, page: result.page + 1, search: search)
                 guard !Task.isCancelled, currentOperation == operation,
                       hostname == host, selectedOrganization == organization else { return }
                 loaded.append(contentsOf: result.items)
-                match = result.items.first { $0.name == link.workspaceName }
+                if let exactName { match = result.items.first { $0.name == exactName } }
             }
             let organizationPage = try? await client.organizations(hostname: host, token: token, page: 1)
             guard !Task.isCancelled, currentOperation == operation,
@@ -956,6 +1003,21 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             workspaceHasNextPage = result.hasNextPage
             isConnected = true
             lastUpdated = Date()
+            if exactName == nil {
+                let candidates = Self.linkedCandidates(from: loaded, selector: link.selector)
+                switch candidates.count {
+                case 0:
+                    errorMessage = "No accessible workspace matches \(link.selectorDescription) in \(organization)."
+                case 1:
+                    isLoading = false
+                    selectedWorkspaceID = candidates[0].id
+                    await refreshRuns(force: true)
+                default:
+                    linkedWorkspaceCandidates = candidates
+                    linkedWorkspaceNotice = "\(candidates.count) workspaces match \(link.selectorDescription). Choose the one this folder uses."
+                }
+                return
+            }
             guard let exactMatch = match else {
                 errorMessage = "The configured HCP workspace wasn’t found in the first 250 accessible workspaces."
                 return

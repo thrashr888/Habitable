@@ -95,6 +95,80 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         XCTAssertFalse(HCPURLProtocolStub.requests.contains { $0.url?.path.contains("/runs") == true })
     }
 
+    @MainActor
+    func testOpenLinkedWorkspaceWithTagsListsCandidatesWithoutSelecting() async throws {
+        let path = "/api/v2/organizations/pthrasher_v2/workspaces"
+        HCPURLProtocolStub.responses[path] = try workspacePage([
+            workspaceRecord(id: "ws-a", name: "app-a", tags: ["app", "prod"]),
+            workspaceRecord(id: "ws-b", name: "app-b", tags: ["prod", "app", "extra"])], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(),
+            selectionStore: HCPMemorySelectionStore(), client: makeClient())
+
+        await model.openLinkedWorkspace(linkedSelector(.tags(["app", "prod"])))
+
+        XCTAssertEqual(model.linkedWorkspaceCandidates?.count, 2)
+        XCTAssertNil(model.selectedWorkspaceID)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertTrue(model.linkedWorkspaceNotice?.contains("2 workspaces") == true)
+        XCTAssertTrue(HCPURLProtocolStub.requests.contains {
+            URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems?
+                .contains(where: { $0.name == "search[tags]" && $0.value == "app,prod" }) == true
+        })
+        XCTAssertFalse(HCPURLProtocolStub.requests.contains { $0.url?.path.contains("/runs") == true })
+
+        model.selectedWorkspaceID = "ws-b"
+        XCTAssertNil(model.linkedWorkspaceCandidates)
+        XCTAssertNil(model.linkedWorkspaceNotice)
+    }
+
+    @MainActor
+    func testOpenLinkedWorkspaceWithTagsSelectsSingleVerifiedMatch() async throws {
+        let path = "/api/v2/organizations/pthrasher_v2/workspaces"
+        HCPURLProtocolStub.responses[path] = try workspacePage([
+            workspaceRecord(id: "ws-a", name: "app-a", tags: ["app", "prod"]),
+            workspaceRecord(id: "ws-c", name: "app-c", tags: ["app"])], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-a/runs"] = emptyRunPage()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(),
+            selectionStore: HCPMemorySelectionStore(), client: makeClient())
+
+        await model.openLinkedWorkspace(linkedSelector(.tags(["app", "prod"])))
+
+        XCTAssertEqual(model.selectedWorkspaceID, "ws-a")
+        XCTAssertNil(model.linkedWorkspaceCandidates)
+        XCTAssertNil(model.linkedWorkspaceNotice)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertTrue(HCPURLProtocolStub.requests.contains { $0.url?.path == "/api/v2/workspaces/ws-a/runs" })
+        XCTAssertFalse(HCPURLProtocolStub.requests.contains { $0.url?.path == "/api/v2/workspaces/ws-c/runs" })
+    }
+
+    @MainActor
+    func testOpenLinkedWorkspaceWithPrefixReportsNoMatch() async throws {
+        let path = "/api/v2/organizations/pthrasher_v2/workspaces"
+        HCPURLProtocolStub.responses[path] = try workspacePage(
+            [workspaceRecord(id: "ws-x", name: "other-x")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(),
+            selectionStore: HCPMemorySelectionStore(), client: makeClient())
+
+        await model.openLinkedWorkspace(linkedSelector(.prefix("app-")))
+
+        XCTAssertNil(model.selectedWorkspaceID)
+        XCTAssertNil(model.linkedWorkspaceCandidates)
+        XCTAssertTrue(model.errorMessage?.contains("No accessible workspace matches") == true)
+        XCTAssertTrue(HCPURLProtocolStub.requests.contains {
+            URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems?
+                .contains(where: { $0.name == "search[name]" && $0.value == "app-" }) == true
+        })
+        XCTAssertFalse(HCPURLProtocolStub.requests.contains { $0.url?.path.contains("/runs") == true })
+    }
+
+    private func linkedSelector(_ selector: TerraformRemoteWorkspaceLink.Selector) -> TerraformRemoteWorkspaceLink {
+        TerraformRemoteWorkspaceLink(hostname: "app.terraform.io", organization: "pthrasher_v2", selector: selector,
+            source: .configuration(sourceFile: "main.tf"), url: URL(string: "https://app.terraform.io/app/pthrasher_v2/workspaces")!)
+    }
+
     func testRunHistoryPreservesRemoteRunIDAndReadsSignedLogsWithoutForwardingAPIToken() async throws {
         let signedURL = "https://archivist.terraform.io/v1/object/signed?token=do-not-store-this-url"
         HCPURLProtocolStub.responses = [
@@ -581,8 +655,10 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         XCTAssertTrue(model.isLoading)
     }
 
-    private func workspaceRecord(id: String, name: String) -> [String: Any] {
-        ["id": id, "type": "workspaces", "attributes": ["name": name, "terraform-version": "1.10.0", "execution-mode": "remote", "locked": false]]
+    private func workspaceRecord(id: String, name: String, tags: [String]? = nil) -> [String: Any] {
+        var attributes: [String: Any] = ["name": name, "terraform-version": "1.10.0", "execution-mode": "remote", "locked": false]
+        if let tags { attributes["tag-names"] = tags }
+        return ["id": id, "type": "workspaces", "attributes": attributes]
     }
 
     private func workspacePage(_ records: [[String: Any]], hasNext: Bool) throws -> Data {

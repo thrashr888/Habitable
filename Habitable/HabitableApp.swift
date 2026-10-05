@@ -11,8 +11,8 @@ import SwiftUI
 struct HabitableApp: App {
     @StateObject private var cloud = HCPWorkspaceViewerModel()
     var body: some Scene {
-        WindowGroup("Workspace", id: "Workspace.viewer") {
-            ContentView(onOpenRemoteWorkspace: { link in
+        WindowGroup("Workspace", id: "Workspace.viewer", for: URL.self) { $directory in
+            ContentView(initialDirectory: directory, onOpenRemoteWorkspace: { link in
                 Task { await cloud.openLinkedWorkspace(link) }
             })
                 .frame(minWidth: 900, minHeight: 560)
@@ -79,6 +79,16 @@ private struct WorkspaceCommands: Commands {
 private struct CloudWorkspaceWindow: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
     @Environment(\.openWindow) private var openWindow
+    @StateObject private var recentWorkspaces = RecentWorkspaceStore()
+    @StateObject private var localLinks = LocalWorkspaceLinkIndex()
+
+    /// Known local folders whose verified backend identity is the selected
+    /// remote workspace. Folder names are never used to infer a match.
+    private var linkedLocalFolders: [URL] {
+        guard let workspace = model.selectedWorkspace else { return [] }
+        return localLinks.folders(hostname: model.hostname, organization: model.selectedOrganization,
+                                  workspaceName: workspace.name)
+    }
 
     var body: some View {
         HCPWorkspaceViewer(model: model,
@@ -86,13 +96,29 @@ private struct CloudWorkspaceWindow: View {
             .navigationTitle(model.selectedWorkspace.map { "\($0.name) · \(model.selectedOrganization)" } ?? "HCP Terraform")
             .toolbar {
                 ToolbarItemGroup {
-                    Button { openWindow(id: "Workspace.viewer") } label: { Label("Local workspace", systemImage: "folder") }
+                    let folders = linkedLocalFolders
+                    if folders.count == 1, let folder = folders.first {
+                        Button { openWindow(id: "Workspace.viewer", value: folder) } label: {
+                            Label("Open local folder", systemImage: "folder.badge.gearshape")
+                        }
+                        .help("Open \(folder.path), whose Terraform backend is this workspace")
+                    } else if folders.count > 1 {
+                        Menu {
+                            ForEach(folders, id: \.path) { folder in
+                                Button(folder.path) { openWindow(id: "Workspace.viewer", value: folder) }
+                            }
+                        } label: { Label("Open local folder", systemImage: "folder.badge.gearshape") }
+                        .help("Local folders whose Terraform backend is this workspace")
+                    } else {
+                        Button { openWindow(id: "Workspace.viewer") } label: { Label("Local workspace", systemImage: "folder") }
+                    }
                     Button { openWindow(id: "App.settings") } label: { Label("Connections", systemImage: "network") }
                 }
             }
             .onAppear { model.setVisible(true) }
             .onDisappear { model.setVisible(false) }
             .task { if !model.isConnected && !model.isLoading && model.hasStoredCredential { await model.connect() } }
+            .task(id: recentWorkspaces.paths) { await localLinks.refresh(folders: recentWorkspaces.folders) }
     }
 }
 

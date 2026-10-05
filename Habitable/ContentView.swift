@@ -57,9 +57,12 @@ struct ContentView: View {
     private let onOpenRemoteWorkspace: (TerraformRemoteWorkspaceLink) -> Void
     @State private var remoteWorkspaceLink: TerraformRemoteWorkspaceLink?
 
-    init(onOpenRemoteWorkspace: @escaping (TerraformRemoteWorkspaceLink) -> Void = { _ in }) {
+    /// `initialDirectory` is supplied when another window opens a specific
+    /// folder (for example a cloud workspace's linked local checkout).
+    init(initialDirectory: URL? = nil,
+         onOpenRemoteWorkspace: @escaping (TerraformRemoteWorkspaceLink) -> Void = { _ in }) {
         self.onOpenRemoteWorkspace = onOpenRemoteWorkspace
-        _workspace = StateObject(wrappedValue: Workspace(restoreLastDirectory: true))
+        _workspace = StateObject(wrappedValue: Workspace(dir: initialDirectory, restoreLastDirectory: initialDirectory == nil))
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
@@ -169,8 +172,8 @@ struct ContentView: View {
                     Button {
                         onOpenRemoteWorkspace(link)
                         openWindow(id: "HCP.browser")
-                    } label: { Label("Open in HCP Terraform", systemImage: "cloud") }
-                    .help("Open \(link.organization) / \(link.workspaceName) on \(link.hostname)")
+                    } label: { Label(link.isExact ? "Open in HCP Terraform" : "Find in HCP Terraform", systemImage: "cloud") }
+                    .help(remoteLinkHelp(link))
                 } else {
                     Button { openWindow(id: "HCP.browser") } label: { Label("Cloud workspaces", systemImage: "cloud") }
                 }
@@ -238,6 +241,26 @@ struct ContentView: View {
             canValidate: workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
             planTitle: workspace.autoApply ? "Plan and apply automatically" : "Plan"
         )
+    }
+
+    private func remoteLinkDetail(_ link: TerraformRemoteWorkspaceLink) -> String {
+        var parts: [String] = []
+        switch link.source {
+        case .initializedBackend:
+            parts.append("Open the remote workspace to view its Map. Local configuration and inputs remain available in this window.")
+        case .configuration(let file):
+            parts.append("\(file) declares \(link.organization) / \(link.selectorDescription) on \(link.hostname). This folder has not been initialized yet.")
+        }
+        if !link.isExact {
+            parts.append("Terraform selects among \(link.selectorDescription); choose the one this folder uses in the HCP Terraform window.")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private func remoteLinkHelp(_ link: TerraformRemoteWorkspaceLink) -> String {
+        var text = "\(link.organization) / \(link.selectorDescription) on \(link.hostname)"
+        if case .configuration(let file) = link.source { text += " · declared in \(file), not initialized" }
+        return text
     }
 
     private var workspaceName: String {
@@ -338,11 +361,12 @@ struct ContentView: View {
         case .map where remoteWorkspaceLink != nil && workspace.state == nil && !workspace.locked:
             VStack(spacing: 16) {
                 Image(systemName: "cloud").font(.system(size: 36)).foregroundStyle(.secondary)
-                Text("State managed in HCP Terraform").font(.title2.weight(.semibold))
-                Text("Open the remote workspace to view its Map. Local configuration and inputs remain available in this window.")
-                    .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 470)
                 if let link = remoteWorkspaceLink {
-                    Button("Open \(link.workspaceName) in HCP Terraform") {
+                    Text(link.isInitialized ? "State managed in HCP Terraform" : "Configured for HCP Terraform")
+                        .font(.title2.weight(.semibold))
+                    Text(remoteLinkDetail(link))
+                        .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 470)
+                    Button(link.workspaceName.map { "Open \($0) in HCP Terraform" } ?? "Choose the workspace in HCP Terraform") {
                         onOpenRemoteWorkspace(link)
                         openWindow(id: "HCP.browser")
                     }.buttonStyle(.borderedProminent)
