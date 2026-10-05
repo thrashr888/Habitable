@@ -5,6 +5,7 @@ struct HCPWorkspaceViewer: View {
     let connectionOnly: Bool
     let onOpenConnections: () -> Void
     let onOpenWorkspaces: () -> Void
+    @StateObject private var localConnections = LocalCloudConnectionsModel()
     @State private var workspaceSearch = ""
     @State private var showingMap = true
     @State private var showingWorkspaces = false
@@ -25,16 +26,38 @@ struct HCPWorkspaceViewer: View {
     var body: some View {
         VStack(spacing: 0) {
             if connectionOnly {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Terraform connection").font(.largeTitle.weight(.semibold))
-                    Text("Connect to HCP Terraform or your Terraform Enterprise server.").foregroundStyle(.secondary)
-                    connectionPanel
-                    if model.isConnected {
-                        Button("Open workspaces", action: onOpenWorkspaces).buttonStyle(.borderedProminent)
-                    }
-                    Spacer()
-                }.padding(16).frame(maxWidth: 720, maxHeight: .infinity, alignment: .topLeading)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Text("Connections").font(.largeTitle.weight(.semibold))
+                        GroupBox {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("HCP Terraform & Terraform Enterprise").font(.title3.weight(.semibold))
+                                Text("Browse remote workspace state and runs.").foregroundStyle(.secondary)
+                                connectionPanel
+                                if model.isConnected {
+                                    Button("Open workspaces", action: onOpenWorkspaces).buttonStyle(.borderedProminent)
+                                }
+                            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        HStack {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Local cloud access").font(.title2.weight(.semibold))
+                                Text("Uses your existing CLI sign-ins for local Terraform workflows.")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if localConnections.isRefreshing { ProgressView().controlSize(.small) }
+                            Button("Refresh cloud connections") { Task { await localConnections.refresh() } }
+                                .disabled(localConnections.isRefreshing)
+                        }
+                        ForEach(localConnections.connections) { connection in
+                            LocalCloudConnectionCard(connection: connection, isRefreshing: localConnections.isRefreshing)
+                        }
+                        Text("Authentication checks do not run a plan or change infrastructure. Provider settings in each workspace determine which profile, subscription, and project Terraform uses.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }.padding(16).frame(maxWidth: 980, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.task { await localConnections.refresh() }
             } else if model.isConnected {
                 HStack(spacing: 16) {
                     organizationPicker.frame(maxWidth: 270)
@@ -613,5 +636,38 @@ private struct HCPMapVariableEditor: View {
         .onChange(of: value) { _ in didEdit = true }
         .onChange(of: model.mapRequestKey) { _ in dismiss() }
         .interactiveDismissDisabled(isSaving)
+    }
+}
+
+private struct LocalCloudConnectionCard: View {
+    let connection: LocalCloudConnection
+    let isRefreshing: Bool
+    @State private var copied = false
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(connection.name).font(.title3.weight(.semibold))
+                    Spacer()
+                    Label(isRefreshing ? "Checking…" : connection.status,
+                          systemImage: isRefreshing ? "clock" : (connection.isAuthenticated ? "checkmark.circle.fill" : "exclamationmark.circle"))
+                        .foregroundStyle(connection.isAuthenticated && !isRefreshing ? Color.green : Color.secondary)
+                }
+                ForEach(Array(connection.details.enumerated()), id: \.offset) { _, detail in
+                    Text(detail).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 12) {
+                    Text(connection.loginCommand).font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button(copied ? "Copied" : "Copy sign-in command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(connection.loginCommand, forType: .string)
+                        copied = true
+                    }.accessibilityLabel("Copy \(connection.name) sign-in command")
+                }.padding(10).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
