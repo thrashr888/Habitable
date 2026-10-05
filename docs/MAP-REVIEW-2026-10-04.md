@@ -68,3 +68,7 @@ Moved hostname, credential import, connect/disconnect and connection refresh to 
 Validation: native Debug build passed; 32 HCPWorkspaceViewer tests passed with zero failures; diff check passed. Live inspection of the rebuilt stable Habitable Preview covered disconnected Map to Connections, connection using the existing credential, Open workspaces returning to real ethertext data (3 groups, 10 managed resources, 1 data source), opening the top organization menu, and workspace sidebar visibility. The Map screenshot confirms the connection form is absent and Variables is rightmost. No real variable or infrastructure changes were made.
 
 Final-build screenshots: `/tmp/habitable-map-review/connections-page.png` and `/tmp/habitable-map-review/compact-map-navigation.png`. User test route: Connections, Open workspaces, select an organization/workspace, then toggle the far-right Variables control. Overall Map visual acceptance remains open.
+
+## Omit empty categories
+
+Empty categories no longer produce bands or placeholder text. Search also removes bands without matching tiles, while the existing whole-map empty/no-match states remain. Updated the layout regression test; all 18 ResourceMap tests and native build pass. Live real ethertext inspection showed only Front door and Data; searching Website Bucket reduced the map to Data, and clearing restored both. Screenshot: `/tmp/habitable-map-review/populated-sections-only.png`. Provider-specific grouping for GitHub/Datadog remains tracked in Habitable-tuo.
