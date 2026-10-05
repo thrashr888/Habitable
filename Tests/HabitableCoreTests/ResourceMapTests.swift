@@ -398,4 +398,43 @@ final class ResourceMapTests: XCTestCase {
         ])
         XCTAssertFalse(map.workspaceReferences.contains { $0.consumers.contains(unrelatedTile) })
     }
+
+    private func ident(_ type: String, _ name: String, _ identity: String?) -> MapResource {
+        MapResource(address: type + "." + name, type: type, name: name, identity: identity)
+    }
+
+    func testCollidingTilesPreferStateIdentityTitles() throws {
+        let long = String(repeating: "x", count: 60)
+        let map = try classifier.classify([
+            ident("aws_route53_zone", "app", "example.com"),
+            ident("aws_acm_certificate", "app", "example.com"),
+            ident("aws_s3_bucket", "app", "app-uploads"),
+            ident("aws_vpc", "app", nil),
+            ident("datadog_monitor", "api", MapResource.stateIdentity(type: "datadog_monitor") { key, _ in key == "name" ? long : nil }),
+            ident("aws_s3_bucket", "api", "api-bucket"),
+            ident("aws_lambda_function", "worker", "ignored"),
+        ])
+        func title(_ address: String) -> String? { map.tiles.first { $0.id == address }?.title }
+        XCTAssertEqual(title("aws_s3_bucket.app"), "app-uploads")
+        XCTAssertEqual(title("aws_vpc.app"), "App · Network")
+        let zone = try XCTUnwrap(title("aws_route53_zone.app")), cert = try XCTUnwrap(title("aws_acm_certificate.app"))
+        XCTAssertNotEqual(zone, cert)
+        XCTAssertTrue(zone.contains("example.com") && cert.contains("example.com"))
+        XCTAssertEqual(title("datadog_monitor.api"), "Api · Monitor")
+        XCTAssertEqual(title("aws_s3_bucket.api"), "api-bucket")
+        XCTAssertEqual(title("aws_lambda_function.worker"), "Worker")
+    }
+
+    func testStateIdentityRules() {
+        func id(_ type: String, _ values: [String: String]) -> String? {
+            MapResource.stateIdentity(type: type) { key, index in values[index.map { "\(key)[\($0)]" } ?? key] }
+        }
+        XCTAssertEqual(id("aws_route53_zone", ["name": "example.com."]), "example.com")
+        XCTAssertEqual(id("aws_cloudfront_distribution", ["aliases[0]": "cdn.example.com", "domain_name": "d1.cloudfront.net"]), "cdn.example.com")
+        XCTAssertEqual(id("aws_cloudfront_distribution", ["domain_name": "d1.cloudfront.net"]), "d1.cloudfront.net")
+        XCTAssertEqual(id("github_repository", ["name": "habitable"]), "habitable")
+        XCTAssertNil(id("aws_vpc", ["name": "main"]))
+        XCTAssertNil(id("aws_s3_bucket", ["bucket": "a\nb"]))
+        XCTAssertNil(id("aws_s3_bucket", ["bucket": "(sensitive value)"]))
+    }
 }

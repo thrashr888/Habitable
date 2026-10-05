@@ -9,15 +9,51 @@ struct MapResource: Equatable, Sendable {
     let module: String
     let isData: Bool
     let dependencies: [String]
+    /// Optional recognizable name read from non-sensitive state (see `stateIdentity`).
+    let identity: String?
 
     init(address: String, type: String, name: String, module: String = "",
-         isData: Bool = false, dependencies: [String] = []) {
+         isData: Bool = false, dependencies: [String] = [], identity: String? = nil) {
+        self.identity = identity
         self.address = address
         self.type = type
         self.name = name
         self.module = module
         self.isData = isData
         self.dependencies = dependencies
+    }
+}
+
+extension MapResource {
+    /// Recognizable name for a resource type from non-sensitive attributes, or nil.
+    /// `attribute(key, index)` returns a top-level string attribute (index nil) or the
+    /// string at `key[index]`; it must already apply redaction and return nil for
+    /// sensitive, null or empty values.
+    static func stateIdentity(type: String, attribute: (String, Int?) -> String?) -> String? {
+        var value: String?
+        switch type {
+        case "aws_route53_zone":
+            value = attribute("name", nil).map { $0.hasSuffix(".") ? String($0.dropLast()) : $0 }
+        case "aws_route53_record": value = attribute("name", nil)
+        case "aws_acm_certificate": value = attribute("domain_name", nil)
+        case "aws_cloudfront_distribution": value = attribute("aliases", 0) ?? attribute("domain_name", nil)
+        case "aws_s3_bucket": value = attribute("bucket", nil)
+        case "aws_ses_domain_identity": value = attribute("domain", nil)
+        case "aws_key_pair": value = attribute("key_name", nil)
+        case "aws_db_instance": value = attribute("identifier", nil)
+        case "aws_elasticache_replication_group": value = attribute("replication_group_id", nil)
+        case "aws_elasticache_cluster": value = attribute("cluster_id", nil)
+        case "github_repository": value = attribute("full_name", nil) ?? attribute("name", nil)
+        case "github_team": value = attribute("name", nil)
+        case "datadog_monitor", "datadog_dashboard", "datadog_service_level_objective", "datadog_synthetics_test":
+            value = attribute("name", nil)
+        default: return nil
+        }
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count <= 48, trimmed != "(sensitive value)", trimmed != "null",
+              !trimmed.contains(where: { $0.isNewline }) else { return nil }
+        return trimmed
     }
 }
 
@@ -480,15 +516,33 @@ struct ResourceMapClassifier {
             let plain = resource.name.replacingOccurrences(of: "-", with: "_").split(separator: "_").map { String($0).capitalized }.joined(separator: " ")
             return (plain, id)
         }, by: { $0.0 }).mapValues(\.count)
+        func plain(_ resource: MapResource) -> String {
+            resource.name.replacingOccurrences(of: "-", with: "_").split(separator: "_").map { String($0).capitalized }.joined(separator: " ")
+        }
+        var identityTitleCounts: [String: Int] = [:]
+        for id in groups.keys {
+            guard let resource = by[id], (titleCounts[plain(resource)] ?? 0) > 1, let identity = resource.identity,
+                  identity.lowercased() != plain(resource).lowercased() else { continue }
+            identityTitleCounts[identity.lowercased(), default: 0] += 1
+        }
         let tiles: [MapTile] = groups.map { id, members in
             let anchorMembers = (anchorGroups[id] ?? []).sorted()
             let resource = by[id]!
             let words = resource.name.replacingOccurrences(of: "-", with: "_").split(separator: "_")
             let plainTitle = words.map { String($0).capitalized }.joined(separator: " ")
             let service = shortService(resource.type)
-            let title = (titleCounts[plainTitle] ?? 0) > 1 && !service.isEmpty ? "\(plainTitle) · \(service)" : plainTitle
+            let collides = (titleCounts[plainTitle] ?? 0) > 1
+            var title = collides && !service.isEmpty ? "\(plainTitle) · \(service)" : plainTitle
+            if collides, let identity = resource.identity, identity.lowercased() != plainTitle.lowercased() { title = identity }
             return MapTile(id: id, title: title, kind: anchorMembers.isEmpty ? .identityAndMonitoring : resourceKind(resource),
                            anchors: anchorMembers, resources: members.sorted())
+        }.map { tile -> MapTile in
+            // Two tiles can share one identity (a zone and its certificate); qualify those.
+            guard let resource = by[tile.id], let identity = resource.identity, tile.title == identity,
+                  (identityTitleCounts[identity.lowercased()] ?? 0) > 1 else { return tile }
+            let service = shortService(resource.type)
+            return service.isEmpty ? tile : MapTile(id: tile.id, title: "\(identity) · \(service)", kind: tile.kind,
+                                                    anchors: tile.anchors, resources: tile.resources)
         }.sorted { $0.kind == $1.kind ? $0.id < $1.id : $0.kind.rawValue < $1.kind.rawValue }
         let tileForResource = Dictionary(uniqueKeysWithValues: tiles.flatMap { tile in tile.resources.map { ($0, tile.id) } })
         var evidenceByPair: [String: [MapConnectionEvidence]] = [:]

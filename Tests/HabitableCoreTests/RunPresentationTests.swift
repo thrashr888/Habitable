@@ -77,3 +77,46 @@ final class RunPresentationTests: XCTestCase {
         XCTAssertEqual(state.expanded, [.outputs])
     }
 }
+
+final class MapTimelinePresentationTests: XCTestCase {
+    private var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.locale = Locale(identifier: "en_US_POSIX")
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal
+    }
+
+    private func date(_ month: Int, _ day: Int, hour: Int = 12) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour))!
+    }
+
+    private func clip(_ id: String, _ date: Date?, applied: Bool = true,
+                      added: Int? = nil, changed: Int? = nil, destroyed: Int? = nil) -> MapChangeClip {
+        MapChangeClip(id: id, title: id, date: date, status: applied ? "Applied" : "Planned",
+                      isApplied: applied, added: added, changed: changed, destroyed: destroyed, author: nil)
+    }
+
+    func testCountsSummaryFormatting() {
+        XCTAssertEqual(clip("a", nil, added: 14, changed: 2, destroyed: 1).countsSummary, "+14 ~2 \u{2212}1")
+        XCTAssertEqual(clip("a", nil, added: 3, changed: 0, destroyed: nil).countsSummary, "+3")
+        XCTAssertEqual(clip("a", nil, added: 0, changed: 0, destroyed: 0).countsSummary, "No changes")
+        XCTAssertEqual(clip("a", nil).countsSummary, "")
+        XCTAssertFalse(clip("a", nil).hasRecordedCounts)
+    }
+
+    func testSummaryWithAndWithoutAppliedClips() {
+        let clips = [clip("p", date(9, 1), applied: false), clip("a", date(9, 2)), clip("b", date(9, 9))]
+        XCTAssertEqual(MapTimelinePresentation.summary(for: clips, calendar: calendar), "2 applied since Sep 2")
+        XCTAssertEqual(MapTimelinePresentation.summary(for: [clips[0]], calendar: calendar), "No applied changes yet")
+        XCTAssertEqual(MapTimelinePresentation.summary(for: [], calendar: calendar), "No applied changes yet")
+    }
+
+    func testDateGroupsMergeSameDayAndKeepOrder() {
+        let clips = [clip("a", date(9, 2, hour: 9)), clip("b", date(9, 2, hour: 17)),
+                     clip("c", date(9, 9)), clip("d", nil)]
+        let groups = MapTimelinePresentation.dateGroups(for: clips, calendar: calendar)
+        XCTAssertEqual(groups.map(\.label), ["Sep 2", "Sep 9", "Undated"])
+        XCTAssertEqual(groups.map { $0.clips.map(\.id) }, [["a", "b"], ["c"], ["d"]])
+    }
+}
+

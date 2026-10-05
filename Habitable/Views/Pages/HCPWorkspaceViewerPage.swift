@@ -72,23 +72,9 @@ struct HCPWorkspaceViewer: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.task { await localConnections.refresh() }
             } else if model.isConnected {
-                HStack(spacing: 16) {
-                    organizationPicker.frame(maxWidth: 270)
-                    Button { showingWorkspaces.toggle() } label: { Label("Workspaces", systemImage: "square.grid.2x2") }
-                        .accessibilityLabel("Choose cloud workspace")
-                        .popover(isPresented: $showingWorkspaces) {
-                            workspaceColumn.padding(16).frame(width: 340, height: 480)
-                        }
-                    Spacer()
-                    Picker("Workspace view", selection: $section) {
-                        ForEach(HCPWorkspaceSection.allCases) { section in Text(section.rawValue).tag(section) }
-                    }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
-                }.padding(.bottom, 8)
                 if section == .map {
-                    Divider()
                     cloudMap.frame(minWidth: 550, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 } else if section == .variables {
-                    Divider()
                     HCPMapVariablesPanel(model: model).id(model.mapRequestKey)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -112,9 +98,40 @@ struct HCPWorkspaceViewer: View {
                 disconnectedState
             }
         }
-        .padding(16)
+        .padding(connectionOnly || section != .map ? 16 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .toolbar {
+            if !connectionOnly && model.isConnected {
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { showingWorkspaces.toggle() } label: {
+                        Label(model.selectedWorkspace?.name ?? "Choose workspace", systemImage: "square.grid.2x2")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .accessibilityLabel("Choose cloud workspace")
+                    .help("Choose an organization and workspace")
+                    .popover(isPresented: $showingWorkspaces) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            organizationPicker
+                            workspaceColumn
+                        }.padding(16).frame(width: 340, height: 520)
+                    }
+                    Picker("Workspace view", selection: Binding(get: { section == .variables ? .map : section },
+                                                              set: { section = $0 })) {
+                        Text("Map").tag(HCPWorkspaceSection.map)
+                        Text("Runs").tag(HCPWorkspaceSection.runs)
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 132)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Toggle(isOn: Binding(get: { section == .variables }, set: { section = $0 ? .variables : .map })) {
+                        Label("Variables", systemImage: "slider.horizontal.3")
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide workspace variables")
+                    .accessibilityLabel("Show workspace variables")
+                }
+            }
+        }
         .onChange(of: model.mapRequestKey) { _ in inspectorRequest = nil }
         .sheet(item: $inspectorRequest) { request in
             HCPMapResourceSheet(resources: model.mapSnapshot?.resources ?? [],
@@ -324,6 +341,7 @@ struct HCPWorkspaceViewer: View {
             Text("Choose a workspace to view its resource map.")
                 .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+        VStack(spacing: 0) {
         ResourceMapContent(title: model.selectedWorkspace?.name ?? "Choose a workspace",
             identity: model.mapRequestKey + "|" + (model.mapSnapshot?.versionID ?? ""),
             map: model.mapSnapshot?.map, resources: model.mapSnapshot?.resources ?? [],
@@ -341,6 +359,26 @@ struct HCPWorkspaceViewer: View {
             onShowHistory: { section = .runs },
             onShowVariables: { section = .variables })
         .task(id: model.mapRequestKey) { await model.refreshMap() }
+        Divider()
+        MapTimelineStrip(clips: remoteChangeClips, selectedID: model.selectedRunID,
+                         hint: model.runs.isEmpty ? "" : "Select a change to review its remote run",
+                         onSelect: { clip in
+                             runSelection.wrappedValue = clip.id
+                             section = .runs
+                         }, onShowAll: { section = .runs })
+        }
+        }
+    }
+
+    /// Loaded remote runs, oldest first. HCP run lists carry no per-run change
+    /// counts, so clips show their recorded status instead of inventing numbers.
+    private var remoteChangeClips: [MapChangeClip] {
+        model.runs.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }.map { run in
+            let status = run.status.replacingOccurrences(of: "_", with: " ").capitalized
+            let fallback = run.operation?.replacingOccurrences(of: "_", with: " ").capitalized ?? status
+            return MapChangeClip(id: run.id, title: run.message?.isEmpty == false ? run.message! : fallback,
+                                 date: run.createdAt, status: run.hasChanges == false ? "No changes" : status,
+                                 isApplied: run.status == "applied", added: nil, changed: nil, destroyed: nil, author: nil)
         }
     }
 

@@ -139,21 +139,23 @@ struct ResourceMapContent: View {
                 }
             }.frame(minHeight: 0, maxHeight: .infinity)
             Divider()
-            HStack(spacing: 16) {
+            HStack(spacing: 8) {
                 if map != nil {
-                    Label(search.isEmpty ? "\(tiles.count) groups" : "\(visibleTiles.count) of \(tiles.count) groups", systemImage: "square.grid.2x2")
-                    Text("\(tiles.reduce(0) { $0 + $1.resources.count }) managed resources")
+                    statusChip(count: tiles.reduce(0) { $0 + $1.resources.count }, label: "resources")
+                    statusChip(count: search.isEmpty ? tiles.count : visibleTiles.count,
+                               label: search.isEmpty ? "groups" : "of \(tiles.count) groups")
                     if let count = map?.dataSources.count, count > 0 {
-                        Button("\(count) data sources", action: onShowList).buttonStyle(.link)
+                        Button(action: onShowList) { statusChip(count: count, label: "data sources") }
+                            .buttonStyle(.plain).help("Open the data sources in List")
                     }
                     Spacer()
-                    Text("Current state").foregroundStyle(.tertiary)
+                    Text(notice ?? "This Mac · Current state").foregroundStyle(.tertiary)
                 } else {
                     Text(isLoading ? "Reading state…" : (errorMessage == nil ? "No recorded state" : "State unavailable"))
                     Spacer()
                 }
             }
-            .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.vertical, 10)
+            .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
         }
         .task(id: sourceIdentity) {
             sourceDeclaration = nil
@@ -182,18 +184,26 @@ struct ResourceMapContent: View {
         }
     }
 
+    /// One compact row: the window title already names the workspace, so the
+    /// Map keeps only its own controls (Exploration B).
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
                 Toggle(isOn: $showingInventory) { Image(systemName: "sidebar.left") }
                     .toggleStyle(.button).accessibilityLabel("Show resource inventory")
                     .help("Show or hide the resource inventory")
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.title2.weight(.semibold)).lineLimit(1)
-                    Text(notice ?? "This Mac · Current state")
-                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Find a resource or group", text: $search).textFieldStyle(.plain)
+                        .accessibilityLabel("Search map")
+                    if !search.isEmpty {
+                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).accessibilityLabel("Clear map search")
+                    }
                 }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                .frame(maxWidth: 360)
+                .help("Find a service, resource type or Terraform address. Arrows point to dependencies.")
                 Spacer()
                 Menu {
                     Button("100%") { canvasZoom = 1 }
@@ -209,28 +219,15 @@ struct ResourceMapContent: View {
                 Button(action: refresh) { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.bordered).disabled(!canRefresh)
                     .accessibilityLabel("Refresh map").help("Refresh map from Terraform state")
-                if let onShowVariables {
-                    Button(action: onShowVariables) { Label("Variables", systemImage: "slider.horizontal.3") }
-                        .buttonStyle(.bordered).accessibilityLabel("Open workspace variables")
-                } else if variablesPanel != nil {
+                // Variables and Inputs live in the window toolbar now (far right per the
+                // settled decision); the Map header keeps only its own controls.
+                if variablesPanel != nil {
                     Toggle(isOn: $showingVariables) { Label("Variables", systemImage: "rectangle.bottomthird.inset.filled") }
                         .toggleStyle(.button).help("Show or hide workspace variables")
                         .accessibilityLabel("Show workspace variables")
                 }
-            }
-            HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Find a resource or group", text: $search).textFieldStyle(.plain)
-                    .accessibilityLabel("Search map")
-                if !search.isEmpty {
-                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).accessibilityLabel("Clear map search")
-                }
-            }
-            .padding(8).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-            .help("Find a service, resource type or Terraform address. Arrows point to dependencies.")
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        .padding(.horizontal, 16).padding(.vertical, 8)
     }
 
     private var inventory: some View {
@@ -760,6 +757,19 @@ struct ResourceMapContent: View {
         selectedTileID = tile.id
         selectedMember = tile.anchors.first ?? tile.resources.first
     }
+    /// Status chips mirror the mock's "23 resources · 22 in sync" row. Only
+    /// recorded facts appear here; sync and drift are never inferred.
+    private func statusChip(count: Int, label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(count, format: .number).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.primary)
+            Text(label)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Color.primary.opacity(0.05), in: Capsule())
+        .overlay(Capsule().stroke(Color.primary.opacity(0.1), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+
     private func empty(_ title: String, detail: String, symbol: String) -> some View {
         VStack(spacing: 12) {
             Image(systemName: symbol).font(.system(size: 30)).foregroundStyle(.tertiary)

@@ -60,6 +60,25 @@ Final validation: native build installed in the existing stable Preview; **292 S
 
 Final live captures inspected: `/tmp/habitable-map-review/cloud-window-final.jpg`, `/tmp/habitable-map-review/cloud-variables-window-final.jpg`, `/tmp/habitable-map-review/local-window-final.jpg`, `/tmp/habitable-map-review/settings-window-final.jpg`. Private workspace screenshots remain local. The window boundary now matches the workspace-owned Map in Exploration B while following the user's newer cloud/local separation. Timeline, remote file/line provenance and visual acceptance retain their existing tracked gaps.
 
+## Exploration B window pass, October 5, 2026
+
+Compared against Refresh p7 (Exploration B: one workspace window, inventory left, Map as the viewer, Inspector right, Timeline along the bottom, compact title and a Map | List toggle) and the window-ownership decision of October 4.
+
+| Area | Reference | Now | Still open |
+| --- | --- | --- | --- |
+| Local window chrome | Compact title `acme-web / production · AWS us-west-2 · This Mac`, Map \| List | Native title is the folder; subtitle is `<terraform workspace> · <state location> · This Mac`. Toolbar: Map \| List, **Preview Changes** (prominent; "Preview and apply automatically" when auto-apply is on), Inputs, Changes, a Workspace menu (Overview, About, Source files, Outputs, Environment variables, Workspace settings), cloud link, Settings. The page sidebar is gone; secondary pages open in place with a **Map** back control (⌘[). | Inputs still opens the full Variables page rather than a sheet. Workspace Info is a menu, not a ⌘I panel. |
+| Cloud window chrome | Same single row with an HCP Terraform badge | One toolbar row: workspace chooser (organization picker + workspace list popover), Map \| Runs, Variables far right. Title is the workspace; subtitle `<organization> · HCP Terraform`. The Map header is one row: inventory toggle, search, zoom, connections, List, refresh. | Runs section layout unchanged from the three-column viewer. |
+| Timeline | `Changes · 12 applied since Sep 2`, date labels, clips with +add ~change −remove, selected clip in purple | Timeline strip at the bottom of both Maps built from recorded runs only: local clips carry recorded add/change/destroy counts; HCP clips show their recorded status because the run list carries no counts. Each card shows its day; selection scrolls into view and opens the run. | No map scrubbing: Habitable has no historical state versions and must not simulate them. HCP plan counts would need one plan request per run. |
+| Status chips | `23 resources · 22 in sync · 1 drifted` | Chips for resources, groups and data sources (data sources open List). | Sync/drift are not known from state and are not shown. |
+| Tile names | `app.acme.com · DNS record`, `TLS certificate`, `Uploads · S3` | Tiles whose plain name collides (every Rookery resource is named `rookery`) now take their state identity: `rookeryhq.com · DNS`, `rookeryhq.com · Certificate`, `rookeryhq.com · CDN`, bucket `rookery-prod-h48xufya`, key pair `rookery-prod`. Identities come only from redacted display attributes. | `Rookery · SES domain` style remains where no identity attribute exists; GitHub/Datadog grouping (PR #3) is included but not corpus-validated. |
+| Links between windows | Later user decision | Uninitialized cloud/remote declarations, tag/prefix selectors and reverse cloud→local folder links (PAUL-168). | Tag/prefix and uninitialized paths are unit-tested, not exercised on a real folder. |
+
+Validation: native build installed in the single stable Preview; full Swift suite **313 tests, 8 skipped, 0 failures**; Go helper tests pass. Live on Rookery: local window with the new toolbar and Changes page back control, cloud window single-row chrome, workspace chooser popover, identity tile titles, timeline strip with day labels and selection, HCP → Open local folder. Screenshots (local only): `/tmp/habitable-map-review/cloud-window-explorationB.jpg`, `/tmp/habitable-map-review/local-window-explorationB.jpg`.
+
+Test route: open the stable Preview → cloud window shows Rookery with one toolbar row; click the workspace name to change organization/workspace; toggle Map/Runs; Variables at far right; scroll the Changes strip and click a clip to land on that run; toolbar **Open local folder** opens `~/Workspace/Rookery/terraform` in a local window whose toolbar shows Map \| List, Preview Changes, Inputs, Changes, Workspace; **Changes** shows the page with a **Map** back control.
+
+Issue tracking moved to Linear on October 5, 2026: this pass is PAUL-169; Map acceptance remains PAUL-33.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.
