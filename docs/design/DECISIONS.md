@@ -43,3 +43,10 @@ Decisions Paul made for the Habitable design refresh, October 2026. Treat these 
 - **Kubernetes and Helm resources are Apps & AI.**
 - The Library system map links workspaces by **shared resource IDs across local state copies and HCP states**, because HCP workspace links are not widely used. `tfe_outputs` and remote state reads confirm links.
 - **No corrections layer.** Terraform state (HCP Terraform, or the local state file) is the only source of truth. A misplaced tile is a classifier bug. Only view preferences (layout, zoom) are stored locally.
+
+## Later user refinements (October 4, 2026)
+
+- Hide empty kind sections entirely, including when filtering; this supersedes exploratory empty-band explanations.
+- Product flows use real user infrastructure, not sample cloud maps. New-workspace creation stays separate.
+- Connections holds HCP/TFE and local AWS/Azure/Google access. Organization selection is in the workspace top navigation, and Variables is a hide/show control at the far right.
+- Keep the map readable at native size; compare to the original exploration before calling a page ready. See [design acceptance](DESIGN-ACCEPTANCE.md) for the current comparison and review gate.

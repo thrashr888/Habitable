@@ -86,3 +86,7 @@ bd close <id>         # Complete work
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+## Design refresh verification
+
+For UI work, read `docs/design/DESIGN-ACCEPTANCE.md` and the relevant original exploration before editing. Compare the final running app to that reference and the user's later decisions before handoff. Preserve the accepted overrides recorded there. Passing tests/builds alone is not design acceptance. Use the single stable Habitable Preview, real workspaces for product flows, and screenshot-backed verification; report remaining mismatches in beads.
