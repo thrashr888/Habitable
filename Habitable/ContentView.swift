@@ -29,7 +29,7 @@ extension FocusedValues {
 
 struct ContentView: View {
     enum NavigationItem: String {
-        case map, workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings, hcpTerraform
+        case map, workspace, readme, configuration, runs, resources, outputs, variables, envVariables, settings, hcpTerraform, hcpConnection
 
         var title: String {
             switch self {
@@ -44,6 +44,7 @@ struct ContentView: View {
             case .envVariables: "Environment Variables"
             case .settings: "Settings"
             case .hcpTerraform: "HCP Terraform"
+            case .hcpConnection: "Terraform connection"
             }
         }
 
@@ -68,6 +69,7 @@ struct ContentView: View {
     @StateObject private var hcpViewer = HCPWorkspaceViewerModel()
     @StateObject private var agentAccess = HabitableAgentAccess()
     @StateObject private var windowIdentity = WorkspaceTitlebarController()
+    private var isHCPSelection: Bool { selection == .hcpTerraform || selection == .hcpConnection }
     @State private var selection: NavigationItem? = .map
     @State private var selectedRun: UUID?
     @State private var selectedRunDetail: TerraformRun?
@@ -117,7 +119,7 @@ struct ContentView: View {
         }
         .onDisappear { agentAccess.setEnabled(false, in: workspace) }
         .onChange(of: selection) { page in
-            if page == .hcpTerraform { agentAccess.setEnabled(false, in: workspace) }
+            if (page == .hcpTerraform || page == .hcpConnection) { agentAccess.setEnabled(false, in: workspace) }
         }
         .onChange(of: selectedRun) { id in
             selectedRunDetail = workspace.runs.first { $0.id == id }
@@ -144,8 +146,8 @@ struct ContentView: View {
     private var configuredWindowContent: some View {
         windowContent
         .background(WorkspaceWindowIdentity(controller: windowIdentity, title: workspaceName,
-                                            sidebarVisible: sidebarVisible && (workspace.workingDirectory != nil || selection == .hcpTerraform),
-                                            hasWorkspace: workspace.workingDirectory != nil || selection == .hcpTerraform,
+                                            sidebarVisible: sidebarVisible && (workspace.workingDirectory != nil || isHCPSelection),
+                                            hasWorkspace: workspace.workingDirectory != nil || isHCPSelection,
                                             toggleSidebar: { sidebarVisible.toggle() }))
         .environmentObject(workspace)
         .environmentObject(editors)
@@ -160,7 +162,7 @@ struct ContentView: View {
 
     private var windowContent: some View {
         Group {
-            if workspace.workingDirectory == nil && selection != .hcpTerraform {
+            if workspace.workingDirectory == nil && !isHCPSelection {
                 BlankSlateView(recentFolders: recentWorkspaces.folders,
                                onChooseFolder: openFolder,
                                onOpenRecent: openRecent,
@@ -204,7 +206,7 @@ struct ContentView: View {
             openRecent: openRecent,
             clearRecents: recentWorkspaces.clear,
             plan: {
-                guard selection != .hcpTerraform else { return }
+                guard !isHCPSelection else { return }
                 workspace.validateAndQueueRun(onCreated: { id in
                     selectedRun = id
                     navigationSelection.wrappedValue = .runs
@@ -212,16 +214,17 @@ struct ContentView: View {
             },
             initialize: workspace.initialize,
             validate: workspace.validate,
-            canPlan: selection != .hcpTerraform && workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
+            canPlan: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
                 && workspace.historyError == nil && !workspace.isInspectingInputs && !workspace.hasUnavailableRememberedInputs,
-            canInitialize: selection != .hcpTerraform && workspace.workingDirectory != nil && !workspace.locked,
-            canValidate: selection != .hcpTerraform && workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
+            canInitialize: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked,
+            canValidate: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
             planTitle: workspace.autoApply ? "Plan and apply automatically" : "Plan"
         )
     }
 
     private var workspaceName: String {
-        if selection == .hcpTerraform {
+        if selection == .hcpConnection { return "Connections" }
+        if isHCPSelection {
             return hcpViewer.selectedWorkspace.map { "\($0.name) · \(hcpViewer.selectedOrganization)" } ?? "HCP Terraform"
         }
         guard let directory = workspace.workingDirectory else { return "Habitable" }
@@ -242,11 +245,12 @@ struct ContentView: View {
             Label("Settings", systemImage: "gear").tag(NavigationItem.settings)
             Divider()
             Label("HCP Terraform", systemImage: "cloud").tag(NavigationItem.hcpTerraform)
+            Label("Connections", systemImage: "network").tag(NavigationItem.hcpConnection)
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
-                if selection == .hcpTerraform {
+                if isHCPSelection {
                     Label(hcpViewer.isConnected ? "HCP · Connected" : "HCP disconnected", systemImage: "cloud")
                 } else if workspace.locked {
                     ProgressView().controlSize(.small)
@@ -334,7 +338,10 @@ struct ContentView: View {
         case .variables: VariableListPage(showMissingOnly: showMissingInputs)
         case .envVariables: EnvVarListPage()
         case .settings: SettingsListPage(catalog: releaseCatalog, agentAccess: agentAccess)
-        case .hcpTerraform: HCPWorkspaceViewer(model: hcpViewer)
+        case .hcpConnection: HCPWorkspaceViewer(model: hcpViewer, connectionOnly: true,
+                onOpenWorkspaces: { navigationSelection.wrappedValue = .hcpTerraform })
+        case .hcpTerraform: HCPWorkspaceViewer(model: hcpViewer,
+                onOpenConnections: { navigationSelection.wrappedValue = .hcpConnection })
                 .onAppear { hcpViewer.setVisible(true) }
                 .onDisappear { hcpViewer.setVisible(false) }
         default: WorkspacePage(onReviewRun: { id in
@@ -355,7 +362,7 @@ struct ContentView: View {
         Binding(get: { selection }, set: { page in
             guard page != selection else { return }
             if let page {
-                UserDefaults.standard.set(page == .hcpTerraform, forKey: "lastWorkspaceSourceWasHCP")
+                UserDefaults.standard.set(page == .hcpTerraform || page == .hcpConnection, forKey: "lastWorkspaceSourceWasHCP")
             }
             if page != .variables { showMissingInputs = false }
             navigationTrace.begin(page: page?.rawValue ?? "workspace")

@@ -60,3 +60,11 @@ Validation: native Debug build passes; full suite passes 261 tests, 8 skipped, z
 Screenshots are local review artifacts, not uploaded to the repository: `/tmp/habitable-map-review/rookery-map-panels.png`, `/tmp/habitable-map-review/rookery-map-panels-hidden.png`, and `/tmp/habitable-map-review/sensitive-variable-editor.png`. The variable panel screenshot is filtered to a sensitive variable so it contains no variable value.
 
 User test route: use the existing Habitable Preview on HCP/Rookery; toggle Workspaces and Variables; clear the variable filter; switch workspaces and confirm both map and variables follow; select a tile and close the inspector; edit a value then Cancel. For a variable change you actually intend, choose Save to HCP Terraform, refresh, and verify the value in HCP. That real write/readback remains unperformed by agent QA. The broader Map design acceptance and port/routing refinement remain open.
+
+## Separate connection navigation
+
+Moved hostname, credential import, connect/disconnect and connection refresh to a dedicated Connections sidebar page. The connected workspace browser now puts the organization picker in its top navigation row. Variables is the far-right Map toolbar control. Custom Terraform Enterprise hostnames remain supported; multiple saved connection profiles are tracked separately in Habitable-e04.
+
+Validation: native Debug build passed; 32 HCPWorkspaceViewer tests passed with zero failures; diff check passed. Live inspection of the rebuilt stable Habitable Preview covered disconnected Map to Connections, connection using the existing credential, Open workspaces returning to real ethertext data (3 groups, 10 managed resources, 1 data source), opening the top organization menu, and workspace sidebar visibility. The Map screenshot confirms the connection form is absent and Variables is rightmost. No real variable or infrastructure changes were made.
+
+Final-build screenshots: `/tmp/habitable-map-review/connections-page.png` and `/tmp/habitable-map-review/compact-map-navigation.png`. User test route: Connections, Open workspaces, select an organization/workspace, then toggle the far-right Variables control. Overall Map visual acceptance remains open.
