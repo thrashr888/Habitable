@@ -133,3 +133,65 @@ struct MapTimelineStrip: View {
         return parts.joined(separator: ", ")
     }
 }
+
+/// The Changes face of the Map's right pane: the same recorded runs as the
+/// Timeline strip, newest first, one row each.
+struct MapChangesList: View {
+    let clips: [MapChangeClip]          // chronological, oldest first (same input as the strip)
+    let selectedID: String?
+    let onSelect: (MapChangeClip) -> Void
+    var onShowAll: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if clips.isEmpty {
+                Text("No changes recorded yet. Preview Changes starts the first one.")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(clips.reversed()) { clip in
+                            Button { onSelect(clip) } label: { row(clip) }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Change: \(clip.title), \(clip.countsSummary.isEmpty ? clip.status : clip.countsSummary)")
+                            Divider().padding(.leading, 16)
+                        }
+                    }
+                }
+            }
+            if let onShowAll {
+                Divider()
+                Button("All changes", action: onShowAll).buttonStyle(.link).font(.system(size: 13))
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 10)
+            }
+        }
+    }
+
+    private func row(_ clip: MapChangeClip) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle().fill(statusColor(clip)).frame(width: 8, height: 8).padding(.top, 6)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(clip.title).font(.system(size: 13, weight: .medium)).lineLimit(2)
+                HStack(spacing: 6) {
+                    if let date = clip.date { Text(date, format: .relative(presentation: .named)) }
+                    if clip.hasRecordedCounts { Text("·"); Text(clip.countsSummary) } else { Text("·"); Text(clip.status) }
+                }.font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selectedID == clip.id ? Color.accentColor.opacity(0.15) : .clear)
+        .contentShape(Rectangle())
+    }
+
+    private func statusColor(_ clip: MapChangeClip) -> Color {
+        if clip.isApplied { return .green }
+        switch clip.status.lowercased() {
+        case let s where s.contains("error"): return .red
+        case let s where s.contains("planning") || s.contains("applying") || s.contains("pending") || s.contains("confirmed"): return .orange
+        default: return .secondary
+        }
+    }
+}

@@ -12,7 +12,6 @@ struct HCPWorkspaceViewer: View {
     let connectionOnly: Bool
     let onOpenConnections: () -> Void
     let onOpenWorkspaces: () -> Void
-    @StateObject private var localConnections = LocalCloudConnectionsModel()
     @State private var workspaceSearch = ""
     @State private var section: HCPWorkspaceSection = .map
     @State private var showingWorkspaces = false
@@ -34,43 +33,7 @@ struct HCPWorkspaceViewer: View {
     var body: some View {
         VStack(spacing: 0) {
             if connectionOnly {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        Text("Connections").font(.largeTitle.weight(.semibold))
-                        GroupBox {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("HCP Terraform & Terraform Enterprise").font(.title3.weight(.semibold))
-                                Text("Browse remote workspace state and runs.").foregroundStyle(.secondary)
-                                connectionPanel
-                                if model.isConnected {
-                                    Button("Open workspaces", action: onOpenWorkspaces).buttonStyle(.borderedProminent)
-                                }
-                            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        HStack {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Local cloud access").font(.title2.weight(.semibold))
-                                Text("Uses your existing CLI sign-ins for local Terraform workflows.")
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if localConnections.isRefreshing { ProgressView().controlSize(.small) }
-                            Button("Refresh cloud connections") { Task { await localConnections.refresh() } }
-                                .disabled(localConnections.isRefreshing || localConnections.connectingID != nil)
-                        }
-                        ForEach(localConnections.connections) { connection in
-                            LocalCloudConnectionCard(connection: connection, isRefreshing: localConnections.isRefreshing,
-                                                     isConnecting: localConnections.connectingID == connection.id,
-                                                     canConnect: localConnections.canConnect(connection.id),
-                                                     loginMessage: localConnections.loginMessages[connection.id]) {
-                                Task { await localConnections.connect(connection.id) }
-                            }
-                        }
-                        Text("Authentication checks do not run a plan or change infrastructure. Provider settings in each workspace determine which profile, subscription, and project Terraform uses.")
-                            .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }.padding(16).frame(maxWidth: 980, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }.task { await localConnections.refresh() }
+                ConnectionsPane(model: model, onOpenWorkspaces: onOpenWorkspaces)
             } else if model.isConnected {
                 if section == .map {
                     cloudMap.frame(minWidth: 550, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
@@ -180,50 +143,6 @@ struct HCPWorkspaceViewer: View {
             .labelsHidden().lineLimit(1).accessibilityLabel("HCP Terraform organization")
             .help(model.hostname)
         }
-    }
-
-    private var connectionPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            LazyVGrid(columns: [GridItem(.flexible(minimum: 160), alignment: .leading),
-                                GridItem(.flexible(minimum: 160), alignment: .leading)],
-                      alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Hostname").font(.system(size: 12)).foregroundStyle(.secondary)
-                    TextField("app.terraform.io", text: $model.hostname)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel("HCP Terraform hostname")
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Organization").font(.system(size: 12)).foregroundStyle(.secondary)
-                    organizationPicker
-                }
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(model.isConnected ? model.connectionSummary : "Credentials are stored in Keychain.")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                if model.isConnected {
-                    Button("Refresh") { Task { await model.refreshWorkspaces() } }
-                        .disabled(model.isLoading)
-                    Button("Disconnect") { model.disconnect() }
-                } else {
-                    Button("Import CLI credential") { Task { await model.importTerraformCredentialFile() } }
-                        .help("Import the Terraform CLI credential into Keychain")
-                        .disabled(model.isImporting || model.hostname.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "app.terraform.io")
-                    Button("Connect") { Task { await model.connect() } }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(model.isLoading || !model.hasStoredCredential)
-                }
-            }
-            .buttonStyle(.borderless)
-            if model.isImporting {
-                Label("Importing credential into Keychain…", systemImage: "key.fill")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.bottom, 12)
     }
 
     /// Keep the selected workspace represented when search narrows the menu.
@@ -359,7 +278,8 @@ struct HCPWorkspaceViewer: View {
             stateCreatedAt: model.mapSnapshot?.stateCreatedAt,
             stateSerial: model.mapSnapshot?.stateSerial,
             onShowHistory: { section = .runs },
-            onShowVariables: { section = .variables })
+            onShowVariables: { section = .variables },
+            sideFaces: remoteSideFaces)
         .task(id: model.mapRequestKey) { await model.refreshMap() }
         Divider()
         MapTimelineStrip(clips: remoteChangeClips, selectedID: model.selectedRunID,
@@ -370,6 +290,23 @@ struct HCPWorkspaceViewer: View {
                          }, onShowAll: { section = .runs })
         }
         }
+    }
+
+    /// Runs and Variables ride the cloud Map's inspector as faces (DESIGN.md §2).
+    private var remoteSideFaces: [MapSideFace] {
+        [
+            MapSideFace(id: "runs", title: "Runs", count: model.runs.isEmpty ? nil : model.runs.count) {
+                MapChangesList(clips: remoteChangeClips, selectedID: model.selectedRunID,
+                               onSelect: { clip in
+                                   runSelection.wrappedValue = clip.id
+                                   section = .runs
+                               }, onShowAll: { section = .runs })
+            },
+            MapSideFace(id: "variables", title: "Variables",
+                        count: model.workspaceVariables.isEmpty ? nil : model.workspaceVariables.count) {
+                RemoteVariablesFace(model: model, onOpen: { section = .variables })
+            }
+        ]
     }
 
     /// Loaded remote runs, oldest first. HCP run lists carry no per-run change
@@ -840,52 +777,59 @@ private struct HCPMapResourceSheet: View {
 
 }
 
-
-private struct LocalCloudConnectionCard: View {
-    let connection: LocalCloudConnection
-    let isRefreshing: Bool
-    let isConnecting: Bool
-    let canConnect: Bool
-    let loginMessage: String?
-    let onConnect: () -> Void
-    @State private var copied = false
+/// Compact Variables face for the cloud Map. Masked values stay masked;
+/// editing happens on the Variables page.
+private struct RemoteVariablesFace: View {
+    @ObservedObject var model: HCPWorkspaceViewerModel
+    let onOpen: () -> Void
 
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(connection.name).font(.title3.weight(.semibold))
-                    Spacer()
-                    Label(isRefreshing ? "Checking…" : connection.status,
-                          systemImage: isRefreshing ? "clock" : (connection.isAuthenticated ? "checkmark.circle.fill" : "exclamationmark.circle"))
-                        .foregroundStyle(connection.isAuthenticated && !isRefreshing ? Color.green : Color.secondary)
-                }
-                HStack(spacing: 12) {
-                    Button(connection.isAuthenticated ? "Connected" : isConnecting ? "Connecting…" : "Connect", action: onConnect)
-                        .buttonStyle(.borderedProminent).disabled(!canConnect)
-                        .accessibilityLabel("Connect \(connection.name)")
-                    if isConnecting { ProgressView().controlSize(.small) }
-                    if let loginMessage {
-                        Text(loginMessage).font(.system(size: 13)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else if !connection.isAuthenticated {
-                        Text("Opens Terminal and your browser to sign in.").font(.system(size: 13)).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            if model.isLoadingVariables && model.workspaceVariables.isEmpty {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = model.variablesError, model.workspaceVariables.isEmpty {
+                Text(error).font(.system(size: 13)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
+            } else if model.workspaceVariables.isEmpty {
+                Text("This workspace has no variables.").font(.system(size: 13)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.workspaceVariables) { variable in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(variable.key).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                        .lineLimit(1).truncationMode(.middle)
+                                    Spacer(minLength: 4)
+                                    Text(variable.category == "env" ? "Environment" : "Terraform")
+                                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                                }
+                                if variable.isMaskedForDisplay {
+                                    Label("Private value · hidden", systemImage: "lock.fill")
+                                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                                } else {
+                                    Text(variable.value?.isEmpty == false ? variable.value! : "Empty value")
+                                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture(perform: onOpen)
+                            .accessibilityElement(children: .combine)
+                            Divider().padding(.leading, 16)
+                        }
                     }
                 }
-                ForEach(Array(connection.details.enumerated()), id: \.offset) { _, detail in
-                    Text(detail).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(spacing: 12) {
-                    Text(connection.loginCommand).font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    Button(copied ? "Copied" : "Copy sign-in command") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(connection.loginCommand, forType: .string)
-                        copied = true
-                    }.accessibilityLabel("Copy \(connection.name) sign-in command")
-                }.padding(10).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Divider()
+            Button("Open Variables", action: onOpen).buttonStyle(.link).font(.system(size: 13))
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 10)
+        }
+        .task(id: model.mapRequestKey) {
+            if model.workspaceVariables.isEmpty, !model.isLoadingVariables { await model.refreshVariables() }
         }
     }
 }

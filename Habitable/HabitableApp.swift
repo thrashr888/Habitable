@@ -128,14 +128,9 @@ private struct ConnectionsSettingsWindow: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        HCPWorkspaceViewer(model: model, connectionOnly: true,
-            onOpenWorkspaces: { openWindow(id: "HCP.browser") })
-            .navigationTitle("Settings · Connections")
-            .toolbar {
-                ToolbarItemGroup {
-                    Button { openWindow(id: "HCP.browser") } label: { Label("Cloud workspaces", systemImage: "cloud") }
-                    Button { openWindow(id: "Workspace.viewer") } label: { Label("Local workspace", systemImage: "folder") }
-                }
-            }
+        SettingsWindow(model: model,
+            onOpenWorkspaces: { openWindow(id: "HCP.browser") },
+            onOpenLocalWorkspace: { openWindow(id: "Workspace.viewer") })
+            .navigationTitle("Settings")
     }
 }
