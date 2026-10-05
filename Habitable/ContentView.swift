@@ -58,7 +58,8 @@ struct ContentView: View {
     init() {
         let restoreHCP = UserDefaults.standard.bool(forKey: "lastWorkspaceSourceWasHCP")
         _workspace = StateObject(wrappedValue: Workspace(restoreLastDirectory: !restoreHCP))
-        _selection = State(initialValue: restoreHCP ? .hcpTerraform : .map)
+        _selection = State(initialValue: .map)
+        _workspaceSourceIsHCP = State(initialValue: restoreHCP)
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
@@ -69,8 +70,11 @@ struct ContentView: View {
     @StateObject private var hcpViewer = HCPWorkspaceViewerModel()
     @StateObject private var agentAccess = HabitableAgentAccess()
     @StateObject private var windowIdentity = WorkspaceTitlebarController()
-    private var isHCPSelection: Bool { selection == .hcpTerraform || selection == .hcpConnection }
+    private var isHCPSelection: Bool {
+        selection == .hcpTerraform || selection == .hcpConnection || (selection == .map && workspaceSourceIsHCP)
+    }
     @State private var selection: NavigationItem? = .map
+    @State private var workspaceSourceIsHCP = false
     @State private var selectedRun: UUID?
     @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
@@ -92,6 +96,7 @@ struct ContentView: View {
         .onChange(of: workspace.workingDirectory) { directory in
             agentAccess.workspaceChanged(in: workspace)
             if let directory, isAvailableDirectory(directory) {
+                setWorkspaceSource(isHCP: false)
                 recentWorkspaces.recordSuccessfulOpen(directory)
                 navigationSelection.wrappedValue = .map
             }
@@ -119,7 +124,7 @@ struct ContentView: View {
         }
         .onDisappear { agentAccess.setEnabled(false, in: workspace) }
         .onChange(of: selection) { page in
-            if (page == .hcpTerraform || page == .hcpConnection) { agentAccess.setEnabled(false, in: workspace) }
+            if isHCPSelection { agentAccess.setEnabled(false, in: workspace) }
         }
         .onChange(of: selectedRun) { id in
             selectedRunDetail = workspace.runs.first { $0.id == id }
@@ -212,8 +217,8 @@ struct ContentView: View {
                     navigationSelection.wrappedValue = .runs
                 })
             },
-            initialize: workspace.initialize,
-            validate: workspace.validate,
+            initialize: { if !isHCPSelection { workspace.initialize() } },
+            validate: { if !isHCPSelection { workspace.validate() } },
             canPlan: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
                 && workspace.historyError == nil && !workspace.isInspectingInputs && !workspace.hasUnavailableRememberedInputs,
             canInitialize: !isHCPSelection && workspace.workingDirectory != nil && !workspace.locked,
@@ -326,6 +331,11 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
+        case .map where workspaceSourceIsHCP:
+            HCPWorkspaceViewer(model: hcpViewer,
+                onOpenConnections: { navigationSelection.wrappedValue = .hcpConnection })
+                .onAppear { hcpViewer.setVisible(true) }
+                .onDisappear { hcpViewer.setVisible(false) }
         case .map: ResourceMapPage(onShowVariables: { navigationSelection.wrappedValue = .variables },
                                     onShowList: { navigationSelection.wrappedValue = .resources },
                                     onOpenResource: { address in
@@ -361,8 +371,10 @@ struct ContentView: View {
     private var navigationSelection: Binding<NavigationItem?> {
         Binding(get: { selection }, set: { page in
             guard page != selection else { return }
-            if let page {
-                UserDefaults.standard.set(page == .hcpTerraform || page == .hcpConnection, forKey: "lastWorkspaceSourceWasHCP")
+            if page == .hcpTerraform {
+                setWorkspaceSource(isHCP: true)
+            } else if page != .map, page != .hcpConnection, page != nil {
+                setWorkspaceSource(isHCP: false)
             }
             if page != .variables { showMissingInputs = false }
             navigationTrace.begin(page: page?.rawValue ?? "workspace")
@@ -370,6 +382,11 @@ struct ContentView: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) { selection = page }
         })
+    }
+
+    private func setWorkspaceSource(isHCP: Bool) {
+        workspaceSourceIsHCP = isHCP
+        UserDefaults.standard.set(isHCP, forKey: "lastWorkspaceSourceWasHCP")
     }
 
     private func openDeclaration(_ file: String, _ line: Int) {

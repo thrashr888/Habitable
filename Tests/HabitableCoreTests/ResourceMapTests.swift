@@ -13,6 +13,7 @@ final class ResourceMapTests: XCTestCase {
         for (type, kind) in [("aws_s3_bucket", MapKind.data), ("aws_lambda_function", .appsAndAI),
                              ("aws_sqs_queue", .messaging), ("aws_iam_role", .identityAndMonitoring),
                              ("google_compute_network", .network), ("google_compute_backend_service", .frontDoor),
+                             ("aws_eip", .network),
                              ("kubernetes_secret", .appsAndAI), ("helm_release", .appsAndAI),
                              ("custom_bucket", .data), ("custom_mystery", .other)] {
             XCTAssertEqual(classifier.kind(for: type), kind, type)
@@ -45,6 +46,53 @@ final class ResourceMapTests: XCTestCase {
     func testGenericNamesRemainSeparateAndSemanticStemsMerge() throws {
         XCTAssertEqual(try classifier.classify([r("aws_s3_bucket"), r("aws_db_instance")]).tiles.count, 2)
         XCTAssertEqual(try classifier.classify([r("aws_s3_bucket", "chat_data_primary"), r("aws_s3_bucket", "chat_data_secondary")]).tiles.count, 1)
+    }
+
+    func testAWSWorkloadSupportOwnershipAndProviderNeutralFallback() throws {
+        let asg = r("aws_autoscaling_group", "rookery")
+        let launch = r("aws_launch_template", "rookery", deps: [asg.address])
+        let role = r("aws_iam_role", "rookery", deps: [asg.address])
+        let security = r("aws_security_group", "rookery", deps: [asg.address])
+        let database = r("aws_db_instance", "rookery", deps: ["aws_db_subnet_group.rookery"])
+        let dbSubnets = r("aws_db_subnet_group", "rookery", deps: [database.address])
+        let cache = r("aws_elasticache_cluster", "rookery", deps: ["aws_elasticache_subnet_group.rookery"])
+        let cacheSubnets = r("aws_elasticache_subnet_group", "rookery", deps: [cache.address])
+        let cert = r("aws_acm_certificate", "rookery")
+        let cdn = r("aws_cloudfront_distribution", "rookery")
+        let dns = r("aws_route53_zone", "rookery")
+        let email = r("aws_ses_domain_identity", "rookery")
+        let bucket = r("aws_s3_bucket", "rookery")
+        let vpc = r("aws_vpc", "rookery", module: "module.network")
+        let eip = r("aws_eip", "rookery", module: "module.address")
+        let github = r("github_repository", "rookery")
+        let monitor = r("datadog_monitor", "rookery")
+
+        let map = try classifier.classify([asg, launch, role, security, database, dbSubnets,
+                                           cache, cacheSubnets, cert, cdn, dns, email, bucket,
+                                           github, monitor, vpc, eip])
+        func tile(containing address: String) throws -> MapTile {
+            try XCTUnwrap(map.tiles.first { $0.resources.contains(address) })
+        }
+        XCTAssertEqual(try tile(containing: asg.address).kind, .appsAndAI)
+        XCTAssertEqual(try tile(containing: launch.address).id, asg.address)
+        XCTAssertEqual(try tile(containing: role.address).id, asg.address)
+        XCTAssertEqual(try tile(containing: security.address).id, asg.address)
+        XCTAssertEqual(try tile(containing: dbSubnets.address).id, database.address)
+        XCTAssertEqual(try tile(containing: cacheSubnets.address).id, cache.address)
+        XCTAssertNotEqual(try tile(containing: database.address).id, try tile(containing: cache.address).id)
+        XCTAssertEqual(try tile(containing: github.address).kind, .other)
+        XCTAssertEqual(try tile(containing: monitor.address).kind, .other)
+        XCTAssertTrue([cert, cdn, dns, email, bucket].allSatisfy { resource in
+            (try? tile(containing: resource.address).title.contains("·")) == true
+        })
+        XCTAssertEqual(try tile(containing: cert.address).title, "Rookery · Certificate")
+        XCTAssertEqual(try tile(containing: cdn.address).title, "Rookery · CDN")
+        XCTAssertEqual(try tile(containing: dns.address).title, "Rookery · DNS")
+        XCTAssertEqual(try tile(containing: email.address).title, "Rookery · SES domain")
+        XCTAssertEqual(try tile(containing: bucket.address).title, "Rookery · Bucket")
+        XCTAssertEqual(try tile(containing: vpc.address).title, "Rookery · Network")
+        XCTAssertEqual(try tile(containing: eip.address).title, "Rookery · Network")
+        XCTAssertEqual(Set(map.tiles.flatMap(\.resources)).count, 17)
     }
 
     func testAllResourcesAccountedForIncludingUnknownAndData() throws {
@@ -183,7 +231,7 @@ final class ResourceMapTests: XCTestCase {
 
     func testCanvasLayoutOmitsAllEmptyBands() {
         let layout = MapCanvasLayout(map: ResourceMap(tiles: [], connections: [], dataSources: []), width: 300)
-        XCTAssertEqual(layout.width, 680)
+        XCTAssertEqual(layout.width, 580)
         XCTAssertTrue(layout.bands.isEmpty)
         XCTAssertEqual(layout.height, 0)
         XCTAssertTrue(layout.tiles.isEmpty)
@@ -195,7 +243,7 @@ final class ResourceMapTests: XCTestCase {
         )
         XCTAssertEqual(withOther.bands.map(\.kind), [.other])
         XCTAssertEqual(withOther.bands.first?.y, 0)
-        XCTAssertEqual(withOther.bands.last?.height, 178)
+        XCTAssertEqual(withOther.bands.last?.height, 170)
     }
 
     func testWorkspaceReferencesUseOnlyExplicitRemoteStateDependencies() throws {

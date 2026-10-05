@@ -89,6 +89,7 @@ struct ResourceMapContent: View {
     var emptyDetail = "Resources appear here after they are recorded in Terraform state. You can still inspect configuration, inputs, and outputs in the sidebar."
     var variablesPanel: AnyView? = nil
     @State private var showingVariables = false
+    @State private var showingInventory = true
     @State private var selectedTileID: String?
     @State private var selectedMember: String?
     @State private var search = ""
@@ -112,6 +113,9 @@ struct ResourceMapContent: View {
             header
             Divider()
             HSplitView {
+                if showingInventory, !tiles.isEmpty {
+                    inventory.frame(minWidth: 170, idealWidth: 195, maxWidth: 235, minHeight: 0, maxHeight: .infinity)
+                }
                 canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 if selectedTile != nil {
                     inspector.frame(minWidth: 270, idealWidth: 310, maxWidth: 390, maxHeight: .infinity)
@@ -151,13 +155,16 @@ struct ResourceMapContent: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Toggle(isOn: $showingInventory) { Image(systemName: "sidebar.left") }
+                    .toggleStyle(.button).accessibilityLabel("Show resource inventory")
+                    .help("Show or hide the resource inventory")
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.title2.weight(.semibold)).lineLimit(1)
-                    Label("Resource map", systemImage: "square.grid.3x3")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text(notice ?? "This Mac · Current state")
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Menu {
@@ -193,13 +200,53 @@ struct ResourceMapContent: View {
                 }
             }
             .padding(8).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-            Text("Arrows point to Terraform dependencies. Select a tile to inspect its resources.")
-                .font(.caption).foregroundStyle(.secondary)
-            if let notice {
-                Label(notice, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
-            }
+            .help("Find a service, resource type or Terraform address. Arrows point to dependencies.")
         }
-        .padding(20)
+        .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    private var inventory: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                let endpointTiles = visibleTiles.filter { !presentation(for: $0).endpoints.isEmpty }
+                if !endpointTiles.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Endpoints").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                        ForEach(endpointTiles, id: \.id) { tile in
+                            if let endpoint = presentation(for: tile).endpoints.first {
+                                Button { select(tile) } label: {
+                                    Label(endpoint.value, systemImage: "arrow.up.right")
+                                        .font(.callout).lineLimit(1).truncationMode(.middle)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }.buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                                    .help("\(tile.title) · \(endpoint.value)")
+                                    .accessibilityLabel("Inspect endpoint for \(tile.title)")
+                            }
+                        }
+                    }.padding(.horizontal, 8)
+                }
+                ForEach(MapKind.allCases.filter { kind in visibleTiles.contains { $0.kind == kind } }, id: \.rawValue) { kind in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(kind.title).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                        ForEach(visibleTiles.filter { $0.kind == kind }, id: \.id) { tile in
+                            Button { select(tile) } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: symbol(for: tile)).foregroundStyle(tile.kind.color).frame(width: 16)
+                                    Text(tile.title).font(.callout).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("\(tile.resources.count)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                                }.padding(8).contentShape(Rectangle())
+                                    .background(selectedTileID == tile.id ? Color.accentColor.opacity(0.17) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                            }.buttonStyle(.plain).accessibilityLabel("Inspect \(tile.title)")
+                        }
+                    }
+                }
+            }.padding(12)
+        }.background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func presentation(for tile: MapTile) -> MapResourcePresentation {
+        MapResourcePresentation.summarize(tile: tile, resources: resources)
     }
 
     private var canvas: some View {
@@ -237,12 +284,23 @@ struct ResourceMapContent: View {
                         }.frame(width: viewport.size.width)
                     } else {
                         let filteredMap = ResourceMap(tiles: visibleTiles, connections: map?.connections ?? [], dataSources: [])
-                        let layout = MapCanvasLayout(map: filteredMap, width: max(680, (viewport.size.width - 24) / canvasZoom))
+                        let layout = MapCanvasLayout(map: filteredMap, width: max(580, (viewport.size.width - 24) / canvasZoom))
                         let references = map?.workspaceReferences ?? []
                         let portColumns = max(1, Int((layout.width - 56) / 260))
                         let portHeight = references.isEmpty ? 0.0 : Double((references.count + portColumns - 1) / portColumns) * 46 + 46
                         ZStack(alignment: .topLeading) {
                             canvasBackground(layout)
+                            // Real layout anchors let inventory selection scroll after panel resizing.
+                            // Card offsets alone are not reliable ScrollViewReader targets.
+                            let rows = Array(Set(layout.tiles.map(\.y))).sorted()
+                            VStack(spacing: 0) {
+                                Color.clear.frame(height: max(0, (rows.first ?? 0) - 38))
+                                ForEach(Array(rows.enumerated()), id: \.element) { index, y in
+                                    Color.clear.frame(height: 1).id("map-row-\(y)")
+                                    let next = index + 1 < rows.count ? rows[index + 1] : layout.height
+                                    Color.clear.frame(height: max(0, next - y - 1))
+                                }
+                            }.frame(width: 1).allowsHitTesting(false).accessibilityHidden(true)
                             if !references.isEmpty {
                                 Text("WORKSPACE REFERENCES").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                                     .offset(x: 20, y: layout.height + 16)
@@ -291,12 +349,25 @@ struct ResourceMapContent: View {
                         .padding(12)
                     }
                 }
-                .onChange(of: selectedTileID) { id in
-                    if let id { proxy.scrollTo(id, anchor: .center) }
+                .onChange(of: selectedTileID) { _ in
+                    scrollToSelection(proxy, width: viewport.size.width)
+                }
+                .onChange(of: viewport.size.width) { width in
+                    scrollToSelection(proxy, width: width)
                 }
             }
         }
         .background(Color(nsColor: .underPageBackgroundColor))
+    }
+
+    private func scrollToSelection(_ proxy: ScrollViewProxy, width: Double) {
+        guard let selectedTileID else { return }
+        let filteredMap = ResourceMap(tiles: visibleTiles, connections: map?.connections ?? [], dataSources: [])
+        let layout = MapCanvasLayout(map: filteredMap, width: max(580, (width - 24) / canvasZoom))
+        guard let tile = layout.tiles.first(where: { $0.id == selectedTileID }) else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo("map-row-\(tile.y)", anchor: .top)
+        }
     }
 
     private func canvasBackground(_ layout: MapCanvasLayout) -> some View {
@@ -322,52 +393,28 @@ struct ResourceMapContent: View {
     }
 
     private func connectionLines(_ layout: MapCanvasLayout) -> some View {
-        Canvas { context, _ in
-            let positions = Dictionary(uniqueKeysWithValues: layout.tiles.map { ($0.id, $0) })
-            for (index, connection) in (map?.connections ?? []).enumerated() {
-                guard let source = positions[connection.source], let target = positions[connection.target] else { continue }
+        let positions = Dictionary(uniqueKeysWithValues: layout.tiles.map { ($0.id, $0) })
+        let routes = (map?.connections ?? []).compactMap { connection -> (MapConnection, [CGPoint])? in
+            guard let source = positions[connection.source], let target = positions[connection.target] else { return nil }
+            let points = MapConnectionRoute.points(from: source, to: target, avoiding: layout.tiles, canvasWidth: layout.width)
+            return points.count >= 2 ? (connection, points) : nil
+        }
+        return Canvas { context, _ in
+            for (connection, points) in routes {
                 let emphasized = connection.source == selectedTileID || connection.target == selectedTileID
-                let color = emphasized ? Color.accentColor : Color.secondary.opacity(selectedTileID == nil ? 0.5 : 0.18)
+                let color = emphasized ? Color.accentColor : Color.secondary.opacity(selectedTileID == nil ? 0.28 : 0.10)
                 var line = Path()
-                let end: CGPoint
-                let arrow: [CGPoint]
-                if source.y == target.y && source.x + source.width < target.x {
-                    let start = CGPoint(x: source.x + source.width, y: source.y + source.height / 2)
-                    end = CGPoint(x: target.x, y: target.y + target.height / 2)
-                    line.move(to: start)
-                    let hasInterveningTile = layout.tiles.contains { tile in
-                        tile.id != source.id && tile.id != target.id && tile.y == source.y &&
-                            tile.x >= source.x + source.width && tile.x + tile.width <= target.x
-                    }
-                    if hasInterveningTile,
-                       let band = layout.bands.first(where: { $0.y <= source.y && source.y < $0.y + $0.height }) {
-                        let laneY = band.y + band.height - 10
-                        let sourceTurnX = source.x + source.width + 8
-                        let targetTurnX = target.x - 8
-                        line.addLine(to: CGPoint(x: sourceTurnX, y: start.y))
-                        line.addLine(to: CGPoint(x: sourceTurnX, y: laneY))
-                        line.addLine(to: CGPoint(x: targetTurnX, y: laneY))
-                        line.addLine(to: CGPoint(x: targetTurnX, y: end.y))
-                        line.addLine(to: end)
-                    } else {
-                        line.addLine(to: end)
-                    }
-                    arrow = [CGPoint(x: end.x - 5, y: end.y - 3), end, CGPoint(x: end.x - 5, y: end.y + 3)]
-                } else {
-                    let start = CGPoint(x: source.x + source.width / 2, y: source.y)
-                    end = CGPoint(x: target.x + target.width / 2, y: target.y)
-                    let gutter = Double(12 + index % 4 * 3)
-                    line.move(to: start)
-                    line.addLine(to: CGPoint(x: start.x, y: start.y - 9))
-                    line.addLine(to: CGPoint(x: gutter, y: start.y - 9))
-                    line.addLine(to: CGPoint(x: gutter, y: end.y - 9))
-                    line.addLine(to: CGPoint(x: end.x, y: end.y - 9))
-                    line.addLine(to: end)
-                    arrow = [CGPoint(x: end.x - 3, y: end.y - 5), end, CGPoint(x: end.x + 3, y: end.y - 5)]
-                }
-                context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: emphasized ? 1.6 : 1, lineCap: .round, lineJoin: .round))
-                var head = Path(); head.addLines(arrow)
-                context.stroke(head, with: .color(color), lineWidth: 1.5)
+                line.addLines(points)
+                context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: emphasized ? 1.8 : 1, lineCap: .round, lineJoin: .round))
+                let end = points[points.count - 1], previous = points[points.count - 2]
+                let angle = atan2(end.y - previous.y, end.x - previous.x)
+                let length = 5.0
+                var head = Path()
+                head.addLines([
+                    CGPoint(x: end.x - length * cos(angle - .pi / 6), y: end.y - length * sin(angle - .pi / 6)), end,
+                    CGPoint(x: end.x - length * cos(angle + .pi / 6), y: end.y - length * sin(angle + .pi / 6))
+                ])
+                context.stroke(head, with: .color(color), lineWidth: emphasized ? 1.8 : 1)
             }
         }
     }
@@ -412,23 +459,6 @@ struct ResourceMapContent: View {
         return tile.kind.symbol
     }
 
-    private func composition(for tile: MapTile) -> String {
-        let members = resources.filter { tile.resources.contains($0.address) }
-        let groups = Dictionary(grouping: members) { resource -> String in
-            if resource.type.contains("_iam_") { return "IAM" }
-            if resource.type.contains("log_group") { return "log groups" }
-            if resource.type.contains("logging_configuration") { return "configs" }
-            if resource.type.contains("event_rule") { return "rules" }
-            if resource.type.contains("sns_topic") { return "topics" }
-            if resource.type.contains("chatbot") { return "channel configs" }
-            if resource.type.contains("elasticache_subnet_group") { return "subnet groups" }
-            if resource.type.contains("elasticache") { return "caches" }
-            let labels = ["aws_lb": "load balancers", "aws_ecs_service": "services", "aws_lambda_function": "functions", "aws_sqs_queue": "queues", "aws_db_instance": "databases", "aws_s3_bucket": "buckets", "aws_s3_bucket_versioning": "versioning", "aws_vpc": "networks"]
-            return labels[resource.type] ?? resource.type.split(separator: "_").dropFirst().joined(separator: " ")
-        }
-        return groups.keys.sorted().map { "\(groups[$0]!.count) \($0)" }.joined(separator: " · ")
-    }
-
     private func stackCount(for tile: MapTile) -> Int {
         let anchors = resources.filter { tile.anchors.contains($0.address) }
         return Dictionary(grouping: anchors, by: \.type).values.map(\.count).max() ?? 1
@@ -443,8 +473,8 @@ struct ResourceMapContent: View {
                     .background(tile.kind.color, in: RoundedRectangle(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(tile.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                    Text(category(for: tile)).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
-                    Text(composition(for: tile)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                    Text(presentation(for: tile).subtitle).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
+                    Text("\(tile.resources.count) \(tile.resources.count == 1 ? "resource" : "resources")").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
@@ -490,8 +520,35 @@ struct ResourceMapContent: View {
                             Text(tile.kind.title).font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Text(tile.resources.count == 1 ? "1 resource makes up this group." : "\(tile.resources.count) resources make up this group.").foregroundStyle(.secondary).font(.callout)
+                    Text(presentation(for: tile).subtitle).font(.body).foregroundStyle(.secondary)
+                    ForEach(presentation(for: tile).facts) { fact in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(fact.label).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(fact.value).multilineTextAlignment(.trailing).textSelection(.enabled)
+                        }.font(.callout)
+                    }
+                    if !presentation(for: tile).endpoints.isEmpty {
+                        Divider()
+                        Text("Endpoints").font(.headline)
+                        ForEach(presentation(for: tile).endpoints) { endpoint in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(endpoint.label).font(.callout).foregroundStyle(.secondary)
+                                if let url = endpoint.url {
+                                    Link(endpoint.value, destination: url).lineLimit(3)
+                                } else {
+                                    Text(endpoint.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                }
+                                Button("Copy endpoint") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(endpoint.value, forType: .string)
+                                }.buttonStyle(.link)
+                            }
+                        }
+                    }
+                    connections(for: tile)
                     Divider()
+                    DisclosureGroup("Resources · \(tile.resources.count)") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Resources").font(.headline)
                         ForEach(tile.resources, id: \.self) { address in
@@ -507,7 +564,7 @@ struct ResourceMapContent: View {
                             }.buttonStyle(.plain)
                         }
                     }
-                    connections(for: tile)
+                    }
                     if let resource = selectedResource {
                         Divider()
                         HStack {
@@ -516,11 +573,13 @@ struct ResourceMapContent: View {
                             Button("Full inspector") { onOpenResource(selectedMember!) }.buttonStyle(.link)
                         }
                         Text(resource.type).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        DisclosureGroup("Attributes") {
                         ForEach(Array(resource.displayAttributes.prefix(14))) { attribute in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(attribute.path).font(.caption).foregroundStyle(.secondary)
                                 Text(attribute.value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
                             }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         }
                         if resource.displayAttributes.count > 14 {
                             Text("Open the full inspector for all attributes and source links.").font(.caption).foregroundStyle(.secondary)
@@ -563,10 +622,6 @@ struct ResourceMapContent: View {
         if !visibleTiles.contains(where: { $0.id == tile.id }) { search = "" }
         selectedTileID = tile.id
         selectedMember = tile.anchors.first ?? tile.resources.first
-    }
-    private func category(for tile: MapTile) -> String {
-        guard let resource = resources.first(where: { $0.address == (tile.anchors.first ?? tile.id) }) else { return tile.kind.title }
-        return ResourceMapCategories.values[resource.type] ?? resource.type
     }
     private func empty(_ title: String, detail: String, symbol: String) -> some View {
         VStack(spacing: 12) {

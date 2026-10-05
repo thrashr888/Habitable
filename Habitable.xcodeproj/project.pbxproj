@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC21000000000000000002 /* MapConnectionRoute.swift */; };
+		AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC20000000000000000002 /* MapResourcePresentation.swift */; };
 		AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC10000000000000000002 /* LocalCloudConnections.swift */; };
 		AA6040000000000000000040 /* HCPMapSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000041 /* HCPMapSnapshot.swift */; };
 		AA6040000000000000000030 /* ResourceMapSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000031 /* ResourceMapSample.swift */; };
@@ -84,6 +86,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AACC21000000000000000002 /* MapConnectionRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapConnectionRoute.swift; sourceTree = "<group>"; };
+		AACC20000000000000000002 /* MapResourcePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapResourcePresentation.swift; sourceTree = "<group>"; };
 		AACC10000000000000000002 /* LocalCloudConnections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCloudConnections.swift; sourceTree = "<group>"; };
 		AA6040000000000000000041 /* HCPMapSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPMapSnapshot.swift; sourceTree = "<group>"; };
 		AA6040000000000000000031 /* ResourceMapSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapSample.swift; sourceTree = "<group>"; };
@@ -196,6 +200,8 @@
 				0CDD60EE544E42578F32C1DA /* HCPWorkspaceViewer.swift */,
 				8680473AA64240379CAC8EE4 /* AgentConnectionModel.swift */,
 				AACC10000000000000000002 /* LocalCloudConnections.swift */,
+				AACC20000000000000000002 /* MapResourcePresentation.swift */,
+				AACC21000000000000000002 /* MapConnectionRoute.swift */,
 				0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */,
 				B1EAA330000000000000002 /* TerraformProviderSchema.swift */,
 				B1EAA330000000000000004 /* TerraformConfigurationContextHelp.swift */,
@@ -399,6 +405,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */,
+				AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */,
+				AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */,
 				903CDE668045415297D22E75 /* HCPWorkspaceViewerPage.swift in Sources */,
 				4C2E594417E941249EC613A0 /* AgentsSettingsPage.swift in Sources */,
 				B91637601B374FF8AA9B4158 /* HabitableMCPHTTPListener.swift in Sources */,

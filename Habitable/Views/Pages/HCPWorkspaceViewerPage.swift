@@ -67,8 +67,11 @@ struct HCPWorkspaceViewer: View {
                 HStack(spacing: 16) {
                     organizationPicker.frame(maxWidth: 270)
                     if showingMap {
-                        Toggle(isOn: $showingWorkspaces) { Label("Workspaces", systemImage: "sidebar.left") }
-                            .toggleStyle(.button).accessibilityLabel("Show workspace list")
+                        Button { showingWorkspaces.toggle() } label: { Label("Workspaces", systemImage: "square.grid.2x2") }
+                            .accessibilityLabel("Choose cloud workspace")
+                            .popover(isPresented: $showingWorkspaces) {
+                                workspaceColumn.padding(16).frame(width: 340, height: 480)
+                            }
                     }
                     Spacer()
                 Picker("Workspace view", selection: $showingMap) {
@@ -77,15 +80,8 @@ struct HCPWorkspaceViewer: View {
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
                 }.padding(.bottom, 8)
                 if showingMap {
-                    if !showingWorkspaces { compactSelection }
                     Divider()
-                    HSplitView {
-                        if showingWorkspaces {
-                            workspaceColumn.frame(minWidth: 200, idealWidth: 230, maxWidth: 300)
-                                .padding(.top, 12)
-                        }
-                        cloudMap.frame(minWidth: 550, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                    }.frame(minHeight: 0, maxHeight: .infinity)
+                    cloudMap.frame(minWidth: 550, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 } else {
                 GeometryReader { geometry in
                     if geometry.size.width >= 960 {
@@ -124,6 +120,7 @@ struct HCPWorkspaceViewer: View {
     // selected workspace/run and must not be duplicated when layouts remount.
     private var workspaceSelection: Binding<String?> {
         Binding(get: { model.selectedWorkspaceID }, set: { id in
+            showingWorkspaces = false
             guard model.selectedWorkspaceID != id else { return }
             model.selectedWorkspaceID = id
             if id != nil { Task { await model.refreshRuns(force: true) } }
@@ -286,7 +283,7 @@ struct HCPWorkspaceViewer: View {
         ResourceMapContent(title: model.selectedWorkspace?.name ?? "Choose a workspace",
             identity: model.mapRequestKey + "|" + (model.mapSnapshot?.versionID ?? ""),
             map: model.mapSnapshot?.map, resources: model.mapSnapshot?.resources ?? [],
-            notice: model.mapSnapshot?.notice ?? (model.mapSnapshot == nil ? nil : "HCP Terraform · current state · read-only"),
+            notice: model.mapSnapshot?.notice ?? (model.mapSnapshot == nil ? nil : "HCP Terraform · Current state"),
             errorMessage: model.mapError,
             isLoading: model.isLoadingMap, canRefresh: model.selectedWorkspace != nil && !model.isLoadingMap,
             refresh: { Task { await model.refreshMap() } },
@@ -321,22 +318,35 @@ struct HCPWorkspaceViewer: View {
             }
             TextField("Filter workspaces", text: $workspaceSearch)
                 .textFieldStyle(.roundedBorder)
-            List(selection: workspaceSelection) {
-                ForEach(filteredWorkspaces) { workspace in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(workspace.name).lineLimit(1)
-                        HStack(spacing: 5) {
-                            if let version = workspace.terraformVersion { Text("Terraform \(version)") }
-                            if workspace.locked { Text("Locked") }
-                        }.font(.caption).foregroundStyle(.secondary)
-                    }
-                    .tag(Optional(workspace.id))
-                    .contextMenu {
-                        if let url = workspace.htmlURL { Link("Open in HCP Terraform", destination: url) }
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(filteredWorkspaces) { workspace in
+                        Button { workspaceSelection.wrappedValue = workspace.id } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(workspace.name).lineLimit(1)
+                                    HStack(spacing: 5) {
+                                        if let version = workspace.terraformVersion { Text("Terraform \(version)") }
+                                        if workspace.locked { Text("Locked") }
+                                    }.font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 4)
+                                if model.selectedWorkspaceID == workspace.id {
+                                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                                }
+                            }
+                            .padding(9).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(model.selectedWorkspaceID == workspace.id ? Color.accentColor.opacity(0.15) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).accessibilityLabel("Choose workspace \(workspace.name)")
+                        .contextMenu {
+                            if let url = workspace.htmlURL { Link("Open in HCP Terraform", destination: url) }
+                        }
                     }
                 }
             }
-            .listStyle(.inset)
             if model.workspaceHasNextPage {
                 Button("Load More Workspaces") { Task { await model.loadNextWorkspacePage() } }
                     .buttonStyle(.borderless).disabled(model.isLoading)

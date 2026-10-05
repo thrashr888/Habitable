@@ -74,11 +74,11 @@ struct MapCanvasLayout: Equatable, Sendable {
     let tiles: [MapCanvasTile]
 
     init(map: ResourceMap, width requestedWidth: Double) {
-        let minimumWidth = 680.0
-        let tileWidth = 264.0
-        let tileHeight = 120.0
+        let minimumWidth = 580.0
+        let tileWidth = 240.0
+        let tileHeight = 112.0
         let horizontalInset = 28.0
-        let tileGap = 70.0
+        let tileGap = 44.0
         let rowGap = 26.0
         let topPadding = 38.0
         let bottomPadding = 20.0
@@ -232,6 +232,10 @@ struct ResourceMapClassifier {
     var categories: [String: String] = ResourceMapCategories.values
 
     func kind(for type: String) -> MapKind {
+        // Auto Scaling groups are compute workloads; their launch-template and
+        // IAM/network support resources should collect around the group.
+        if type == "aws_autoscaling_group" { return .appsAndAI }
+        if type == "aws_eip" { return .network }
         if type.hasPrefix("aws_cloudwatch_event_") || type.hasPrefix("aws_chatbot_") { return .messaging }
         if type.hasPrefix("kubernetes_") || type.hasPrefix("helm_") { return .appsAndAI }
         if type.range(of: #"^google_compute_(url_map|target_https?_proxy|global_forwarding_rule|forwarding_rule|backend_service|ssl_certificate|managed_ssl)"#, options: .regularExpression) != nil { return .frontDoor }
@@ -293,11 +297,19 @@ struct ResourceMapClassifier {
         }
         func helper(_ resource: MapResource) -> Bool {
             resourceKind(resource) == .identityAndMonitoring || facets[resource.address] != nil ||
-            resource.type.range(of: #"(_policy_attachment|_role_policy|_iam_|^aws_iam|_security_group_rule|^aws_security_group$|_subnet_group|_parameter_group|_log_group|_metric_alarm|_route_table_association|_secret_version|_public_access_block|_ownership_controls|_server_side_encryption|_versioning|_lifecycle_configuration|_event_target|_subscription|_permission$|_listener_rule|_target_group_attachment|^aws_route53_record|_kms_|_policy$)"#, options: .regularExpression) != nil
+            resource.type.range(of: #"(_policy_attachment|_role_policy|_iam_|^aws_iam|_security_group_rule|^aws_security_group$|_launch_template|_subnet_group|_parameter_group|_log_group|_metric_alarm|_route_table_association|_secret_version|_public_access_block|_ownership_controls|_server_side_encryption|_versioning|_lifecycle_configuration|_event_target|_subscription|_permission$|_listener_rule|_target_group_attachment|^aws_route53_record|_kms_|_policy$)"#, options: .regularExpression) != nil
         }
         let anchors = resources.filter { !helper($0) }
         let anchorIDs = Set(anchors.map(\.address))
         var owner: [String: String] = [:]
+        func semanticFamily(_ resource: MapResource) -> String {
+            let category = categories[resource.type] ?? ""
+            if !category.isEmpty { return category }
+            if resource.type.contains("subnet_group") { return "database-subnet" }
+            if resource.type.contains("launch_template") { return "compute-template" }
+            if resource.type.contains("security_group") { return "network-security" }
+            return resource.type.components(separatedBy: "_").dropFirst().prefix(2).joined(separator: "_")
+        }
         for resource in resources where !anchorIDs.contains(resource.address) {
             var parent = facets[resource.address]
             var visited = Set<String>()
@@ -306,6 +318,21 @@ struct ResourceMapClassifier {
                 parent = facets[candidate]
             }
             if owner[resource.address] != nil { continue }
+            // Prefer a directly consuming workload with a related service
+            // family. In particular subnet groups belong to the DB/cache that
+            // references them, even when another application is nearby.
+            let directOwners = (neighbors[resource.address] ?? []).intersection(anchorIDs).sorted()
+            let family = semanticFamily(resource)
+            if let preferred = directOwners.first(where: {
+                guard let candidate = by[$0] else { return false }
+                let candidateFamily = semanticFamily(candidate)
+                return !family.isEmpty && (candidateFamily == family ||
+                    (resource.type.contains("launch_template") && candidate.type == "aws_autoscaling_group") ||
+                    (resource.type.contains("subnet_group") && candidate.type.range(of: #"(db_instance|db_cluster|elasticache_cluster|docdb_cluster|rds_cluster)"#, options: .regularExpression) != nil))
+            }) {
+                owner[resource.address] = preferred
+                continue
+            }
             var frontier: Set<String> = [resource.address]
             visited = frontier
             for _ in 0..<3 {
@@ -313,6 +340,9 @@ struct ResourceMapClassifier {
                 let candidates = next.intersection(anchorIDs).sorted {
                     let leftLocal = by[$0]?.module == resource.module
                     let rightLocal = by[$1]?.module == resource.module
+                    let leftFamily = by[$0].map(semanticFamily) == family
+                    let rightFamily = by[$1].map(semanticFamily) == family
+                    if leftFamily != rightFamily { return leftFamily }
                     return leftLocal == rightLocal ? $0 < $1 : leftLocal
                 }
                 if let candidate = candidates.first { owner[resource.address] = candidate; break }
@@ -361,11 +391,33 @@ struct ResourceMapClassifier {
             let id = owner[resource.address].map(find) ?? resource.address
             groups[id, default: []].append(resource.address)
         }
+        func shortService(_ type: String) -> String {
+            switch type {
+            case "aws_vpc": return "Network"
+            case let value where value.hasPrefix("aws_vpc_"): return "Network"
+            case let value where value.hasPrefix("aws_acm_"): return "Certificate"
+            case let value where value.hasPrefix("aws_cloudfront_"): return "CDN"
+            case let value where value.hasPrefix("aws_route53_"): return "DNS"
+            case let value where value.hasPrefix("aws_ses_"):
+                return value.contains("configuration_set") ? "SES configuration set" : "SES domain"
+            case let value where value.hasPrefix("aws_s3_"): return "Bucket"
+            case "aws_internet_gateway", "aws_route_table", "aws_subnet", "aws_security_group", "aws_network_acl", "aws_eip", "aws_nat_gateway": return "Network"
+            case "aws_key_pair": return "SSH key"
+            default: return categories[type] ?? ""
+            }
+        }
+        let titleCounts = Dictionary(grouping: groups.keys.compactMap { id -> (String, String)? in
+            guard let resource = by[id] else { return nil }
+            let plain = resource.name.replacingOccurrences(of: "-", with: "_").split(separator: "_").map { String($0).capitalized }.joined(separator: " ")
+            return (plain, id)
+        }, by: { $0.0 }).mapValues(\.count)
         let tiles: [MapTile] = groups.map { id, members in
             let anchorMembers = (anchorGroups[id] ?? []).sorted()
             let resource = by[id]!
             let words = resource.name.replacingOccurrences(of: "-", with: "_").split(separator: "_")
-            let title = words.map { String($0).capitalized }.joined(separator: " ")
+            let plainTitle = words.map { String($0).capitalized }.joined(separator: " ")
+            let service = shortService(resource.type)
+            let title = (titleCounts[plainTitle] ?? 0) > 1 && !service.isEmpty ? "\(plainTitle) · \(service)" : plainTitle
             return MapTile(id: id, title: title, kind: anchorMembers.isEmpty ? .identityAndMonitoring : resourceKind(resource),
                            anchors: anchorMembers, resources: members.sorted())
         }.sorted { $0.kind == $1.kind ? $0.id < $1.id : $0.kind.rawValue < $1.kind.rawValue }
