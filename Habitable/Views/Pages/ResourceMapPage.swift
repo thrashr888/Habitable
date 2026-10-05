@@ -5,6 +5,7 @@ private extension MapKind {
         switch self {
         case .frontDoor: "Front door"
         case .appsAndAI: "Apps & AI"
+        case .code: "Code & delivery"
         case .messaging: "Messaging & events"
         case .data: "Data"
         case .network: "Network"
@@ -16,6 +17,7 @@ private extension MapKind {
         switch self {
         case .frontDoor: "globe"
         case .appsAndAI: "shippingbox"
+        case .code: "chevron.left.forwardslash.chevron.right"
         case .messaging: "arrow.triangle.branch"
         case .data: "externaldrive"
         case .network: "network"
@@ -27,6 +29,7 @@ private extension MapKind {
         switch self {
         case .frontDoor: .teal
         case .appsAndAI: .orange
+        case .code: .mint
         case .messaging: .pink
         case .data: .cyan
         case .network: .blue

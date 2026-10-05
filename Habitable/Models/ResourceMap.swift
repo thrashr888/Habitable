@@ -22,7 +22,7 @@ struct MapResource: Equatable, Sendable {
 }
 
 enum MapKind: Int, CaseIterable, Sendable {
-    case frontDoor, appsAndAI, messaging, data, network, identityAndMonitoring, other
+    case frontDoor, appsAndAI, code, messaging, data, network, identityAndMonitoring, other
 }
 
 struct MapTile: Equatable, Sendable {
@@ -258,6 +258,19 @@ enum ResourceMapStateReader {
 struct ResourceMapClassifier {
     var categories: [String: String] = ResourceMapCategories.values
 
+    /// Identity and monitoring resources usually support an application, but
+    /// for GitHub and Datadog workspaces these are the product itself, so they
+    /// anchor their own tiles instead of folding into a neighbor.
+    static let primaryIdentityAndMonitoringTypes: Set<String> = [
+        "github_team",
+        "datadog_monitor", "datadog_monitor_json", "datadog_dashboard", "datadog_dashboard_json",
+        "datadog_service_level_objective", "datadog_synthetics_test",
+        "datadog_security_monitoring_rule", "datadog_team"
+    ]
+    /// Providers whose helpers commonly reuse their anchor's block name instead
+    /// of referencing it (for example `repository = "rookery"`).
+    static let nameOwnedProviders: Set<String> = ["github", "datadog"]
+
     func kind(for type: String) -> MapKind {
         // Auto Scaling groups are compute workloads; their launch-template and
         // IAM/network support resources should collect around the group.
@@ -265,6 +278,13 @@ struct ResourceMapClassifier {
         if type == "aws_eip" { return .network }
         if type.hasPrefix("aws_cloudwatch_event_") || type.hasPrefix("aws_chatbot_") { return .messaging }
         if type.hasPrefix("kubernetes_") || type.hasPrefix("helm_") { return .appsAndAI }
+        // GitHub repositories and their settings are code; teams, members and
+        // organization settings are identity. Datadog is monitoring throughout.
+        if type.hasPrefix("github_") {
+            return type.range(of: #"^github_(team($|_)|membership$|organization|user_|enterprise|emu_|actions_organization_)"#, options: .regularExpression) != nil
+                ? .identityAndMonitoring : .code
+        }
+        if type.hasPrefix("datadog_") { return .identityAndMonitoring }
         if type.range(of: #"^google_compute_(url_map|target_https?_proxy|global_forwarding_rule|forwarding_rule|backend_service|ssl_certificate|managed_ssl)"#, options: .regularExpression) != nil { return .frontDoor }
         if type.range(of: #"^google_compute_(network|subnetwork|firewall|router|route|global_address|address)|^aws_(security_group|network_acl|vpc_endpoint)"#, options: .regularExpression) != nil { return .network }
         if type.range(of: #"^aws_(lb|alb)(_|$)"#, options: .regularExpression) != nil { return .frontDoor }
@@ -323,11 +343,14 @@ struct ResourceMapClassifier {
             facets[resource.address] = parents.first?.address
         }
         func helper(_ resource: MapResource) -> Bool {
-            resourceKind(resource) == .identityAndMonitoring || facets[resource.address] != nil ||
-            resource.type.range(of: #"(_policy_attachment|_role_policy|_iam_|^aws_iam|_security_group_rule|^aws_security_group$|_launch_template|_subnet_group|_parameter_group|_log_group|_metric_alarm|_route_table_association|_secret_version|_public_access_block|_ownership_controls|_server_side_encryption|_versioning|_lifecycle_configuration|_event_target|_subscription|_permission$|_listener_rule|_target_group_attachment|^aws_route53_record|_kms_|_policy$)"#, options: .regularExpression) != nil
+            if Self.primaryIdentityAndMonitoringTypes.contains(resource.type) { return facets[resource.address] != nil }
+            return resourceKind(resource) == .identityAndMonitoring || facets[resource.address] != nil ||
+            resource.type.range(of: #"^github_(branch|repository_|actions_(secret|variable|environment)|issue_label)|(_policy_attachment|_role_policy|_iam_|^aws_iam|_security_group_rule|^aws_security_group$|_launch_template|_subnet_group|_parameter_group|_log_group|_metric_alarm|_route_table_association|_secret_version|_public_access_block|_ownership_controls|_server_side_encryption|_versioning|_lifecycle_configuration|_event_target|_subscription|_permission$|_listener_rule|_target_group_attachment|^aws_route53_record|_kms_|_policy$)"#, options: .regularExpression) != nil
         }
         let anchors = resources.filter { !helper($0) }
         let anchorIDs = Set(anchors.map(\.address))
+        let anchorsByName = Dictionary(grouping: anchors) { $0.module + "|" + $0.name }
+        func provider(_ type: String) -> String { String(type.prefix { $0 != "_" }) }
         var owner: [String: String] = [:]
         func semanticFamily(_ resource: MapResource) -> String {
             let category = categories[resource.type] ?? ""
@@ -376,6 +399,15 @@ struct ResourceMapClassifier {
                 visited.formUnion(next)
                 frontier = next
             }
+            if owner[resource.address] != nil { continue }
+            // Without a reference, fall back to the one same-provider, same-kind
+            // anchor sharing this block name. Ambiguous names stay separate.
+            let resourceProvider = provider(resource.type)
+            guard Self.nameOwnedProviders.contains(resourceProvider) else { continue }
+            let sameName = (anchorsByName[resource.module + "|" + resource.name] ?? []).filter {
+                provider($0.type) == resourceProvider && resourceKind($0) == resourceKind(resource)
+            }
+            if sameName.count == 1 { owner[resource.address] = sameName[0].address }
         }
         var parent = Dictionary(uniqueKeysWithValues: anchors.map { ($0.address, $0.address) })
         func find(_ value: String) -> String {
@@ -401,9 +433,13 @@ struct ResourceMapClassifier {
             stems[instanceKey] = resource.address
             for target in refs[resource.address] ?? [] where anchorIDs.contains(target) {
                 guard let other = by[target], other.module == resource.module,
-                      resourceKind(other) == resourceKind(resource),
-                      let category = categories[resource.type], !category.isEmpty,
-                      category == categories[other.type] else { continue }
+                      resourceKind(other) == resourceKind(resource) else { continue }
+                let category = categories[resource.type] ?? ""
+                let sameCategory = !category.isEmpty && category == categories[other.type]
+                // An SLO and the monitors it measures are one service objective.
+                // Dashboards only connect to monitors; they often show many.
+                let objective = resource.type == "datadog_service_level_objective" && other.type.hasPrefix("datadog_monitor")
+                guard sameCategory || objective else { continue }
                 union(resource.address, target)
             }
         }
@@ -430,6 +466,12 @@ struct ResourceMapClassifier {
             case let value where value.hasPrefix("aws_s3_"): return "Bucket"
             case "aws_internet_gateway", "aws_route_table", "aws_subnet", "aws_security_group", "aws_network_acl", "aws_eip", "aws_nat_gateway": return "Network"
             case "aws_key_pair": return "SSH key"
+            case "github_repository": return "Repository"
+            case "github_team": return "Team"
+            case "datadog_monitor", "datadog_monitor_json": return "Monitor"
+            case "datadog_dashboard", "datadog_dashboard_json": return "Dashboard"
+            case "datadog_service_level_objective": return "SLO"
+            case "datadog_synthetics_test": return "Synthetic test"
             default: return categories[type] ?? ""
             }
         }
