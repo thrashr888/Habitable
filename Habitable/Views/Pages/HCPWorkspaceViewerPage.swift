@@ -48,10 +48,15 @@ struct HCPWorkspaceViewer: View {
                             Spacer()
                             if localConnections.isRefreshing { ProgressView().controlSize(.small) }
                             Button("Refresh cloud connections") { Task { await localConnections.refresh() } }
-                                .disabled(localConnections.isRefreshing)
+                                .disabled(localConnections.isRefreshing || localConnections.connectingID != nil)
                         }
                         ForEach(localConnections.connections) { connection in
-                            LocalCloudConnectionCard(connection: connection, isRefreshing: localConnections.isRefreshing)
+                            LocalCloudConnectionCard(connection: connection, isRefreshing: localConnections.isRefreshing,
+                                                     isConnecting: localConnections.connectingID == connection.id,
+                                                     canConnect: localConnections.canConnect(connection.id),
+                                                     loginMessage: localConnections.loginMessages[connection.id]) {
+                                Task { await localConnections.connect(connection.id) }
+                            }
                         }
                         Text("Authentication checks do not run a plan or change infrastructure. Provider settings in each workspace determine which profile, subscription, and project Terraform uses.")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -642,6 +647,10 @@ private struct HCPMapVariableEditor: View {
 private struct LocalCloudConnectionCard: View {
     let connection: LocalCloudConnection
     let isRefreshing: Bool
+    let isConnecting: Bool
+    let canConnect: Bool
+    let loginMessage: String?
+    let onConnect: () -> Void
     @State private var copied = false
 
     var body: some View {
@@ -653,6 +662,18 @@ private struct LocalCloudConnectionCard: View {
                     Label(isRefreshing ? "Checking…" : connection.status,
                           systemImage: isRefreshing ? "clock" : (connection.isAuthenticated ? "checkmark.circle.fill" : "exclamationmark.circle"))
                         .foregroundStyle(connection.isAuthenticated && !isRefreshing ? Color.green : Color.secondary)
+                }
+                HStack(spacing: 12) {
+                    Button(connection.isAuthenticated ? "Connected" : isConnecting ? "Connecting…" : "Connect", action: onConnect)
+                        .buttonStyle(.borderedProminent).disabled(!canConnect)
+                        .accessibilityLabel("Connect \(connection.name)")
+                    if isConnecting { ProgressView().controlSize(.small) }
+                    if let loginMessage {
+                        Text(loginMessage).font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if !connection.isAuthenticated {
+                        Text("Opens Terminal and your browser to sign in.").font(.callout).foregroundStyle(.secondary)
+                    }
                 }
                 ForEach(Array(connection.details.enumerated()), id: \.offset) { _, detail in
                     Text(detail).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
