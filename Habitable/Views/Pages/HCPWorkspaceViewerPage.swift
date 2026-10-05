@@ -668,9 +668,25 @@ private struct HCPRunDetailView: View {
         Text(title).font(.headline).accessibilityAddTraits(.isHeader)
     }
 
-    private func plannedChanges(_ changes: [HCPRunLogPresentation.Change]) -> some View {
+    /// Data-source reads are not changes; when a plan has nothing else they stay
+    /// available but collapsed, so a clean plan reads as clean.
+    @ViewBuilder private func plannedChanges(_ changes: [HCPRunLogPresentation.Change]) -> some View {
+        let reads = changes.filter { $0.action == .Read }
+        let realChanges = changes.filter { $0.action != .Read }
+        if !realChanges.isEmpty {
+            plannedChangeRows(realChanges, title: "Planned changes")
+        }
+        if !reads.isEmpty {
+            DisclosureGroup("\(reads.count) data source\(reads.count == 1 ? "" : "s") read during the plan") {
+                plannedChangeRows(reads, title: nil).padding(.top, 6)
+            }
+            .font(.system(size: 13))
+        }
+    }
+
+    private func plannedChangeRows(_ changes: [HCPRunLogPresentation.Change], title: String?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionTitle("Planned changes")
+            if let title { sectionTitle(title) }
             ForEach(changes) { change in
                 let style = hcpActionStyle(change.action)
                 HStack(spacing: 8) {
