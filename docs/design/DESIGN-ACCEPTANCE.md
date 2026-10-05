@@ -103,7 +103,7 @@ Taken from Alchemy's inspector and System Settings shapes (see `DESIGN.md` §2).
 | Remote-state folders | The local window keeps the Map shape: the canvas shows "State managed in HCP Terraform" with the Open button as the Map's empty state, so Inputs and Changes stay on the right. | Fixed after a first pass showed the state-read error instead; re-checked live. |
 | Settings | `Window("Settings")` is a 220pt sidebar (identity block with version, General · Connections · Terraform rows with colored symbol tiles, accent wash on the selected row, selection remembered) and a pane with a centered header tile and grouped forms. General holds Windows and Links groups; Connections is the restyled HCP/TFE and local cloud groups; Terraform shows the active version, executable and latest stable read-only with a link to Workspace settings, because version switching is per workspace. | Live: all three panes; Connect/Refresh/Disconnect controls present; local cloud rows with disclosures. |
 
-Open: the two General toggles are stored but not yet read by the windows (TODO PAUL-169 in `SettingsWindow.swift`); Terraform version changes stay in Workspace settings.
+Follow-up the same day: the local Inputs face was checked live (43 inputs, sensitive values masked, defaults labelled). Light mode was checked by forcing the preview app's appearance: light canvas with white tiles and hairlines, readable timeline and chips, Settings panes correct; nothing needed changing. The two General toggles now feed the next local window (open last folder) and the next Map (inventory shown). Terraform version changes stay in Workspace settings.
 
 ## Gate for every page handoff
 

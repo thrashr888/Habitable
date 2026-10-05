@@ -154,9 +154,7 @@ struct SettingsWindow: View {
 private struct GeneralPane: View {
     let onOpenWorkspaces: () -> Void
     let onOpenLocalWorkspace: () -> Void
-    // TODO(PAUL-169): ContentView should honour general.restoreLastFolder.
     @AppStorage("general.restoreLastFolder") private var restoreLastFolder = true
-    // TODO(PAUL-169): ContentView should honour map.showInventory.
     @AppStorage("map.showInventory") private var showInventory = true
 
     var body: some View {

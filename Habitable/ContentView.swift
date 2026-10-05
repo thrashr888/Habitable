@@ -62,7 +62,9 @@ struct ContentView: View {
     init(initialDirectory: URL? = nil,
          onOpenRemoteWorkspace: @escaping (TerraformRemoteWorkspaceLink) -> Void = { _ in }) {
         self.onOpenRemoteWorkspace = onOpenRemoteWorkspace
-        _workspace = StateObject(wrappedValue: Workspace(dir: initialDirectory, restoreLastDirectory: initialDirectory == nil))
+        // Settings › General › "Open last folder at launch".
+        let restoreLast = UserDefaults.standard.object(forKey: "general.restoreLastFolder") as? Bool ?? true
+        _workspace = StateObject(wrappedValue: Workspace(dir: initialDirectory, restoreLastDirectory: initialDirectory == nil && restoreLast))
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
