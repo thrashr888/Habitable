@@ -55,7 +55,9 @@ struct ContentView: View {
     @StateObject var workspace: Workspace
 
     init() {
-        _workspace = StateObject(wrappedValue: Workspace())
+        let restoreHCP = UserDefaults.standard.bool(forKey: "lastWorkspaceSourceWasHCP")
+        _workspace = StateObject(wrappedValue: Workspace(restoreLastDirectory: !restoreHCP))
+        _selection = State(initialValue: restoreHCP ? .hcpTerraform : .map)
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
@@ -351,6 +353,9 @@ struct ContentView: View {
     private var navigationSelection: Binding<NavigationItem?> {
         Binding(get: { selection }, set: { page in
             guard page != selection else { return }
+            if let page {
+                UserDefaults.standard.set(page == .hcpTerraform, forKey: "lastWorkspaceSourceWasHCP")
+            }
             if page != .variables { showMissingInputs = false }
             navigationTrace.begin(page: page?.rawValue ?? "workspace")
             var transaction = Transaction(animation: nil)
