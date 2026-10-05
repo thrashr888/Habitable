@@ -247,7 +247,7 @@ struct ContentView: View {
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 if selection == .hcpTerraform {
-                    Label(hcpViewer.isConnected ? "HCP · Read-only" : "HCP disconnected", systemImage: "cloud")
+                    Label(hcpViewer.isConnected ? "HCP · Connected" : "HCP disconnected", systemImage: "cloud")
                 } else if workspace.locked {
                     ProgressView().controlSize(.small)
                     Text("Running Terraform").lineLimit(1)
@@ -322,7 +322,8 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
-        case .map: ResourceMapPage(onShowList: { navigationSelection.wrappedValue = .resources },
+        case .map: ResourceMapPage(onShowVariables: { navigationSelection.wrappedValue = .variables },
+                                    onShowList: { navigationSelection.wrappedValue = .resources },
                                     onOpenResource: { address in
                                         selectedResource = address
                                         navigationSelection.wrappedValue = .resources

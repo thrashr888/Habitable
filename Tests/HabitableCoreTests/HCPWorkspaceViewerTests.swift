@@ -229,6 +229,194 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         }
     }
 
+    func testWorkspaceVariablesPaginateAndNeverExposeSensitiveValues() async throws {
+        let path = "/api/v2/workspaces/ws-1/vars"
+        HCPURLProtocolStub.responses[path + "#page=1"] = Data(#"{"data":[{"id":"var-1","type":"vars","attributes":{"key":"REGION","value":"us-west-2","category":"env","description":"region","sensitive":false,"hcl":false}},{"id":"var-secret","type":"vars","attributes":{"key":"TOKEN","value":"backend-secret","category":"env","sensitive":true,"hcl":false}}],"links":{"next":"https://app.terraform.io/api/v2/workspaces/ws-1/vars?page[number]=2"}}"#.utf8)
+        HCPURLProtocolStub.responses[path + "#page=2"] = Data(#"{"data":[{"id":"var-3","type":"vars","attributes":{"key":"POLICY","value":"{enabled=true}","category":"terraform","sensitive":false,"hcl":true}}],"links":{}}"#.utf8)
+
+        let first = try await makeClient().workspaceVariables(hostname: "app.terraform.io", workspaceID: "ws-1", token: "test-token", page: 1)
+        let second = try await makeClient().workspaceVariables(hostname: "app.terraform.io", workspaceID: "ws-1", token: "test-token", page: 2)
+        XCTAssertTrue(first.hasNextPage)
+        XCTAssertEqual(first.items.map(\.id), ["var-1", "var-secret"])
+        XCTAssertEqual(first.items[0].value, "us-west-2")
+        XCTAssertNil(first.items[1].value)
+        XCTAssertTrue(first.items[1].isSensitive)
+        XCTAssertEqual(second.items.first?.value, "{enabled=true}")
+        XCTAssertTrue(second.items.first?.isHCL == true)
+    }
+
+    func testWorkspaceVariablePatchOnlySendsValue() async throws {
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars/var-1"] = Data(#"{"data":{"id":"var-1","type":"vars","attributes":{"value":"new-value"}}}"#.utf8)
+        try await makeClient().updateWorkspaceVariable(hostname: "app.terraform.io", workspaceID: "ws-1", variableID: "var-1", value: "new-value", token: "test-token")
+        let request = try XCTUnwrap(HCPURLProtocolStub.requests.first)
+        XCTAssertEqual(request.httpMethod, "PATCH")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/vnd.api+json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+        let body = try XCTUnwrap(request.httpBody ?? readBody(request.httpBodyStream))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let data = try XCTUnwrap(json["data"] as? [String: Any])
+        XCTAssertEqual(data["type"] as? String, "vars")
+        XCTAssertEqual(data["id"] as? String, "var-1")
+        XCTAssertEqual(data["attributes"] as? [String: String], ["value": "new-value"])
+    }
+
+    func testWorkspaceVariableHTTPErrorOmitsBackendBody() async throws {
+        HCPURLProtocolStub.statusCode = 403
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars"] = Data(#"{"errors":[{"detail":"echoed-private-variable"}]}"#.utf8)
+        do {
+            _ = try await makeClient().workspaceVariables(hostname: "app.terraform.io", workspaceID: "ws-1", token: "test-token", page: 1)
+            XCTFail("Expected sanitized API error")
+        } catch let error as HCPViewerError {
+            XCTAssertEqual(error, .response(status: 403, message: "This account cannot view that organization, workspace, or run. Check its permissions and entitlements."))
+            XCTAssertFalse(error.localizedDescription.contains("echoed-private-variable"))
+        }
+    }
+
+    func testWorkspaceVariablePatchRejectsMalformedSuccessResponse() async throws {
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars/var-1"] = Data("{}".utf8)
+        do {
+            try await makeClient().updateWorkspaceVariable(hostname: "app.terraform.io", workspaceID: "ws-1", variableID: "var-1", value: "new-value", token: "test-token")
+            XCTFail("Malformed success must not be confirmed")
+        } catch let error as HCPViewerError {
+            XCTAssertEqual(error, .invalidResponse)
+        }
+    }
+
+    @MainActor
+    func testStaleVariableResponseCannotReplaceNewWorkspaceVariables() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage([
+            workspaceRecord(id: "ws-1", name: "first"), workspaceRecord(id: "ws-2", name: "second")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-2/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars"] = Data(#"{"data":[{"id":"old","type":"vars","attributes":{"key":"OLD","sensitive":false}}],"links":{}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-2/vars"] = Data(#"{"data":[{"id":"new","type":"vars","attributes":{"key":"NEW","sensitive":false}}],"links":{}}"#.utf8)
+        HCPURLProtocolStub.delays["/api/v2/workspaces/ws-1/vars"] = 0.15
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        let loading = Task { await model.refreshVariables() }
+        for _ in 0..<100 where !model.isLoadingVariables { try await Task.sleep(nanoseconds: 1_000_000) }
+        model.selectedWorkspaceID = "ws-2"
+        await model.refreshVariables()
+        await loading.value
+        XCTAssertEqual(model.workspaceVariables.map(\.id), ["new"])
+    }
+
+    @MainActor
+    func testFailedVariableSaveKeepsLoadedValueAndSanitizesError() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage(
+            [workspaceRecord(id: "ws-1", name: "first")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars"] = Data(#"{"data":[{"id":"var-1","type":"vars","attributes":{"key":"REGION","value":"us-west-2","description":"region","sensitive":false}}],"links":{}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars/var-1"] = Data(#"{"errors":[{"detail":"echoed-secret-value"}]}"#.utf8)
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        await model.refreshVariables()
+        HCPURLProtocolStub.statusCode = 403
+
+        let saved = await model.updateVariable(variableID: "var-1", value: "new-value")
+
+        XCTAssertFalse(saved)
+        XCTAssertEqual(model.workspaceVariables.first?.value, "us-west-2")
+        XCTAssertEqual(model.workspaceVariables.first?.description, "region")
+        XCTAssertTrue(model.variablesError?.contains("Couldn’t save") == true)
+        XCTAssertFalse(model.variablesError?.contains("echoed-secret-value") == true)
+    }
+
+    @MainActor
+    func testSuccessfulSaveUpdatesNonsensitiveValueAndPreservesMetadataAndSensitiveMask() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage(
+            [workspaceRecord(id: "ws-1", name: "first")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars"] = Data(#"{"data":[{"id":"plain","type":"vars","attributes":{"key":"REGION","value":"us-east-1","category":"env","description":"deployment region","sensitive":false,"hcl":false}},{"id":"secret","type":"vars","attributes":{"key":"TOKEN","value":"backend-secret","category":"env","description":"private credential","sensitive":true,"hcl":false}}],"links":{}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars/plain"] = Data(#"{"data":{"id":"plain","type":"vars","attributes":{"value":"us-west-2"}}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars/secret"] = Data(#"{"data":{"id":"secret","type":"vars","attributes":{"value":"new-secret"}}}"#.utf8)
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        await model.refreshVariables()
+
+        let plainSaved = await model.updateVariable(variableID: "plain", value: "us-west-2")
+        let secretSaved = await model.updateVariable(variableID: "secret", value: "new-secret")
+        XCTAssertTrue(plainSaved)
+        XCTAssertTrue(secretSaved)
+
+        let plain = try XCTUnwrap(model.workspaceVariables.first { $0.id == "plain" })
+        XCTAssertEqual(plain.value, "us-west-2")
+        XCTAssertEqual(plain.key, "REGION")
+        XCTAssertEqual(plain.category, "env")
+        XCTAssertEqual(plain.description, "deployment region")
+        XCTAssertFalse(plain.isSensitive)
+        XCTAssertFalse(plain.isHCL)
+        let secret = try XCTUnwrap(model.workspaceVariables.first { $0.id == "secret" })
+        XCTAssertNil(secret.value)
+        XCTAssertEqual(secret.key, "TOKEN")
+        XCTAssertEqual(secret.description, "private credential")
+        XCTAssertTrue(secret.isSensitive)
+        XCTAssertFalse(String(describing: model.workspaceVariables).contains("backend-secret"))
+        XCTAssertFalse(String(describing: model.workspaceVariables).contains("new-secret"))
+    }
+
+    @MainActor
+    func testUnknownVariableIDDoesNotSendPatch() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage(
+            [workspaceRecord(id: "ws-1", name: "first")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars"] = Data(#"{"data":[{"id":"known","type":"vars","attributes":{"key":"KNOWN","value":"current","sensitive":false}}],"links":{}}"#.utf8)
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        await model.refreshVariables()
+
+        let saved = await model.updateVariable(variableID: "not-loaded", value: "forbidden")
+        XCTAssertFalse(saved)
+        XCTAssertFalse(HCPURLProtocolStub.requests.contains { $0.httpMethod == "PATCH" })
+        XCTAssertEqual(model.workspaceVariables.first?.value, "current")
+    }
+
+    @MainActor
+    func testStaleSuccessfulSaveDoesNotAffectNewWorkspace() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage([
+            workspaceRecord(id: "ws-1", name: "first"), workspaceRecord(id: "ws-2", name: "second")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-2/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars"] = Data(#"{"data":[{"id":"var-1","type":"vars","attributes":{"key":"OLD","value":"before","sensitive":false}}],"links":{}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-2/vars"] = Data(#"{"data":[{"id":"var-2","type":"vars","attributes":{"key":"NEW","value":"current","sensitive":false}}],"links":{}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/vars/var-1"] = Data(#"{"data":{"id":"var-1","type":"vars","attributes":{"value":"late-write"}}}"#.utf8)
+        HCPURLProtocolStub.delays["/api/v2/workspaces/ws-1/vars/var-1"] = 0.15
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        await model.refreshVariables()
+
+        let save = Task { await model.updateVariable(variableID: "var-1", value: "late-write") }
+        for _ in 0..<100 where model.savingVariableID == nil { try await Task.sleep(nanoseconds: 1_000_000) }
+        model.selectedWorkspaceID = "ws-2"
+        await model.refreshVariables()
+        let didSave = await save.value
+        XCTAssertFalse(didSave)
+
+        XCTAssertEqual(model.selectedWorkspaceID, "ws-2")
+        XCTAssertEqual(model.workspaceVariables.map(\.id), ["var-2"])
+        XCTAssertEqual(model.workspaceVariables.first?.value, "current")
+    }
+
+    private func readBody(_ stream: InputStream?) throws -> Data? {
+        guard let stream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 { throw stream.streamError ?? HCPViewerError.invalidResponse }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
     @MainActor
     func testConnectNormalizesHostBeforeGenerationAndRestoresSavedWorkspaceFromNextPage() async throws {
         let workspacesPath = "/api/v2/organizations/pthrasher_v2/workspaces"

@@ -38,6 +38,7 @@ private extension MapKind {
 
 struct ResourceMapPage: View {
     @EnvironmentObject private var workspace: Workspace
+    let onShowVariables: () -> Void
     let onShowList: () -> Void
     let onOpenResource: (String) -> Void
 
@@ -52,7 +53,23 @@ struct ResourceMapPage: View {
             },
             notice: workspace.mapNotice, errorMessage: workspace.errorMessage,
             isLoading: workspace.locked, canRefresh: !workspace.locked && !workspace.isMapDemo,
-            refresh: workspace.refreshResources, onShowList: onShowList, onOpenResource: onOpenResource)
+            refresh: workspace.refreshResources, onShowList: onShowList, onOpenResource: onOpenResource,
+            variablesPanel: AnyView(VStack(alignment: .leading, spacing: 12) {
+                Text("Variables").font(.headline)
+                Text("Local workspace inputs").foregroundStyle(.secondary)
+                Button("Manage variables", action: onShowVariables).buttonStyle(.bordered)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(workspace.terraformVariables, id: \.id) { variable in
+                            TerraformVariableSummaryView(variable: variable)
+                            Divider()
+                        }
+                        if workspace.terraformVariables.isEmpty {
+                            Text("No Terraform inputs found in this workspace.").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }.padding(16).frame(maxHeight: .infinity, alignment: .topLeading)))
     }
 }
 
@@ -70,6 +87,8 @@ struct ResourceMapContent: View {
     let onShowList: () -> Void
     let onOpenResource: (String) -> Void
     var emptyDetail = "Resources appear here after they are recorded in Terraform state. You can still inspect configuration, inputs, and outputs in the sidebar."
+    var variablesPanel: AnyView? = nil
+    @State private var showingVariables = false
     @State private var selectedTileID: String?
     @State private var selectedMember: String?
     @State private var search = ""
@@ -93,11 +112,13 @@ struct ResourceMapContent: View {
             header
             Divider()
             HSplitView {
-                canvas.frame(minWidth: 330, maxWidth: .infinity, maxHeight: .infinity)
+                canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 if selectedTile != nil {
                     inspector.frame(minWidth: 270, idealWidth: 310, maxWidth: 390, maxHeight: .infinity)
+                } else if showingVariables, let variablesPanel {
+                    variablesPanel.frame(minWidth: 280, idealWidth: 320, maxWidth: 390, maxHeight: .infinity)
                 }
-            }
+            }.frame(minHeight: 0, maxHeight: .infinity)
             Divider()
             HStack(spacing: 16) {
                 if map != nil {
@@ -139,6 +160,14 @@ struct ResourceMapContent: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if variablesPanel != nil {
+                    Toggle(isOn: Binding(get: { showingVariables && selectedTileID == nil }, set: { show in
+                        showingVariables = show
+                        if show { selectedTileID = nil; selectedMember = nil }
+                    })) { Label("Variables", systemImage: "sidebar.right") }
+                        .toggleStyle(.button).help("Show or hide workspace variables")
+                        .accessibilityLabel("Show workspace variables")
+                }
                 Menu {
                     Button("100%") { canvasZoom = 1 }
                     Button("125%") { canvasZoom = 1.25 }
