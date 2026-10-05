@@ -1,5 +1,12 @@
 import SwiftUI
 
+private enum HCPWorkspaceSection: String, CaseIterable, Identifiable {
+    case map = "Map"
+    case runs = "Runs"
+    case variables = "Variables"
+    var id: String { rawValue }
+}
+
 struct HCPWorkspaceViewer: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
     let connectionOnly: Bool
@@ -7,7 +14,7 @@ struct HCPWorkspaceViewer: View {
     let onOpenWorkspaces: () -> Void
     @StateObject private var localConnections = LocalCloudConnectionsModel()
     @State private var workspaceSearch = ""
-    @State private var showingMap = true
+    @State private var section: HCPWorkspaceSection = .map
     @State private var showingWorkspaces = false
     @State private var inspectorRequest: HCPMapInspectorRequest?
 
@@ -66,38 +73,39 @@ struct HCPWorkspaceViewer: View {
             } else if model.isConnected {
                 HStack(spacing: 16) {
                     organizationPicker.frame(maxWidth: 270)
-                    if showingMap {
-                        Button { showingWorkspaces.toggle() } label: { Label("Workspaces", systemImage: "square.grid.2x2") }
-                            .accessibilityLabel("Choose cloud workspace")
-                            .popover(isPresented: $showingWorkspaces) {
-                                workspaceColumn.padding(16).frame(width: 340, height: 480)
-                            }
-                    }
+                    Button { showingWorkspaces.toggle() } label: { Label("Workspaces", systemImage: "square.grid.2x2") }
+                        .accessibilityLabel("Choose cloud workspace")
+                        .popover(isPresented: $showingWorkspaces) {
+                            workspaceColumn.padding(16).frame(width: 340, height: 480)
+                        }
                     Spacer()
-                Picker("Workspace view", selection: $showingMap) {
-                    Text("Map").tag(true)
-                    Text("Runs").tag(false)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                    Picker("Workspace view", selection: $section) {
+                        ForEach(HCPWorkspaceSection.allCases) { section in Text(section.rawValue).tag(section) }
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
                 }.padding(.bottom, 8)
-                if showingMap {
+                if section == .map {
                     Divider()
                     cloudMap.frame(minWidth: 550, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                } else if section == .variables {
+                    Divider()
+                    HCPMapVariablesPanel(model: model).id(model.mapRequestKey)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                GeometryReader { geometry in
-                    if geometry.size.width >= 960 {
-                        HSplitView {
-                            workspaceColumn.frame(minWidth: 210, idealWidth: 250, maxWidth: 330)
-                            runColumn.frame(minWidth: 260, idealWidth: 320, maxWidth: 390)
-                            runDetail.frame(minWidth: 360, maxWidth: .infinity)
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            compactSelection
-                            Divider()
-                            runDetail
+                    GeometryReader { geometry in
+                        if geometry.size.width >= 960 {
+                            HSplitView {
+                                workspaceColumn.frame(minWidth: 210, idealWidth: 250, maxWidth: 330)
+                                runColumn.frame(minWidth: 260, idealWidth: 320, maxWidth: 390)
+                                runDetail.frame(minWidth: 360, maxWidth: .infinity)
+                            }
+                        } else {
+                            VStack(spacing: 0) {
+                                compactSelection
+                                Divider()
+                                runDetail
+                            }
                         }
                     }
-                }
                 }
             } else {
                 disconnectedState
@@ -245,30 +253,30 @@ struct HCPWorkspaceViewer: View {
                     }
                 }
             }
-            if !showingMap {
-            HStack(spacing: 12) {
-                Picker("Run", selection: runSelection) {
-                    Text(model.runs.isEmpty ? "No remote runs loaded" : "Choose a run").tag(nil as String?)
-                    if let id = model.selectedRunID, !model.runs.contains(where: { $0.id == id }) {
-                        Text("Selected run · \(id)").tag(Optional(id))
+            if section == .runs {
+                HStack(spacing: 12) {
+                    Picker("Run", selection: runSelection) {
+                        Text(model.runs.isEmpty ? "No remote runs loaded" : "Choose a run").tag(nil as String?)
+                        if let id = model.selectedRunID, !model.runs.contains(where: { $0.id == id }) {
+                            Text("Selected run · \(id)").tag(Optional(id))
+                        }
+                        ForEach(model.runs) { run in
+                            Text("\(run.status.replacingOccurrences(of: "_", with: " ").capitalized) · \(run.message?.isEmpty == false ? run.message! : run.operation ?? run.id)")
+                                .tag(Optional(run.id))
+                        }
                     }
-                    ForEach(model.runs) { run in
-                        Text("\(run.status.replacingOccurrences(of: "_", with: " ").capitalized) · \(run.message?.isEmpty == false ? run.message! : run.operation ?? run.id)")
-                            .tag(Optional(run.id))
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .disabled(model.selectedWorkspaceID == nil)
+                    if model.runHasNextPage {
+                        Button("Load more") { Task { await model.loadNextRunPage() } }
+                            .disabled(model.isLoading)
+                            .accessibilityLabel("Load more remote runs")
                     }
+                    Button { Task { await model.refreshRuns(force: false) } } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Refresh run history").accessibilityLabel("Refresh remote run history")
+                        .disabled(model.isLoading || model.selectedWorkspaceID == nil)
                 }
-                .lineLimit(1).truncationMode(.middle)
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                .disabled(model.selectedWorkspaceID == nil)
-                if model.runHasNextPage {
-                    Button("Load more") { Task { await model.loadNextRunPage() } }
-                        .disabled(model.isLoading)
-                        .accessibilityLabel("Load more remote runs")
-                }
-                Button { Task { await model.refreshRuns(force: false) } } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Refresh run history").accessibilityLabel("Refresh remote run history")
-                    .disabled(model.isLoading || model.selectedWorkspaceID == nil)
-            }
             }
         }
         .buttonStyle(.borderless)
@@ -294,8 +302,8 @@ struct HCPWorkspaceViewer: View {
             stateVersionID: model.mapSnapshot?.versionID,
             stateCreatedAt: model.mapSnapshot?.stateCreatedAt,
             stateSerial: model.mapSnapshot?.stateSerial,
-            onShowHistory: { showingMap = false },
-            variablesPanel: AnyView(HCPMapVariablesPanel(model: model).id(model.mapRequestKey)))
+            onShowHistory: { section = .runs },
+            onShowVariables: { section = .variables })
         .task(id: model.mapRequestKey) { await model.refreshMap() }
         }
     }

@@ -50,3 +50,11 @@ Decisions Paul made for the Habitable design refresh, October 2026. Treat these 
 - Product flows use real user infrastructure, not sample cloud maps. New-workspace creation stays separate.
 - Connections holds HCP/TFE and local AWS/Azure/Google access. Organization selection is in the workspace top navigation, and Variables is a hide/show control at the far right.
 - Keep the map readable at native size; compare to the original exploration before calling a page ready. See [design acceptance](DESIGN-ACCEPTANCE.md) for the current comparison and review gate.
+
+## Window ownership (October 4, 2026 user decision)
+
+- HCP Terraform/Terraform Enterprise owns a separate native window for remote organizations and workspaces, including Map, Runs and Variables sections. It is not a destination inside a local workspace sidebar.
+- Local folders open in local-only workspace windows. Terraform commands are scoped to that window.
+- Shared Settings, including Connections, opens in its own reusable window. Folder-specific execution and Terraform settings remain explicitly scoped to their local workspace.
+- Windows link to one another. A local folder with an exact initialized cloud/remote backend identity can open that workspace in the cloud window. Do not infer a remote identity from a folder name; unresolved identities must not open a different workspace as a substitute.
+- This user direction supersedes the unified local/cloud Library proposal and the temporary cloud Variables bottom drawer. The Map retains its resource inventory and resource Inspector; cloud Variables is a dedicated workspace section.

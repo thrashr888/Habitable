@@ -896,6 +896,83 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         }
     }
 
+    /// Opens only the exact workspace identified by initialized Terraform
+    /// backend metadata. This deliberately avoids `connect()` because its normal
+    /// first-workspace selection would be misleading when the named workspace
+    /// is inaccessible or outside the bounded search window.
+    func openLinkedWorkspace(_ link: TerraformRemoteWorkspaceLink) async {
+        guard !isSample,
+              let host = HCPAPIClient.normalizedHostname(link.hostname),
+              host == link.hostname,
+              !link.organization.isEmpty, !link.workspaceName.isEmpty else {
+            errorMessage = "This Terraform backend does not identify a valid HCP workspace."
+            return
+        }
+
+        hostname = host
+        selectedOrganization = link.organization
+        selectedWorkspaceID = nil
+        workspaces = []
+        runs = []
+        cancelPolling()
+        runRefreshTime = .distantPast
+        workspacePage = 1
+        workspaceHasNextPage = false
+        isConnected = false
+        errorMessage = nil
+        let operation = UUID()
+        currentOperation = operation
+        guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {
+            hasStoredCredential = false
+            errorMessage = "No saved HCP credential is available for this Terraform backend."
+            return
+        }
+        hasStoredCredential = true
+        isLoading = true
+        defer { if currentOperation == operation { isLoading = false } }
+
+        let organization = link.organization
+        do {
+            var result = try await client.workspaces(hostname: host, organization: organization,
+                                                     token: token, page: 1)
+            guard !Task.isCancelled, currentOperation == operation,
+                  hostname == host, selectedOrganization == organization else { return }
+            var loaded = result.items
+            var match = loaded.first { $0.name == link.workspaceName }
+            while match == nil, result.hasNextPage, result.page < 5 {
+                result = try await client.workspaces(hostname: host, organization: organization,
+                                                     token: token, page: result.page + 1)
+                guard !Task.isCancelled, currentOperation == operation,
+                      hostname == host, selectedOrganization == organization else { return }
+                loaded.append(contentsOf: result.items)
+                match = result.items.first { $0.name == link.workspaceName }
+            }
+            let organizationPage = try? await client.organizations(hostname: host, token: token, page: 1)
+            guard !Task.isCancelled, currentOperation == operation,
+                  hostname == host, selectedOrganization == organization else { return }
+            organizations = organizationPage?.items ?? []
+            workspaces = loaded
+            workspacePage = result.page
+            workspaceHasNextPage = result.hasNextPage
+            isConnected = true
+            lastUpdated = Date()
+            guard let exactMatch = match else {
+                errorMessage = "The configured HCP workspace wasn’t found in the first 250 accessible workspaces."
+                return
+            }
+            // Clear loading before selecting: selectedWorkspaceID changes the
+            // operation token by design and starts the normal run refresh.
+            isLoading = false
+            selectedWorkspaceID = exactMatch.id
+            await refreshRuns(force: true)
+        } catch {
+            guard currentOperation == operation, hostname == host,
+                  selectedOrganization == organization else { return }
+            isConnected = false
+            errorMessage = "Couldn’t open the configured HCP workspace. Check access and try again."
+        }
+    }
+
     func refreshWorkspaces(nextPage: Bool = false) async {
         guard !isSample else { return }
         guard isConnected, let token = try? tokenStore.read(hostname: hostname) else { return }

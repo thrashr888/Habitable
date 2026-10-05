@@ -84,6 +84,80 @@ struct TerraformConfigurationMetadata: Sendable {
     var diagnostics: [String] = []
 }
 
+/// An external Terraform workspace URL derived only from initialized backend
+/// metadata. No remote lookup or credential access is performed.
+struct TerraformRemoteWorkspaceLink: Equatable, Sendable {
+    let hostname: String
+    let organization: String
+    let workspaceName: String
+    let url: URL
+
+    /// Reads only Terraform's initialized backend metadata file. Backends that
+    /// select workspaces by tag or prefix do not identify one exact workspace.
+    static func resolve(workingDirectory: URL) -> TerraformRemoteWorkspaceLink? {
+        let metadataURL = workingDirectory.appendingPathComponent(".terraform/terraform.tfstate")
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: metadataURL.path),
+              let size = attributes[.size] as? NSNumber, size.intValue <= 1_048_576,
+              let data = try? Data(contentsOf: metadataURL) else { return nil }
+        return resolve(backendMetadata: data)
+    }
+
+    /// Purely resolves an explicit `cloud` or `remote` backend configuration.
+    static func resolve(backendMetadata data: Data) -> TerraformRemoteWorkspaceLink? {
+        guard data.count <= 1_048_576,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let backend = root["backend"] as? [String: Any],
+              let type = backend["type"] as? String,
+              ["cloud", "remote"].contains(type),
+              let config = backend["config"] as? [String: Any],
+              let hostname = Self.backendHostname(config),
+              let rawOrganization = config["organization"] as? String,
+              let organization = Self.cleanSegment(rawOrganization),
+              let workspaces = config["workspaces"] as? [String: Any],
+              let rawWorkspace = workspaces["name"] as? String,
+              let workspaceName = Self.cleanSegment(rawWorkspace),
+              Self.exactWorkspaceSelector(workspaces) else { return nil }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = hostname
+        components.percentEncodedPath = "/app/\(Self.encodePathSegment(organization))/workspaces/\(Self.encodePathSegment(workspaceName))"
+        guard let url = components.url else { return nil }
+        return TerraformRemoteWorkspaceLink(hostname: hostname, organization: organization,
+                                           workspaceName: workspaceName, url: url)
+    }
+
+    private static func backendHostname(_ config: [String: Any]) -> String? {
+        guard let raw = config["hostname"] else { return "app.terraform.io" }
+        if raw is NSNull { return "app.terraform.io" }
+        guard let hostname = raw as? String else { return nil }
+        return HCPAPIClient.normalizedHostname(hostname)
+    }
+
+    private static func exactWorkspaceSelector(_ workspaces: [String: Any]) -> Bool {
+        // Terraform serializes unset optional attributes as JSON null. Tags or a
+        // prefix selector means this backend does not name one exact workspace.
+        for key in ["tags", "prefix"] {
+            guard let value = workspaces[key], !(value is NSNull) else { continue }
+            return false
+        }
+        return true
+    }
+
+    private static func cleanSegment(_ raw: String) -> String? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !value.contains("/"), !value.contains("\\"),
+              !value.contains("?"), !value.contains("#") else { return nil }
+        return value
+    }
+
+    private static func encodePathSegment(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.subtract(CharacterSet(charactersIn: "/?#%"))
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    }
+}
+
 enum TerraformConfigurationInspector {
     private static let maximumOutputBytes = 8 * 1_024 * 1_024
     private static let maximumRuntime: TimeInterval = 5

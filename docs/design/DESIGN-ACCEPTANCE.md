@@ -50,6 +50,16 @@ Final native build succeeded; full Swift suite: **288 tests, 8 skipped, 0 failur
 
 Final screenshots inspected locally: `/tmp/habitable-map-review/inspector-facts-final.jpg`, `/tmp/habitable-map-review/inspector-provenance-final.jpg`, `/tmp/habitable-map-review/variables-inspector-final.jpg`, `/tmp/habitable-map-review/grouped-connections-final.jpg`. These contain private workspace context and stay out of the repository. User visual acceptance remains pending on Habitable-9gp.
 
+## Separate workspace windows, October 4, 2026
+
+The user explicitly replaced the unified Library direction with separate HCP/TFE, local workspace, and Settings windows. HCP now owns the whole content area, with organization/workspace selection and Map, Runs and Variables sections. Cloud Variables is a full page. HCP Terraform and Connections are removed from the local workspace sidebar; titlebar and File/Window menu actions link the native windows. Folder-specific settings remain labeled Workspace settings; shared Connections opens in the reusable Settings window (also Command-comma). Cloud and Settings share connection state without sharing the local Terraform runner.
+
+Initialized named cloud/remote backends expose an Open in HCP Terraform link. The resolver reads bounded backend metadata only, accepts Terraform's null default hostname fields, and never infers a remote workspace from a directory name. Routing uses the exact hostname, organization and workspace name, checks up to five pages, refreshes available organizations, and fails explicitly without selecting another workspace. Broader uninitialized/tag/prefix/reverse-link discovery remains Habitable-5j9. A local folder whose state is remote shows a cloud handoff when no local state is loaded.
+
+Final validation: native build installed in the existing stable Preview; **292 Swift tests, 8 skipped, zero failures**, including serialized backend resolution, exact routing across pages and no-fallback routing. Live QA opened the real Rookery local folder and followed its link to Rookery in the cloud window, checked local navigation without cloud destinations, separate full-page Variables, Settings round-trip preserving the cloud section, restored windows and disabled local Terraform commands in the cloud window. No variables or infrastructure were changed. Extra local QA windows were closed, leaving one local window, the cloud window and Settings in the same app.
+
+Final live captures inspected: `/tmp/habitable-map-review/cloud-window-final.jpg`, `/tmp/habitable-map-review/cloud-variables-window-final.jpg`, `/tmp/habitable-map-review/local-window-final.jpg`, `/tmp/habitable-map-review/settings-window-final.jpg`. Private workspace screenshots remain local. The window boundary now matches the workspace-owned Map in Exploration B while following the user's newer cloud/local separation. Timeline, remote file/line provenance and visual acceptance retain their existing tracked gaps.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.
