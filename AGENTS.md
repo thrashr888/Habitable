@@ -91,4 +91,6 @@ bd close <id>         # Complete work
 
 ## Design refresh verification
 
+`DESIGN.md` is the visual and interaction source of truth and `WRITING.md` governs user-facing words; read both before UI or copy changes.
+
 For UI work, read `docs/design/DESIGN-ACCEPTANCE.md` and the relevant original exploration before editing. Compare the final running app to that reference and the user's later decisions before handoff. Preserve the accepted overrides recorded there. Passing tests/builds alone is not design acceptance. Use the single stable Habitable Preview, real workspaces for product flows, and screenshot-backed verification; report remaining mismatches in beads.
