@@ -15,6 +15,9 @@ struct HabitableApp: App {
             ContentView(initialDirectory: directory, cloud: cloud, onOpenRemoteWorkspace: { link in
                 Task { await cloud.openLinkedWorkspace(link) }
             })
+                // The restored window value can arrive after the first render; rebuilding
+                // on it keeps a Library window a Library and a folder window its folder.
+                .id(directory)
                 .frame(minWidth: 900, minHeight: 560)
         }
         .windowToolbarStyle(.unifiedCompact)
@@ -83,13 +86,20 @@ private struct CloudWorkspaceWindow: View {
     @Environment(\.openWindow) private var openWindow
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var localLinks = LocalWorkspaceLinkIndex()
+    @StateObject private var checkout = WorkspaceCheckoutCoordinator()
 
     /// Known local folders whose verified backend identity is the selected
-    /// remote workspace. Folder names are never used to infer a match.
+    /// remote workspace, plus folders this app checked out from it. Folder
+    /// names are never used to infer a match.
     private var linkedLocalFolders: [URL] {
         guard let workspace = model.selectedWorkspace else { return [] }
-        return localLinks.folders(hostname: model.hostname, organization: model.selectedOrganization,
-                                  workspaceName: workspace.name)
+        var folders = localLinks.folders(hostname: model.hostname, organization: model.selectedOrganization,
+                                         workspaceName: workspace.name)
+        for record in checkout.store.records(hostname: model.hostname, organization: model.selectedOrganization, workspaceID: workspace.id) {
+            let url = URL(fileURLWithPath: record.path, isDirectory: true)
+            if !folders.contains(where: { RecentWorkspaceStore.canonicalPath($0) == record.path }) { folders.append(url) }
+        }
+        return folders
     }
 
     var body: some View {
@@ -112,6 +122,17 @@ private struct CloudWorkspaceWindow: View {
                             }
                         } label: { Label("Open local folder", systemImage: "folder.badge.gearshape") }
                         .help("Local folders whose Terraform backend is this workspace")
+                    } else if let workspace = model.selectedWorkspace, workspace.vcs?.cloneURL != nil {
+                        if checkout.job != nil {
+                            LoadingIndicator(size: 14, label: "Checking out…")
+                        } else {
+                            Button {
+                                checkout.checkOut(workspace: workspace, organization: model.selectedOrganization, hostname: model.hostname) { folder in
+                                    openWindow(id: "Workspace.viewer", value: folder)
+                                }
+                            } label: { Label("Check Out…", systemImage: "arrow.down.to.line") }
+                            .help("Clone \(workspace.vcs?.displayName ?? "the repository") onto this Mac and open it")
+                        }
                     } else {
                         Button { openWindow(id: "Workspace.viewer") } label: { Label("Local workspace", systemImage: "folder") }
                     }
@@ -122,6 +143,10 @@ private struct CloudWorkspaceWindow: View {
             .onDisappear { model.setVisible(false) }
             .task { if !model.isConnected && !model.isLoading && model.hasStoredCredential { await model.connect() } }
             .task(id: recentWorkspaces.paths) { await localLinks.refresh(folders: recentWorkspaces.folders) }
+            .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in checkout.store.reload() }
+            .alert("Check Out", isPresented: Binding(get: { checkout.errorMessage != nil }, set: { if !$0 { checkout.errorMessage = nil } })) {
+                Button("OK", role: .cancel) { checkout.errorMessage = nil }
+            } message: { Text(checkout.errorMessage ?? "") }
     }
 }
 

@@ -53,9 +53,12 @@ struct ConnectionsPane: View {
         } else {
             Picker("Organization", selection: Binding(get: { model.selectedOrganization }, set: { organization in
                 guard organization != model.selectedOrganization else { return }
-                let reconnect = model.isConnected
-                model.selectedOrganization = organization
-                if reconnect { Task { await model.connect() } }
+                if model.isConnected {
+                    // Keep the connection and the organization list; reload only workspaces.
+                    Task { await model.switchOrganization(organization) }
+                } else {
+                    model.selectedOrganization = organization
+                }
             })) {
                 ForEach(model.organizations) { organization in Text(organization.name).tag(organization.name) }
             }

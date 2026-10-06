@@ -363,7 +363,7 @@ struct ResourceMapContent: View {
                         .padding(24)
                         .frame(width: viewport.size.width, alignment: .leading)
                     } else if isLoading && map == nil {
-                        ProgressView("Reading your infrastructure…")
+                        LoadingIndicator(size: 24, label: "Reading your infrastructure…")
                             .frame(width: viewport.size.width, height: 180)
                     } else if tiles.isEmpty {
                         VStack(spacing: 14) {

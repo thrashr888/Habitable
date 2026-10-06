@@ -35,6 +35,8 @@ final class LibraryModel: ObservableObject {
     @Published private(set) var summaries: [String: LibraryStateSummary] = [:]
     @Published private(set) var loading: Set<String> = []
     @Published private(set) var failures: [String: String] = [:]
+    @Published private(set) var lastRefresh: Date?
+    private var isRefreshingAll = false
 
     // MARK: Entries
 
@@ -96,35 +98,60 @@ final class LibraryModel: ObservableObject {
 
     private enum LocalRead: Sendable {
         case absent
+        case unchanged
         case unreadable
         case summary(LibraryStateSummary)
     }
 
-    nonisolated private static func readLocalState(folder: URL) -> LocalRead {
+    /// Pure: a cloud summary is reloaded only when the current state version differs
+    /// from the cached one. No current version means there is nothing to download.
+    nonisolated static func needsCloudReload(cached: LibraryStateSummary?, currentVersionID: String?) -> Bool {
+        guard let currentVersionID else { return false }
+        return cached?.versionID != currentVersionID
+    }
+
+    /// Pure: a local summary is re-read when the file's modification date changed.
+    nonisolated static func needsLocalReload(cached: LibraryStateSummary?, modified: Date?) -> Bool {
+        guard let cached, let cachedDate = cached.recordedAt, let modified else { return true }
+        return cachedDate != modified
+    }
+
+    nonisolated private static func readLocalState(folder: URL, cached: LibraryStateSummary?) -> LocalRead {
         let file = folder.appendingPathComponent("terraform.tfstate")
         guard FileManager.default.fileExists(atPath: file.path) else { return .absent }
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
-              let size = attributes[.size] as? NSNumber, size.intValue <= maximumStateBytes,
-              let data = try? Data(contentsOf: file),
+              let size = attributes[.size] as? NSNumber, size.intValue <= maximumStateBytes else { return .unreadable }
+        let modified = attributes[.modificationDate] as? Date
+        guard needsLocalReload(cached: cached, modified: modified) else { return .unchanged }
+        guard let data = try? Data(contentsOf: file),
               let resources = try? ResourceMapStateReader.read(data),
               let map = try? ResourceMapClassifier().classify(resources) else { return .unreadable }
         let serial = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["serial"] as? Int
-        return .summary(summary(for: map, recordedAt: attributes[.modificationDate] as? Date,
-                                serial: serial, versionID: nil))
+        return .summary(summary(for: map, recordedAt: modified, serial: serial, versionID: nil))
     }
 
+    /// Loads or refreshes one entry. Local: re-reads when the state file changed.
+    /// Cloud: asks for the current state version id first and skips the download
+    /// when it matches the cached summary.
     func loadSummary(for entry: LibraryEntry, cloud: HCPWorkspaceViewerModel?) async {
         guard !loading.contains(entry.id) else { return }
         switch entry.kind {
         case .localFolder(let folder, _):
-            guard summaries[entry.id] == nil else { return }
             loading.insert(entry.id)
             defer { loading.remove(entry.id) }
-            let result = await Task.detached(priority: .utility) { Self.readLocalState(folder: folder) }.value
+            let cached = summaries[entry.id]
+            let result = await Task.detached(priority: .utility) {
+                Self.readLocalState(folder: folder, cached: cached)
+            }.value
             guard !Task.isCancelled else { return }
             switch result {
-            case .absent: failures[entry.id] = nil
-            case .unreadable: failures[entry.id] = "State file couldn’t be read."
+            case .unchanged: failures[entry.id] = nil
+            case .absent:
+                summaries[entry.id] = nil
+                failures[entry.id] = nil
+            case .unreadable:
+                summaries[entry.id] = nil
+                failures[entry.id] = "State file couldn’t be read."
             case .summary(let summary):
                 summaries[entry.id] = summary
                 failures[entry.id] = nil
@@ -134,16 +161,26 @@ final class LibraryModel: ObservableObject {
             loading.insert(entry.id)
             defer { loading.remove(entry.id) }
             do {
+                let versionID = try await cloud.librarySnapshotVersionID(for: workspace)
+                guard !Task.isCancelled else { return }
+                guard let versionID else {
+                    summaries[entry.id] = nil   // No current state version: no summary, not a failure.
+                    failures[entry.id] = nil
+                    return
+                }
+                guard Self.needsCloudReload(cached: summaries[entry.id], currentVersionID: versionID) else {
+                    failures[entry.id] = nil
+                    return
+                }
                 let snapshot = try await cloud.librarySnapshot(for: workspace)
                 guard !Task.isCancelled else { return }
-                if summaries[entry.id]?.versionID == snapshot.versionID { return }
                 summaries[entry.id] = Self.summary(for: snapshot.map, recordedAt: snapshot.stateCreatedAt,
                                                    serial: snapshot.stateSerial, versionID: snapshot.versionID)
                 failures[entry.id] = nil
             } catch {
                 guard !Task.isCancelled else { return }
                 if case HCPViewerError.response(status: 404, message: _) = error {
-                    failures[entry.id] = nil   // No current state version: no summary, not a failure.
+                    failures[entry.id] = nil
                 } else if case HCPViewerError.response(status: 403, message: _) = error {
                     failures[entry.id] = "Your credential cannot read this workspace’s state."
                 } else if case HCPViewerError.noCredential = error {
@@ -154,4 +191,33 @@ final class LibraryModel: ObservableObject {
             }
         }
     }
+
+    /// Loads or refreshes summaries for all entries with bounded concurrency (3),
+    /// local first, then cloud. A second call while one runs is ignored.
+    func refreshAll(_ entries: [LibraryEntry], cloud: HCPWorkspaceViewerModel?) async {
+        guard !isRefreshingAll else { return }
+        isRefreshingAll = true
+        defer { isRefreshingAll = false }
+        let ordered = entries.filter(\.isLocal) + entries.filter(\.isCloud)
+        // Fixed worker pool: three workers pull from a shared queue on the main actor.
+        let queue = WorkQueue(ordered)
+        let workers = (0..<min(3, ordered.count)).map { _ in
+            Task { @MainActor in
+                while let entry = queue.next() { await self.loadSummary(for: entry, cloud: cloud) }
+            }
+        }
+        await withTaskCancellationHandler {
+            for worker in workers { await worker.value }
+        } onCancel: {
+            for worker in workers { worker.cancel() }
+        }
+        if !Task.isCancelled { lastRefresh = Date() }
+    }
+}
+
+@MainActor
+private final class WorkQueue {
+    private var items: [LibraryEntry]
+    init(_ items: [LibraryEntry]) { self.items = items.reversed() }
+    func next() -> LibraryEntry? { Task.isCancelled ? nil : items.popLast() }
 }
