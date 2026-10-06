@@ -338,6 +338,128 @@ struct HCPAPIClient: Sendable {
         catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
     }
 
+    // MARK: Writes for the making-changes flow
+
+    private func writeURL(hostname: String, path: String) throws -> URL {
+        guard let host = Self.normalizedHostname(hostname), let base = URL(string: "https://\(host)"),
+              let url = URL(string: path, relativeTo: base)?.absoluteURL else { throw HCPViewerError.invalidHost }
+        return url
+    }
+
+    private func writeResponseError(status: Int) -> HCPViewerError {
+        let message: String
+        switch status {
+        case 401: message = "The token was rejected. Reimport a user or team token."
+        case 403: message = "This account cannot change that workspace. Check its permissions and entitlements."
+        case 404: message = "The workspace or run is unavailable to this account."
+        case 409: message = "The run is not in a state that allows this action."
+        case 422: message = "HCP Terraform could not accept this change. Check the workspace settings."
+        case 429: message = "HCP Terraform is limiting requests. Wait before trying again."
+        default: message = "The request could not be completed."
+        }
+        return .response(status: status, message: message)
+    }
+
+    /// Sends a JSON:API write and returns the decoded body (empty object when the body is empty). 2xx is success.
+    private func send(method: String, path: String, hostname: String, token: String, body: [String: Any]?) async throws -> [String: Any] {
+        var request = URLRequest(url: try writeURL(hostname: hostname, path: path))
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Accept")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 25
+        if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
+        do {
+            let (data, response) = try await boundedData(for: request, limit: Self.apiResponseLimit)
+            guard let http = response as? HTTPURLResponse else { throw HCPViewerError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else { throw writeResponseError(status: http.statusCode) }
+            if data.isEmpty { return [:] }
+            return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
+    }
+
+    func createConfigurationVersion(hostname: String, workspaceID: String, speculative: Bool,
+                                    token: String) async throws -> (id: String, uploadURL: URL) {
+        let body: [String: Any] = ["data": ["type": "configuration-versions",
+                                            "attributes": ["auto-queue-runs": false, "speculative": speculative]] as [String: Any]]
+        let object = try await send(method: "POST", path: "/api/v2/workspaces/\(pathComponent(workspaceID))/configuration-versions",
+                                    hostname: hostname, token: token, body: body)
+        guard let row = object["data"] as? [String: Any], let id = row["id"] as? String, !id.isEmpty,
+              let attributes = row["attributes"] as? [String: Any],
+              let value = attributes["upload-url"] as? String, let url = secureArtifactURL(value) else {
+            throw HCPViewerError.invalidResponse
+        }
+        return (id, url)
+    }
+
+    /// The upload URL is signed; the API token is never sent to it.
+    func uploadConfiguration(archive: Data, to uploadURL: URL) async throws {
+        guard secureArtifactURL(uploadURL.absoluteString) != nil else { throw HCPViewerError.invalidResponse }
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        do {
+            let (_, response) = try await session.upload(for: request, from: archive)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw HCPViewerError.transport("Could not upload the configuration to HCP Terraform. Try again.")
+            }
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not upload the configuration to HCP Terraform. Check the connection and try again.") }
+    }
+
+    func createRun(hostname: String, organization: String, workspaceID: String, workspaceName: String,
+                   configurationVersionID: String, message: String, planOnly: Bool, token: String) async throws -> HCPRun {
+        let body = HCPProposal.previewRequestBody(workspaceID: workspaceID, configurationVersionID: configurationVersionID,
+                                                  message: message, planOnly: planOnly)
+        let object = try await send(method: "POST", path: "/api/v2/runs", hostname: hostname, token: token, body: body)
+        guard let row = object["data"] as? [String: Any],
+              let run = decodeRun(row, hostname: hostname, organization: organization,
+                                  workspaceID: workspaceID, workspaceName: workspaceName) else { throw HCPViewerError.invalidResponse }
+        return run
+    }
+
+    func run(hostname: String, organization: String, workspaceID: String, workspaceName: String,
+             runID: String, token: String) async throws -> HCPRun {
+        let object = try await get(path: "/api/v2/runs/\(pathComponent(runID))", hostname: hostname, token: token)
+        guard let row = object["data"] as? [String: Any], row["id"] as? String == runID,
+              let run = decodeRun(row, hostname: hostname, organization: organization,
+                                  workspaceID: workspaceID, workspaceName: workspaceName) else { throw HCPViewerError.invalidResponse }
+        return run
+    }
+
+    func applyRun(hostname: String, runID: String, comment: String, token: String) async throws {
+        _ = try await send(method: "POST", path: "/api/v2/runs/\(pathComponent(runID))/actions/apply",
+                           hostname: hostname, token: token, body: ["comment": comment])
+    }
+
+    func discardRun(hostname: String, runID: String, comment: String, token: String) async throws {
+        _ = try await send(method: "POST", path: "/api/v2/runs/\(pathComponent(runID))/actions/discard",
+                           hostname: hostname, token: token, body: ["comment": comment])
+    }
+
+    /// The structured plan (`terraform show -json` format). HCP answers 307 to a signed archivist URL,
+    /// which `HCPPlanArtifactRedirectPolicy` follows without the API credential.
+    func planJSONOutput(hostname: String, planID: String, token: String) async throws -> Data {
+        var request = URLRequest(url: try writeURL(hostname: hostname, path: "/api/v2/plans/\(pathComponent(planID))/json-output"))
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 25
+        let failure = HCPViewerError.transport("Could not download the plan. Try again.")
+        do {
+            let delegate = HCPPlanArtifactRedirectPolicy(apiHost: Self.normalizedHostname(hostname) ?? "")
+            let (data, response) = try await boundedData(for: request, limit: 32 * 1024 * 1024, delegate: delegate)
+            guard let http = response as? HTTPURLResponse else { throw HCPViewerError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                if http.statusCode == 404 { throw writeResponseError(status: 404) }
+                throw failure
+            }
+            return data
+        } catch let error as HCPViewerError { throw error }
+        catch { throw failure }
+    }
+
     func runDetails(hostname: String, organization: String, run: HCPRun, token: String) async throws -> HCPRunDetails {
         let object = try await get(path: "/api/v2/runs/\(pathComponent(run.id))", hostname: hostname, token: token,
                                   query: [URLQueryItem(name: "include", value: "plan,apply")])
@@ -760,6 +882,38 @@ final class HCPStateArtifactRedirectPolicy: NSObject, URLSessionTaskDelegate, @u
     }
 }
 
+/// The plan JSON endpoint redirects to a signed archivist URL. Follow only that hop (or a same-origin
+/// Enterprise redirect), and never forward the API credential to another host.
+final class HCPPlanArtifactRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let apiHost: String
+    init(apiHost: String) { self.apiHost = apiHost }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let source = task.originalRequest?.url,
+              source.scheme == "https", source.host?.lowercased() == apiHost, (source.port ?? 443) == 443,
+              source.path.hasPrefix("/api/v2/plans/"), task.originalRequest?.httpMethod == "GET",
+              let target = request.url, target.scheme == "https", (target.port ?? 443) == 443,
+              target.user == nil, target.password == nil, let targetHost = target.host?.lowercased() else {
+            completionHandler(nil)
+            return
+        }
+        if targetHost == apiHost {
+            completionHandler(request)
+        } else if apiHost == "app.terraform.io", targetHost == "archivist.terraform.io" {
+            var sanitized = URLRequest(url: target)
+            sanitized.httpMethod = "GET"
+            sanitized.timeoutInterval = request.timeoutInterval
+            sanitized.httpShouldHandleCookies = false
+            completionHandler(sanitized)
+        } else {
+            completionHandler(nil)
+        }
+    }
+}
+
 /// Credentialed API requests may only follow redirects within their original HTTPS origin.
 /// Signed artifact requests have no API bearer and are allowed to follow HTTPS storage redirects.
 final class HCPRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
@@ -829,6 +983,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         isLoadingMap = false
         invalidateHistory()
         invalidateVariables()
+        invalidateProposal()
     }
 
     private func invalidateHistory() {
@@ -904,6 +1059,214 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         guard let version = stateVersions.first(where: { $0.runID == runID }) else { return false }
         await showStateVersion(version)
         return true
+    }
+
+    // MARK: Making changes (API-driven runs)
+
+    @Published private(set) var proposal: HCPProposal?
+    @Published private(set) var proposalError: String?
+    @Published private(set) var proposalPreview: MapChangePreview?
+    @Published private(set) var isProposing = false
+    @Published private(set) var previewedRunID: String?
+    private var proposalOperation = UUID()
+    private var proposalTask: Task<Void, Never>?
+    private var proposalPlanAttempted = false
+
+    private func invalidateProposal() {
+        proposalOperation = UUID()
+        proposalTask?.cancel()
+        proposalTask = nil
+        proposal = nil
+        proposalError = nil
+        proposalPreview = nil
+        previewedRunID = nil
+        isProposing = false
+        proposalPlanAttempted = false
+    }
+
+    func dismissProposal() { invalidateProposal() }
+
+    private func proposalFailureMessage(_ error: Error, fallback: String) -> String {
+        if let viewer = error as? HCPViewerError, case .response(_, let message) = viewer { return message }
+        if let viewer = error as? HCPViewerError, case .transport(let message) = viewer { return message }
+        if let archive = error as? ConfigurationArchive.ArchiveError { return archive.errorDescription ?? fallback }
+        return fallback
+    }
+
+    /// Downloads and parses a plan's JSON output against the current map; nil when unavailable.
+    private func loadPlanPreview(hostname host: String, planID: String, token: String) async -> MapChangePreview? {
+        guard let data = try? await client.planJSONOutput(hostname: host, planID: planID, token: token),
+              let text = String(data: data, encoding: .utf8), let plan = parseTerraformPlan(text) else { return nil }
+        let map = mapSnapshot?.map ?? ResourceMap(tiles: [], connections: [], dataSources: [])
+        return try? MapChangePreview.build(plan: plan, currentMap: map)
+    }
+
+    /// Shows the planned changes for any run (for example one HCP created from a pull request).
+    func showPlanPreview(for run: HCPRun) async {
+        guard !isSample, isConnected, let workspace = selectedWorkspace,
+              let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
+        let host = hostname, organization = selectedOrganization
+        let operation = proposalOperation
+        do {
+            var planID = run.planID
+            if planID == nil {
+                let fresh = try await client.run(hostname: host, organization: organization, workspaceID: workspace.id,
+                                                 workspaceName: workspace.name, runID: run.id, token: token)
+                planID = fresh.planID
+            }
+            guard let planID else { proposalError = "This run has no plan to preview yet."; return }
+            let preview = await loadPlanPreview(hostname: host, planID: planID, token: token)
+            guard proposalOperation == operation, selectedWorkspaceID == workspace.id else { return }
+            guard let preview else { proposalError = "Couldn’t read this run’s plan. Open it in HCP Terraform instead."; return }
+            proposalPreview = preview
+            previewedRunID = run.id
+            proposalError = nil
+        } catch {
+            guard proposalOperation == operation else { return }
+            proposalError = proposalFailureMessage(error, fallback: "Couldn’t load this run’s plan. Try again.")
+        }
+    }
+
+    func confirmApply(run: HCPRun) async {
+        if await applyRunAction(runID: run.id, discard: false) { await refreshRuns(force: true) }
+    }
+
+    func discard(run: HCPRun) async {
+        if await applyRunAction(runID: run.id, discard: true) { await refreshRuns(force: true) }
+    }
+
+    /// Shared apply/discard call; sets `proposalError` and returns false on failure.
+    private func applyRunAction(runID: String, discard: Bool) async -> Bool {
+        guard !isSample, isConnected, let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return false }
+        let operation = proposalOperation
+        do {
+            if discard {
+                try await client.discardRun(hostname: hostname, runID: runID, comment: "Discarded in Habitable", token: token)
+            } else {
+                try await client.applyRun(hostname: hostname, runID: runID, comment: "Approved in Habitable", token: token)
+            }
+            guard proposalOperation == operation else { return false }
+            proposalError = nil
+            return true
+        } catch {
+            guard proposalOperation == operation else { return false }
+            proposalError = proposalFailureMessage(error, fallback: discard ? "Couldn’t discard this run. Try again." : "Couldn’t apply this run. Try again.")
+            return false
+        }
+    }
+
+    /// Uploads the folder as a configuration version and starts a run that waits for confirmation.
+    func propose(folder: URL, message: String) async {
+        guard !isSample, isConnected, let workspace = selectedWorkspace else { return }
+        guard let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else {
+            proposalError = "Your HCP credential is unavailable. Reconnect to propose a change."
+            return
+        }
+        invalidateProposal()
+        let operation = UUID()
+        proposalOperation = operation
+        let host = hostname, organization = selectedOrganization
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let runMessage = trimmed.isEmpty ? "Proposed from Habitable" : String(trimmed.prefix(500))
+        isProposing = true
+        defer { if proposalOperation == operation { isProposing = false } }
+        do {
+            let archive = try await Task.detached { try ConfigurationArchive.make(folder: folder) }.value
+            let version = try await client.createConfigurationVersion(hostname: host, workspaceID: workspace.id,
+                                                                       speculative: false, token: token)
+            guard proposalOperation == operation else { return }
+            try await client.uploadConfiguration(archive: archive, to: version.uploadURL)
+            guard proposalOperation == operation else { return }
+            let run = try await client.createRun(hostname: host, organization: organization, workspaceID: workspace.id,
+                                                 workspaceName: workspace.name, configurationVersionID: version.id,
+                                                 message: runMessage, planOnly: false, token: token)
+            guard proposalOperation == operation, isConnected, hostname == host,
+                  selectedOrganization == organization, selectedWorkspaceID == workspace.id else { return }
+            proposal = HCPProposal(runID: run.id, workspaceID: workspace.id, message: runMessage,
+                                   createdAt: run.createdAt ?? Date(), status: run.status, planID: run.planID, folder: folder)
+            proposalError = nil
+            await refreshRuns(force: true)
+            guard proposalOperation == operation else { return }
+            pollProposal()
+        } catch {
+            guard proposalOperation == operation else { return }
+            proposalError = proposalFailureMessage(error, fallback: "Couldn’t start the run. Check access and try again.")
+        }
+    }
+
+    /// Polls the proposal's run every 4 seconds until it needs confirmation or finishes.
+    func pollProposal() {
+        proposalTask?.cancel()
+        guard proposal != nil else { return }
+        let operation = proposalOperation
+        proposalTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.proposalOperation == operation else { return }
+                if await self.pollProposalOnce(operation: operation) { return }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+    }
+
+    /// One poll step. Returns true when polling should stop.
+    private func pollProposalOnce(operation: UUID) async -> Bool {
+        guard let current = proposal, isConnected, let workspace = selectedWorkspace, workspace.id == current.workspaceID,
+              let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return true }
+        let host = hostname, organization = selectedOrganization
+        do {
+            let run = try await client.run(hostname: host, organization: organization, workspaceID: workspace.id,
+                                           workspaceName: workspace.name, runID: current.runID, token: token)
+            guard proposalOperation == operation, proposal?.runID == current.runID else { return true }
+            proposal?.status = run.status
+            proposal?.planID = run.planID ?? proposal?.planID
+            proposalError = nil
+            let planReady = ["planned", "cost_estimated", "policy_checked", "applied", "confirmed", "apply_queued", "applying"].contains(run.status)
+            if planReady, let planID = run.planID, !proposalPlanAttempted {
+                proposalPlanAttempted = true
+                if let preview = await loadPlanPreview(hostname: host, planID: planID, token: token), proposalOperation == operation {
+                    proposalPreview = preview
+                    previewedRunID = current.runID
+                }
+            }
+            switch HCPProposal.step(forStatus: run.status) {
+            case .planning, .applying:
+                return false
+            case .applied:
+                await finishProposalRefresh(operation: operation)
+                return true
+            case .needsConfirmation, .errored, .discarded, .uploading:
+                return true
+            }
+        } catch {
+            guard proposalOperation == operation else { return true }
+            proposalError = proposalFailureMessage(error, fallback: "Couldn’t check the run. Retrying.")
+            // A rejected credential or missing run will not recover by polling.
+            if case HCPViewerError.response(let status, _) = error, [401, 403, 404].contains(status) { return true }
+            return false
+        }
+    }
+
+    private func finishProposalRefresh(operation: UUID) async {
+        await refreshRuns(force: true)
+        guard proposalOperation == operation else { return }
+        await refreshMap()
+    }
+
+    func confirmProposalApply() async {
+        guard let current = proposal else { return }
+        let operation = proposalOperation
+        guard await applyRunAction(runID: current.runID, discard: false), proposalOperation == operation else { return }
+        proposal?.status = "confirmed"
+        pollProposal()
+    }
+
+    func discardProposal() async {
+        guard let current = proposal else { return }
+        let operation = proposalOperation
+        guard await applyRunAction(runID: current.runID, discard: true), proposalOperation == operation else { return }
+        proposalTask?.cancel()
+        proposal?.status = "discarded"
+        await refreshRuns(force: true)
     }
 
     private func invalidateVariables() {

@@ -19,10 +19,11 @@ Habitable is built around a few short paths. Each starts in the **Library** (Fil
 2. Open a workspace: the Map reads its current state. The **Changes** strip lists its runs; click one to see the Map as it was after that run, then return to the current state.
 3. **Variables** shows workspace variables and the variable sets applied to it; private values stay hidden.
 4. **Check Out…** clones a repository-backed workspace into `~/Documents/Habitable` and opens it as a local folder. From then on the two windows link to each other, and "Defined in" resolves file and line from the checkout with a link to the repository host.
+5. **Make a change.** The Inspector's **Proposal** face starts a change from a folder on this Mac. For a repository-backed workspace, edit the checkout in your editor; Habitable creates the branch, commits, pushes and opens the pull request, and HCP Terraform plans it. For an API-driven workspace, Habitable uploads the folder as a configuration version and starts the run. Either way the plan lands on the Map like a local preview, and you confirm the apply from Habitable. Habitable never applies from your Mac.
 
 **Between the two.** A local folder whose backend is HCP Terraform opens its workspace with one click, and a workspace knows which folders on this Mac belong to it, whether by backend or by checkout.
 
-Not yet in these paths: previewing a cloud workspace's speculative plan on the Map, and the Needs attention view only reflects what HCP Terraform itself records.
+Not yet in these paths: policy and cost checks inline on the Map, and the Needs attention view only reflects what HCP Terraform itself records.
 
 ## Install
 

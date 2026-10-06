@@ -192,6 +192,17 @@ Still open from the design: Exploration D's empty-map welcome, ⌘K, and preview
 | Latest on the right | With no selection the strip scrolls to its right edge on appear and when runs arrive. | Live on Rookery (24 runs). |
 | New-run card | A dotted accent card ends the strip: **Preview Changes** (or **Preview and apply**) in a local window; **New run in HCP Terraform** in the cloud window, which opens the workspace's new-run page since Habitable does not queue remote runs. | Live in both windows; the cloud card's link not clicked. |
 
+## Making changes (Exploration G), October 6, 2026
+
+| Figure | Change | Verified |
+| --- | --- | --- |
+| Proposal face | The cloud inspector gains a **Proposal** face. With no folder on this Mac it offers Check Out… (repository-backed) or Choose Folder…. API-driven workspaces: folder row, message, **Start Run in HCP Terraform**, then a card with steps Uploaded → Planned → Confirmed → Applied and **Discard** / **Confirm Apply**. Repository-backed: files changed in the checkout, message, **Open Pull Request…** (branch `habitable/<slug>`, commit, push, `gh pr create`), then the PR card (number, branches, state, review decision, +/−) with **View on GitHub**, **Merge…** (`gh pr merge --squash --delete-branch`), **Close Proposal**, and other open pull requests. **Latest runs** lists the four newest remote runs with **Show on Map**, and **Confirm Apply** / **Discard** on a planned one. | Live: face renders for `blank` with the linked folder; the empty Map's **Make a change…** and the strip's dotted card open it. Starting a real run was blocked by this session's permission classifier (it writes to HCP Terraform); the API calls are unit-tested but not yet exercised live. `gh` calls are untested against GitHub. |
+| The PR's plan is the preview | A remote run's plan JSON (`/plans/{id}/json-output`) renders on the Map through `MapChangePreview` against the current state; the review bar reads **Discard Run** / **Confirm Apply** with a caption naming the run. Nothing changes until Confirm Apply, which calls HCP's apply action. | Built; awaits a live run. |
+| Every apply is remote | `HCPAPIClient` gains configuration-version create and upload (tar.gz of the folder without `.git`, `.terraform`, state files), run create, run fetch, apply and discard; plan downloads follow HCP's redirect to archivist without the token. `GitProposal` wraps git and `gh` with redacted errors. | Unit-tested (HCPProposalTests 4, GitProposalTests 4 incl. a bare-repo fixture). |
+| Words | WRITING.md's safety sentence is now "Habitable never applies from your Mac. Runs happen in HCP Terraform; you confirm them here." The disconnected prompt and the Proposal footnote carry it. | Done. |
+
+Not in this round: policy and cost checks on the Map, approvals and conversation from GitHub, hold-to-apply for replace and destroy, and `terraform_data`-style previews for templates.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

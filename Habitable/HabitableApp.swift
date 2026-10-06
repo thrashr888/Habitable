@@ -191,7 +191,11 @@ private struct CloudWorkspaceWindow: View {
 
     var body: some View {
         HCPWorkspaceViewer(model: model,
-            onOpenConnections: { openWindow(id: "App.settings") })
+            onOpenConnections: { openWindow(id: "App.settings") },
+            linkedFolders: linkedLocalFolders,
+            onCheckOut: model.selectedWorkspace.map { workspace in
+                { checkout.checkOut(workspace: workspace, organization: model.selectedOrganization, hostname: model.hostname) { _ in } }
+            })
             .navigationTitle(model.selectedWorkspace?.name ?? "HCP Terraform")
             .navigationSubtitle(model.isConnected ? "\(model.selectedOrganization) · HCP Terraform" : "")
             .toolbar {
