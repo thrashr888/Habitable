@@ -16,6 +16,22 @@ struct LibraryView: View {
     @State private var section: Section = .all
     @State private var filter = ""
     @StateObject private var checkout = WorkspaceCheckoutCoordinator()
+    @State private var showAllTags = false
+    @AppStorage("library.sort") private var sortOrder = LibrarySort.lastChange.rawValue
+    private var sort: LibrarySort { LibrarySort(rawValue: sortOrder) ?? .lastChange }
+
+    enum LibrarySort: String, CaseIterable, Identifiable {
+        case lastChange, name, resources, status
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .lastChange: "Last change"
+            case .name: "Name"
+            case .resources: "Resources"
+            case .status: "Status"
+            }
+        }
+    }
 
     private var cloudEntries: [LibraryEntry] {
         guard cloud.isConnected, !cloud.selectedOrganization.isEmpty else { return [] }
@@ -76,14 +92,37 @@ struct LibraryView: View {
         Array(Set(cloudEntries.compactMap { workspace(of: $0)?.projectName })).sorted()
     }
 
-    private var tagCounts: [(tag: String, count: Int)] {
+    /// Tags belong to the organization; the busiest few show under it and the
+    /// rest fold behind "N more".
+    private var allTagCounts: [(tag: String, count: Int)] {
         var counts: [String: Int] = [:]
         for entry in cloudEntries { for tag in workspace(of: entry)?.tagNames ?? [] { counts[tag, default: 0] += 1 } }
-        return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(6).map { ($0.key, $0.value) }
+        return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.map { ($0.key, $0.value) }
+    }
+    private var tagCounts: [(tag: String, count: Int)] { showAllTags ? allTagCounts : Array(allTagCounts.prefix(8)) }
+
+    private func resourceCount(of entry: LibraryEntry) -> Int {
+        summary(for: entry)?.resourceCount ?? workspace(of: entry)?.resourceCount ?? explorer(for: entry)?.resourceCount ?? -1
+    }
+
+    private func statusRank(of entry: LibraryEntry) -> Int {
+        guard let status = status(for: entry) else { return 9 }
+        switch status.color {
+        case .red: return 0
+        case .orange: return 1
+        case Color.accentColor: return 2
+        case .green: return 4
+        default: return 3
+        }
     }
 
     private func byLastChange(_ entries: [LibraryEntry]) -> [LibraryEntry] {
-        entries.sorted { (lastChange(of: $0) ?? .distantPast) > (lastChange(of: $1) ?? .distantPast) }
+        switch sort {
+        case .lastChange: entries.sorted { (lastChange(of: $0) ?? .distantPast) > (lastChange(of: $1) ?? .distantPast) }
+        case .name: entries.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .resources: entries.sorted { resourceCount(of: $0) > resourceCount(of: $1) }
+        case .status: entries.sorted { statusRank(of: $0) == statusRank(of: $1) ? $0.title < $1.title : statusRank(of: $0) < statusRank(of: $1) }
+        }
     }
 
     private var visibleLocal: [LibraryEntry] {
@@ -116,6 +155,7 @@ struct LibraryView: View {
             sheet
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .disclosureGroupStyle(HeaderDisclosureStyle())
         .alert("Check Out", isPresented: Binding(get: { checkout.errorMessage != nil }, set: { if !$0 { checkout.errorMessage = nil } })) {
             Button("OK", role: .cancel) { checkout.errorMessage = nil }
         } message: { Text(checkout.errorMessage ?? "") }
@@ -163,13 +203,20 @@ struct LibraryView: View {
                                                count: cloudEntries.filter { workspace(of: $0)?.projectName == project }.count,
                                                tag: .project(project), indent: true)
                                 }
-                            }
-                        }
-                        if !tagCounts.isEmpty {
-                            Text("Tags").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
-                            ForEach(tagCounts, id: \.tag) { item in
-                                sidebarRow(item.tag, symbol: nil, count: item.count, tag: .tag(item.tag), dot: tagColor(item.tag))
+                                if !allTagCounts.isEmpty {
+                                    Text("Tags").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                                        .padding(.leading, 36).padding(.top, 10).padding(.bottom, 4)
+                                    ForEach(tagCounts, id: \.tag) { item in
+                                        sidebarRow(item.tag, symbol: nil, count: item.count, tag: .tag(item.tag), indent: true, dot: tagColor(item.tag))
+                                            .help(item.tag)
+                                    }
+                                    if allTagCounts.count > 8 {
+                                        Button(showAllTags ? "Show fewer" : "\(allTagCounts.count - 8) more…") { showAllTags.toggle() }
+                                            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                                            .padding(.leading, 36).padding(.vertical, 4)
+                                            .help(allTagCounts.dropFirst(8).map(\.tag).joined(separator: ", "))
+                                    }
+                                }
                             }
                         }
                     }
@@ -258,6 +305,13 @@ struct LibraryView: View {
                         Text("Library").font(.system(size: 22, weight: .semibold))
                         Spacer()
                         FilterField(placeholder: "Filter workspaces", text: $filter).frame(maxWidth: 260)
+                        Menu {
+                            Picker("Sort by", selection: $sortOrder) {
+                                ForEach(LibrarySort.allCases) { order in Text(order.title).tag(order.rawValue) }
+                            }.pickerStyle(.inline)
+                        } label: { Label(sort.title, systemImage: "arrow.up.arrow.down") }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .help("Sort workspaces")
                         Button("Open Folder…", action: onChooseFolder).buttonStyle(.bordered)
                     }
                     if case .all = section, !attentionEntries.isEmpty, filter.isEmpty {
@@ -275,7 +329,7 @@ struct LibraryView: View {
                         group(section == .recent ? "Recent on this Mac" : "This Mac", entries: visibleLocal)
                     }
                     if !visibleCloud.isEmpty {
-                        group(cloudGroupTitle, entries: visibleCloud, subtitle: "Sorted by last change")
+                        group(cloudGroupTitle, entries: visibleCloud, subtitle: "Sorted by \(sort.title.lowercased())")
                     }
                     if case .cloud = section, cloud.workspaceHasNextPage {
                         Button("Load More Workspaces") { Task { await cloud.loadNextWorkspacePage() } }
@@ -364,7 +418,8 @@ struct LibraryView: View {
                                 checkoutNote: checkoutNote(for: entry),
                                 recordedCount: workspace(of: entry)?.resourceCount ?? explorer(for: entry)?.resourceCount,
                                 status: status(for: entry),
-                                tags: workspace(of: entry)?.tagNames ?? [], tagColor: tagColor) { open(entry) }
+                                tags: workspace(of: entry)?.tagNames ?? [], tagColor: tagColor,
+                                description: workspace(of: entry)?.description) { open(entry) }
                         .contextMenu { cardMenu(entry) }
                 }
             }
@@ -450,6 +505,7 @@ private struct LibraryCard: View {
     var status: Status? = nil
     var tags: [String] = []
     var tagColor: (String) -> Color = { _ in .secondary }
+    var description: String? = nil
     let onOpen: () -> Void
     @State private var hovering = false
 
@@ -469,6 +525,9 @@ private struct LibraryCard: View {
                         Text(entry.title).font(.system(size: 14, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                     }
                     Text(entry.location).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    if let description, !description.isEmpty {
+                        Text(description).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                    }
                     HStack(spacing: 6) {
                         Text(detailLine).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                         Spacer(minLength: 4)

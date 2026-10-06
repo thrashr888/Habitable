@@ -79,3 +79,29 @@ struct FilterField: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 }
+
+/// A disclosure whose whole header toggles it, not only the chevron.
+struct HeaderDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { configuration.isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                        .frame(width: 12)
+                    configuration.label
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(configuration.isExpanded ? [.isSelected] : [])
+            if configuration.isExpanded {
+                configuration.content.padding(.leading, 18)
+            }
+        }
+    }
+}

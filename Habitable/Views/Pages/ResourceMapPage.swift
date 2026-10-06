@@ -125,6 +125,14 @@ struct ResourceMapContent: View {
     var onShowVariables: (() -> Void)? = nil
     var variablesPanel: AnyView? = nil
     var sideFaces: [MapSideFace] = []
+    /// A checked-out repository for this workspace: resolves "Defined in" when the
+    /// window itself has no folder, and links file and line to the repository host.
+    var sourceDirectory: URL? = nil
+    var repository: HCPVCSRepository? = nil
+    /// Shown while the Map displays a recorded earlier state rather than the current one.
+    var historyBanner: (text: String, dismiss: () -> Void)? = nil
+    /// The workspace's own description, shown when nothing is selected.
+    var workspaceDescription: String? = nil
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
     @SceneStorage("map.sideFace") private var sideFaceID = "inspector"
@@ -157,6 +165,17 @@ struct ResourceMapContent: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let historyBanner {
+                HStack(spacing: 10) {
+                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(Color.accentColor)
+                    Text(historyBanner.text).font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Button("Return to current state", action: historyBanner.dismiss).buttonStyle(.bordered).controlSize(.small)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Color.accentColor.opacity(0.1))
+                Divider()
+            }
             VSplitView {
                 HStack(spacing: 0) {
                     // The inventory slides like a Finder sidebar; HSplitView cannot animate.
@@ -212,7 +231,7 @@ struct ResourceMapContent: View {
             sourceDeclaration = nil
             sourceDeclarationIdentity = ""
             let requestIdentity = sourceIdentity
-            guard let address = selectedMember, let directory = workspaceDirectory else { return }
+            guard let address = selectedMember, let directory = workspaceDirectory ?? sourceDirectory else { return }
             let task = Task.detached(priority: .utility) {
                 TerraformConfigurationInspector.declarations(for: [address], directory: directory)[address]
             }
@@ -715,50 +734,23 @@ struct ResourceMapContent: View {
                     Divider()
                     historySection
                     Divider()
-                    DisclosureGroup("Resources · \(tile.resources.count)") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(tile.resources, id: \.self) { address in
+                    // Each resource owns its attributes; the open one is the selected member.
+                    Text("Resources · \(tile.resources.count)").font(.headline)
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(tile.resources, id: \.self) { address in
+                            DisclosureGroup(isExpanded: Binding(
+                                get: { selectedMember == address },
+                                set: { expanded in selectedMember = expanded ? address : (selectedMember == address ? nil : selectedMember) })) {
+                                memberDetails(address)
+                            } label: {
                                 HStack(alignment: .top, spacing: 8) {
-                                    Button { selectedMember = address } label: {
-                                        HStack(alignment: .top, spacing: 8) {
-                                            Image(systemName: selectedMember == address ? "checkmark.circle.fill" : "circle")
-                                                .foregroundStyle(selectedMember == address ? Color.accentColor : Color.secondary)
-                                            Text(address).font(.system(size: 13, design: .monospaced)).multilineTextAlignment(.leading)
-                                        }.frame(maxWidth: .infinity, alignment: .leading)
-                                    }.buttonStyle(.plain)
+                                    Text(address).font(.system(size: 13, design: .monospaced)).multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     MapCopyButton(value: address, label: "resource address")
-                                }.padding(8)
-                                    .background(selectedMember == address ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                                }
                             }
-                        }.padding(.top, 8)
-                    }
-                    if let resource = selectedResource {
-                        HStack {
-                            Text("Resource details").font(.headline)
-                            Spacer()
-                            Button("Full inspector") { onOpenResource(resource.address) }.buttonStyle(.link)
-                        }
-                        HStack {
-                            Text(resource.type).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
-                            Spacer()
-                            MapCopyButton(value: resource.type, label: "resource type")
-                        }
-                        DisclosureGroup("Attributes") {
-                            ForEach(Array(resource.displayAttributes.prefix(14))) { attribute in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(attribute.path).font(.system(size: 13)).foregroundStyle(.secondary)
-                                        Spacer()
-                                        if !attribute.value.contains("(sensitive value)") {
-                                            MapCopyButton(value: attribute.value, label: "attribute value")
-                                        }
-                                    }
-                                    Text(attribute.value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
-                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
-                            }
-                            if resource.displayAttributes.count > 14 {
-                                Text("Open the full inspector for all attributes.").font(.system(size: 13)).foregroundStyle(.secondary)
-                            }
+                            .padding(8)
+                            .background(selectedMember == address ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
                         }
                     }
                 }.padding(18)
@@ -766,6 +758,10 @@ struct ResourceMapContent: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(title).font(.title3.weight(.semibold))
+                        if let workspaceDescription, !workspaceDescription.isEmpty {
+                            Text(workspaceDescription).font(.system(size: 13)).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         Text("Select a resource on the Map or in the inventory to inspect it.")
                             .font(.system(size: 13)).foregroundStyle(.secondary)
                     }
@@ -780,6 +776,53 @@ struct ResourceMapContent: View {
         .id(selectedTileID)
     }
 
+    @ViewBuilder private func memberDetails(_ address: String) -> some View {
+        if let resource = resources.first(where: { $0.address == address }) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(resource.type).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
+                    Spacer()
+                    MapCopyButton(value: resource.type, label: "resource type")
+                    Button("Full inspector") { onOpenResource(resource.address) }.buttonStyle(.link).font(.system(size: 13))
+                }
+                ForEach(Array(resource.displayAttributes.prefix(14))) { attribute in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(attribute.path).font(.system(size: 12)).foregroundStyle(.secondary)
+                            Spacer()
+                            if !attribute.value.contains("(sensitive value)") {
+                                MapCopyButton(value: attribute.value, label: "attribute value")
+                            }
+                        }
+                        Text(attribute.value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 3)
+                }
+                if resource.displayAttributes.count > 14 {
+                    Text("Open the full inspector for all attributes.").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }.padding(.top, 6)
+        } else {
+            Text("Attributes are unavailable for this resource.").font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Link to the declaring file on the repository host when the workspace is
+    /// repository-backed (GitHub-style blob URLs with a line anchor).
+    private func repositoryFileURL(file: String, line: Int?) -> URL? {
+        guard let repository, let base = repository.repositoryHTTPURL else { return nil }
+        var path = file
+        if let directory = repository.workingDirectory?.trimmingCharacters(in: CharacterSet(charactersIn: "/")), !directory.isEmpty {
+            path = directory + "/" + file
+        }
+        let ref = (repository.branch?.isEmpty == false) ? repository.branch! : "HEAD"
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        let host = components.host?.lowercased() ?? ""
+        let segment = host.contains("gitlab") ? "-/blob" : (host.contains("bitbucket") ? "src" : "blob")
+        components.path = components.path.replacingOccurrences(of: ".git", with: "") + "/\(segment)/\(ref)/\(path)"
+        components.fragment = line.map { host.contains("bitbucket") ? "lines-\($0)" : "L\($0)" }
+        return components.url
+    }
+
     private var sourceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Defined in").font(.headline)
@@ -789,7 +832,8 @@ struct ResourceMapContent: View {
                     Spacer(minLength: 4)
                     MapCopyButton(value: resource.address, label: "resource address")
                 }
-                if sourceDeclarationIdentity == sourceIdentity, let declaration = sourceDeclaration, let directory = workspaceDirectory,
+                if sourceDeclarationIdentity == sourceIdentity, let declaration = sourceDeclaration,
+                   let directory = workspaceDirectory ?? sourceDirectory,
                    let filename = TerraformDiagnosticSource.currentWorkspaceFile(filename: declaration.sourceFile, workspaceDirectory: directory) {
                     HStack {
                         Button {
@@ -799,6 +843,20 @@ struct ResourceMapContent: View {
                         Spacer()
                         MapCopyButton(value: declaration.sourceLocation, label: "source location")
                     }
+                    if workspaceDirectory == nil {
+                        Text("From the checkout at \(directory.path)").font(.system(size: 12)).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    if let url = repositoryFileURL(file: declaration.sourceFile, line: declaration.sourceLine) {
+                        Link(destination: url) { Label("Open on \(url.host ?? "the repository")", systemImage: "arrow.up.right.square") }
+                            .font(.system(size: 13))
+                    }
+                } else if let repository, let base = repository.repositoryHTTPURL {
+                    Text(workspaceDirectory == nil && sourceDirectory == nil
+                         ? "File and line are not included in remote Terraform state. Check the repository out to resolve them."
+                         : "No matching source declaration found in the checkout.")
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                    Link(destination: base) { Label("Open \(repository.displayName)", systemImage: "arrow.up.right.square") }.font(.system(size: 13))
                 } else {
                     Text(workspaceDirectory == nil ? "File and line are not included in remote Terraform state." : "No matching source declaration found in this folder.")
                         .font(.system(size: 13)).foregroundStyle(.secondary)

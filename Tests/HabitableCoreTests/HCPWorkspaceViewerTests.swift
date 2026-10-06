@@ -943,6 +943,96 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         XCTAssertEqual(query?.first(where: { $0.name == "include" })?.value, "vars")
     }
 
+    func testWorkspaceDescriptionDecodesAndEmptyIsNil() throws {
+        let page = HCPAPIClient(configuration: .ephemeral).decodeWorkspaces(
+            ["data": [["id": "ws-a", "type": "workspaces", "attributes": ["name": "a", "description": "Orders stack"]],
+                      ["id": "ws-b", "type": "workspaces", "attributes": ["name": "b", "description": ""]]]],
+            hostname: "app.terraform.io", organization: "org")
+        XCTAssertEqual(page.map(\.description), ["Orders stack", nil])
+    }
+
+    private func installStateVersionList() throws {
+        HCPURLProtocolStub.responses["/api/v2/state-versions"] = Data(#"{"data":[{"id":"sv-old","type":"state-versions","attributes":{"serial":3,"created-at":"2026-10-01T12:00:00.000Z"},"relationships":{"run":{"data":{"id":"run-1","type":"runs"}}}},{"id":"sv-new","type":"state-versions","attributes":{"serial":4,"created-at":"2026-10-02T12:00:00.000Z","resource-count":7},"relationships":{"run":{"data":{"id":"run-2","type":"runs"}}}}],"links":{},"meta":{"pagination":{"total-count":2}}}"#.utf8)
+        HCPURLProtocolStub.responses["/api/v2/state-versions/sv-old"] = try JSONSerialization.data(withJSONObject:
+            ["data": ["id": "sv-old", "type": "state-versions",
+                      "attributes": ["hosted-state-download-url": "https://archivist.terraform.io/map/raw?signature=private",
+                                     "hosted-json-state-download-url": "https://archivist.terraform.io/map/show?signature=private",
+                                     "serial": 3]]])
+        HCPURLProtocolStub.responses["/map/raw"] = mapRaw
+        HCPURLProtocolStub.responses["/map/show"] = mapShown
+    }
+
+    func testStateVersionPageDecodesSerialDateAndRunRelationship() async throws {
+        try installStateVersionList()
+        let page = try await makeClient().stateVersions(hostname: "app.terraform.io", organization: "pthrasher_v2",
+                                                        workspaceName: "habitable prod", token: "t", page: 1)
+        XCTAssertEqual(page.items.map(\.id), ["sv-old", "sv-new"])
+        XCTAssertEqual(page.items[0].serial, 3)
+        XCTAssertEqual(page.items[0].runID, "run-1")
+        XCTAssertEqual(page.items[0].createdAt, ISO8601DateFormatter().date(from: "2026-10-01T12:00:00Z"))
+        XCTAssertEqual(page.items[1].resourceCount, 7)
+        XCTAssertFalse(page.hasNextPage)
+        let query = URLComponents(url: try XCTUnwrap(HCPURLProtocolStub.requests.first?.url), resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(query?.first(where: { $0.name == "filter[workspace][name]" })?.value, "habitable prod")
+        XCTAssertEqual(query?.first(where: { $0.name == "filter[organization][name]" })?.value, "pthrasher_v2")
+        XCTAssertEqual(query?.first(where: { $0.name == "page[size]" })?.value, "100")
+    }
+
+    func testMapForStateVersionNeverSendsAPITokenToDownloads() async throws {
+        try installStateVersionList()
+        let snapshot = try await makeClient().map(hostname: "app.terraform.io", stateVersionID: "sv-old", token: "api-secret")
+        XCTAssertEqual(snapshot.versionID, "sv-old")
+        XCTAssertEqual(snapshot.stateSerial, 3)
+        XCTAssertEqual(snapshot.map.tiles.count, 1)
+        let downloads = HCPURLProtocolStub.requests.filter { $0.url?.host == "archivist.terraform.io" }
+        XCTAssertEqual(downloads.count, 2)
+        for request in downloads { XCTAssertNil(request.value(forHTTPHeaderField: "Authorization")) }
+    }
+
+    @MainActor
+    func testShowStateVersionForRunHistoryPathsAndReturnToCurrent() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/pthrasher_v2/workspaces"] = try workspacePage([workspaceRecord(id: "ws-1", name: "first"), workspaceRecord(id: "ws-2", name: "second")], hasNext: false)
+        HCPURLProtocolStub.responses["/api/v2/organizations"] = organizationPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/runs"] = emptyRunPage()
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-2/runs"] = emptyRunPage()
+        try installMapResponses()
+        try installStateVersionList()
+        let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
+        await model.connect()
+        await model.refreshMap()
+        await model.refreshStateVersions()
+        XCTAssertEqual(model.stateVersions.map(\.id), ["sv-new", "sv-old"])
+
+        let missing = await model.showStateVersion(forRunID: "run-plan-only")
+        XCTAssertFalse(missing)
+        XCTAssertNil(model.viewingStateVersion)
+
+        let found = await model.showStateVersion(forRunID: "run-1")
+        XCTAssertTrue(found)
+        XCTAssertEqual(model.viewingStateVersion?.id, "sv-old")
+        XCTAssertEqual(model.historicalSnapshot?.versionID, "sv-old")
+        XCTAssertEqual(model.mapSnapshot?.versionID, "sv-ws-1")
+        XCTAssertNil(model.historyError)
+
+        model.returnToCurrentState()
+        XCTAssertNil(model.viewingStateVersion)
+        XCTAssertNil(model.historicalSnapshot)
+        XCTAssertEqual(model.mapSnapshot?.versionID, "sv-ws-1")
+
+        _ = await model.showStateVersion(forRunID: "run-1")
+        XCTAssertNotNil(model.historicalSnapshot)
+        model.selectedWorkspaceID = "ws-2"
+        XCTAssertTrue(model.stateVersions.isEmpty)
+        XCTAssertNil(model.viewingStateVersion)
+        XCTAssertNil(model.historicalSnapshot)
+
+        HCPURLProtocolStub.statusCode = 500
+        await model.showStateVersion(HCPStateVersionSummary(id: "sv-old", serial: 3, createdAt: nil, runID: nil, resourceCount: nil))
+        XCTAssertEqual(model.historyError, "Couldn’t load that state version.")
+        XCTAssertNil(model.historicalSnapshot)
+        XCTAssertFalse(model.isLoadingHistory)
+    }
+
     private func makeClient() -> HCPAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HCPURLProtocolStub.self]
