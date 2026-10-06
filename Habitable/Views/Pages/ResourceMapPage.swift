@@ -97,6 +97,12 @@ struct MapSideFace: Identifiable {
     }
 }
 
+/// Asks the Map's right pane to show a face; a new `id` repeats the request.
+struct MapSideFaceRequest: Equatable {
+    let id = UUID()
+    let faceID: String
+}
+
 /// One prominent action offered by the Map's empty state (e.g. opening the
 /// remote workspace that holds this folder's state).
 struct MapEmptyAction {
@@ -141,6 +147,14 @@ struct ResourceMapContent: View {
     var preview: MapChangePreview? = nil
     var onDiscardPreview: (() -> Void)? = nil
     var onReviewPreview: (() -> Void)? = nil
+    /// Review-bar verbs. Local: discard the saved plan, open it to apply. Cloud:
+    /// discard the remote run, confirm its apply.
+    var previewDiscardTitle = "Discard Preview"
+    var previewReviewTitle = "Review and Apply…"
+    /// A caption under the counts, e.g. which remote run the preview came from.
+    var previewCaption: String? = nil
+    /// Another part of the window asking the right pane to show a face.
+    var faceRequest: MapSideFaceRequest? = nil
     @State private var changesOnly = false
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
@@ -261,6 +275,7 @@ struct ResourceMapContent: View {
             search = ""; selectedTileID = nil; selectedMember = nil; selectedReference = nil
         }
         .onChange(of: selectedTileID) { id in if id != nil { sideFaceID = "inspector" } }
+        .onChange(of: faceRequest?.id) { _ in if let faceRequest { sideFaceID = faceRequest.faceID } }
         .onChange(of: map) { _ in renderCache.reset() }
         .onChange(of: search) { _ in
             if let selectedTileID, !visibleTiles.contains(where: { $0.id == selectedTileID }) {
@@ -728,8 +743,11 @@ struct ResourceMapContent: View {
                 consequence(c.destroy, "to remove", .red)
                 Spacer()
                 Toggle("Changes only", isOn: $changesOnly).toggleStyle(.checkbox).font(.system(size: 13))
-                if let onDiscardPreview { Button("Discard Preview", action: onDiscardPreview).buttonStyle(.bordered) }
-                if let onReviewPreview { Button("Review and Apply…", action: onReviewPreview).buttonStyle(.borderedProminent) }
+                if let onDiscardPreview { Button(previewDiscardTitle, action: onDiscardPreview).buttonStyle(.bordered) }
+                if let onReviewPreview { Button(previewReviewTitle, action: onReviewPreview).buttonStyle(.borderedProminent) }
+            }
+            if let previewCaption {
+                Text(previewCaption).font(.system(size: 13)).foregroundStyle(.secondary)
             }
             if let warning = previewWarning(preview) {
                 Text(warning).font(.system(size: 13)).foregroundStyle(actionColor(.replace))

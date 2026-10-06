@@ -64,7 +64,8 @@ not record.
   case with underscores removed (`Planned and finished`).
 - Safety sentences repeat verbatim wherever they apply: "Nothing changes
   until you apply." · "Workspace variables are updated only when you choose
-  Save." · "Habitable does not queue or apply remote runs."
+  Save." · "Habitable never applies from your Mac. Runs happen in HCP
+  Terraform; you confirm them here."
 - Title case for menu items and toolbar verbs; sentence case for everything
   else. An ellipsis on any item that asks for more before acting.
 

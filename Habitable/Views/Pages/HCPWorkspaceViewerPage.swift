@@ -12,7 +12,13 @@ struct HCPWorkspaceViewer: View {
     let connectionOnly: Bool
     let onOpenConnections: () -> Void
     let onOpenWorkspaces: () -> Void
+    /// Folders on this Mac that belong to the selected workspace, and the
+    /// window's Check Out action, for the Proposal face.
+    var linkedFolders: [URL] = []
+    var onCheckOut: (() -> Void)? = nil
     @State private var workspaceSearch = ""
+    @State private var faceRequest: MapSideFaceRequest?
+    @State private var chosenFolder: URL?
     // Remembered per window so Variables, Runs and Map come back the way they were left.
     @SceneStorage("hcp.section") private var sectionStorage = HCPWorkspaceSection.map.rawValue
     private var section: HCPWorkspaceSection {
@@ -24,9 +30,11 @@ struct HCPWorkspaceViewer: View {
     @StateObject private var checkouts = WorkspaceCheckoutStore()
 
     init(model: HCPWorkspaceViewerModel, connectionOnly: Bool = false,
-         onOpenConnections: @escaping () -> Void = {}, onOpenWorkspaces: @escaping () -> Void = {}) {
+         onOpenConnections: @escaping () -> Void = {}, onOpenWorkspaces: @escaping () -> Void = {},
+         linkedFolders: [URL] = [], onCheckOut: (() -> Void)? = nil) {
         self.model = model; self.connectionOnly = connectionOnly
         self.onOpenConnections = onOpenConnections; self.onOpenWorkspaces = onOpenWorkspaces
+        self.linkedFolders = linkedFolders; self.onCheckOut = onCheckOut
     }
 
     private var filteredWorkspaces: [HCPWorkspace] {
@@ -288,6 +296,9 @@ struct HCPWorkspaceViewer: View {
                 ? "No run has applied in this workspace, so there is no state to map. Its runs are in Runs."
                 : "This workspace has no managed resources in its current state. Data sources remain available in List; remote run history is available in Runs.",
             emptyTitle: shown?.hasStateVersion == false ? "No state recorded yet" : nil,
+            emptyAction: shown?.hasStateVersion == false
+                ? MapEmptyAction(title: "Make a change…") { faceRequest = MapSideFaceRequest(faceID: "proposal") }
+                : nil,
             workspaceURL: model.selectedWorkspace?.htmlURL,
             stateVersionID: shown?.hasStateVersion == true ? shown?.versionID : nil,
             stateCreatedAt: shown?.stateCreatedAt,
@@ -297,7 +308,17 @@ struct HCPWorkspaceViewer: View {
             sideFaces: remoteSideFaces,
             sourceDirectory: checkoutFolder, repository: model.selectedWorkspace?.vcs,
             historyBanner: historyNotice.map { text in (text: text, dismiss: { model.returnToCurrentState() }) },
-            workspaceDescription: model.selectedWorkspace?.description)
+            workspaceDescription: model.selectedWorkspace?.description,
+            preview: model.proposalPreview,
+            onDiscardPreview: previewedRun.map { run in { Task { await model.discard(run: run) } } },
+            onReviewPreview: previewedRun.flatMap { run in
+                ["planned", "cost_estimated", "policy_checked"].contains(run.status)
+                    ? { Task { await model.confirmApply(run: run) } } : nil
+            },
+            previewDiscardTitle: previewedRun.map { ["planned", "cost_estimated", "policy_checked"].contains($0.status) } == true ? "Discard Run" : "Hide",
+            previewReviewTitle: "Confirm Apply",
+            previewCaption: previewCaption,
+            faceRequest: faceRequest)
         .task(id: model.mapRequestKey) { await model.refreshMap() }
         Divider()
         MapTimelineStrip(clips: remoteChangeClips, selectedID: model.viewingStateVersion?.runID,
@@ -311,10 +332,8 @@ struct HCPWorkspaceViewer: View {
                                  }
                              }
                          }, onShowAll: { section = .runs },
-                         newRunTitle: "New run in HCP Terraform",
-                         onNewRun: model.selectedWorkspace?.htmlURL.map { url in
-                             { NSWorkspace.shared.open(url.appendingPathComponent("runs").appendingPathComponent("new")) }
-                         })
+                         newRunTitle: "Make a change",
+                         onNewRun: { faceRequest = MapSideFaceRequest(faceID: "proposal") })
         }
         }
     }
@@ -326,8 +345,49 @@ struct HCPWorkspaceViewer: View {
             MapSideFace(id: "variables", title: "Variables",
                         count: model.workspaceVariables.isEmpty ? nil : model.workspaceVariables.count) {
                 RemoteVariablesFace(model: model, onOpen: { section = .variables })
+            },
+            MapSideFace(id: "proposal", title: "Proposal") {
+                HCPProposalFace(model: model, folders: proposalFolders, onCheckOut: onCheckOut,
+                                onChooseFolder: chooseProposalFolder,
+                                onShowRun: { run in Task { await model.showPlanPreview(for: run) } })
             }
         ]
+    }
+
+    /// Folders a proposal can start from: the window's linked folders, a
+    /// checkout, or one chosen for this session.
+    private var proposalFolders: [URL] {
+        var folders = linkedFolders
+        if let checkoutFolder, !folders.contains(checkoutFolder) { folders.append(checkoutFolder) }
+        if let chosenFolder, !folders.contains(chosenFolder) { folders.insert(chosenFolder, at: 0) }
+        return folders
+    }
+
+    private func chooseProposalFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose the folder to upload"
+        panel.message = "Choose the Terraform folder whose configuration this run should use."
+        panel.prompt = "Choose"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            chosenFolder = url.standardizedFileURL
+        }
+    }
+
+    /// The run whose plan is on the Map: the active proposal's run, or one chosen from Latest runs.
+    private var previewedRun: HCPRun? {
+        let id = model.proposal?.runID ?? model.previewedRunID
+        return id.flatMap { id in model.runs.first { $0.id == id } }
+    }
+
+    private var previewCaption: String? {
+        guard let run = previewedRun else { return nil }
+        let word = run.status.replacingOccurrences(of: "_", with: " ")
+        let when = run.createdAt.map { " · " + $0.formatted(.relative(presentation: .named)) } ?? ""
+        return "Plan from HCP Terraform · \(run.message?.isEmpty == false ? run.message! : "Run") · \(word)\(when)"
     }
 
     private var historyNotice: String? {
@@ -372,7 +432,7 @@ struct HCPWorkspaceViewer: View {
             Image(systemName: "cloud").font(.system(size: 34)).foregroundStyle(.secondary)
             Text(model.hasStoredCredential ? "Connect to load your organization" : "Import a credential to get started")
                 .font(.headline)
-            Text("Browse workspace state and runs. Workspace variables are updated only when you choose Save; Habitable does not queue or apply remote runs.")
+            Text("Browse workspace state and runs, and propose changes. Habitable never applies from your Mac; runs happen in HCP Terraform and you confirm them here.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
             if let error = model.errorMessage { Text(error).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480) }
             Button("Open connection settings", action: onOpenConnections).buttonStyle(.borderedProminent)
