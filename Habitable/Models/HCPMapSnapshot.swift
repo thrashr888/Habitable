@@ -46,6 +46,11 @@ struct HCPMapSnapshot: Equatable, Sendable {
     let stateCreatedAt: Date?
     let stateSerial: Int?
 
+    /// The workspace exists but has no state version yet (no run has applied).
+    static let noStateRecorded = HCPMapSnapshot(versionID: "", map: ResourceMap(tiles: [], connections: [], dataSources: []),
+                                                resources: [], notice: "HCP Terraform · No state recorded yet")
+    var hasStateVersion: Bool { !versionID.isEmpty }
+
     init(versionID: String, map: ResourceMap, resources: [MapDisplayResource], notice: String?,
          stateCreatedAt: Date? = nil, stateSerial: Int? = nil) {
         self.versionID = versionID

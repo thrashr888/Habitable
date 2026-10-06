@@ -1057,7 +1057,9 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         } catch {
             guard !Task.isCancelled, mapOperation == operation, isConnected else { return }
             if case HCPViewerError.response(status: 404, message: _) = error {
-                mapError = "No state is available, or your credential cannot read this workspace’s state."
+                // No current state version: the workspace has never applied. That is an
+                // empty Map with a truthful notice, not a read error.
+                mapSnapshot = HCPMapSnapshot.noStateRecorded
             } else if case HCPViewerError.response(status: 403, message: _) = error {
                 mapError = "Your credential cannot read this workspace’s state."
             } else {

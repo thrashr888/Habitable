@@ -284,9 +284,12 @@ struct HCPWorkspaceViewer: View {
             refresh: { Task { await model.refreshMap() } },
             onShowList: { inspectorRequest = HCPMapInspectorRequest(address: nil) },
             onOpenResource: { address in inspectorRequest = HCPMapInspectorRequest(address: address) },
-            emptyDetail: "This workspace has no managed resources in its current state. Data sources remain available in List; remote run history is available in Runs.",
+            emptyDetail: shown?.hasStateVersion == false
+                ? "No run has applied in this workspace, so there is no state to map. Its runs are in Runs."
+                : "This workspace has no managed resources in its current state. Data sources remain available in List; remote run history is available in Runs.",
+            emptyTitle: shown?.hasStateVersion == false ? "No state recorded yet" : nil,
             workspaceURL: model.selectedWorkspace?.htmlURL,
-            stateVersionID: shown?.versionID,
+            stateVersionID: shown?.hasStateVersion == true ? shown?.versionID : nil,
             stateCreatedAt: shown?.stateCreatedAt,
             stateSerial: shown?.stateSerial,
             onShowHistory: { section = .runs },
@@ -307,7 +310,11 @@ struct HCPWorkspaceViewer: View {
                                      section = .runs
                                  }
                              }
-                         }, onShowAll: { section = .runs })
+                         }, onShowAll: { section = .runs },
+                         newRunTitle: "New run in HCP Terraform",
+                         onNewRun: model.selectedWorkspace?.htmlURL.map { url in
+                             { NSWorkspace.shared.open(url.appendingPathComponent("runs").appendingPathComponent("new")) }
+                         })
         }
         }
     }
@@ -350,7 +357,17 @@ struct HCPWorkspaceViewer: View {
         }
     }
 
-    private var disconnectedState: some View {
+    @ViewBuilder private var disconnectedState: some View {
+        if model.isLoading {
+            // Connecting with a stored credential: say so rather than asking to connect.
+            LoadingIndicator(size: 24, label: "Connecting to HCP Terraform…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            disconnectedPrompt
+        }
+    }
+
+    private var disconnectedPrompt: some View {
         VStack(spacing: 10) {
             Image(systemName: "cloud").font(.system(size: 34)).foregroundStyle(.secondary)
             Text(model.hasStoredCredential ? "Connect to load your organization" : "Import a credential to get started")
@@ -358,7 +375,6 @@ struct HCPWorkspaceViewer: View {
             Text("Browse workspace state and runs. Workspace variables are updated only when you choose Save; Habitable does not queue or apply remote runs.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
             if let error = model.errorMessage { Text(error).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 480) }
-            if model.isLoading { ProgressView().controlSize(.small) }
             Button("Open connection settings", action: onOpenConnections).buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

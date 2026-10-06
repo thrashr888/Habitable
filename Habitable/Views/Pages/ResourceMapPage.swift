@@ -389,8 +389,10 @@ struct ResourceMapContent: View {
                                 .font(.headline)
                             Text("The Map needs readable Terraform state. Check that you opened the intended workspace, then refresh after resolving the state error.")
                                 .font(.body).foregroundStyle(.secondary)
-                            Text(identity.components(separatedBy: "|").first ?? "")
-                                .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                            if let workspaceDirectory {
+                                Text(workspaceDirectory.path)
+                                    .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                            }
                             DisclosureGroup("Technical details") {
                                 Text(error).font(.system(.body, design: .monospaced))
                                     .textSelection(.enabled)
@@ -1000,7 +1002,9 @@ struct ResourceMapContent: View {
                     MapCopyButton(value: stateVersionID, label: "state version")
                 }
             }
-            Text("Current state does not include this resource’s creation or last-change history.")
+            Text(notice == HCPMapSnapshot.noStateRecorded.notice
+                 ? "No state has been recorded yet; the first applied run creates it."
+                 : "Current state does not include this resource’s creation or last-change history.")
                 .font(.system(size: 13)).foregroundStyle(.secondary)
             if let onShowHistory { Button("Open workspace runs", action: onShowHistory).buttonStyle(.link) }
         }
