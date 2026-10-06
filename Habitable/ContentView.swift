@@ -271,6 +271,21 @@ struct ContentView: View {
         })
     }
 
+    private var newRunTitle: String { workspace.autoApply ? "Preview and apply" : "Preview Changes" }
+    private var newRunAction: (() -> Void)? {
+        guard workspace.workingDirectory != nil, !workspace.locked else { return nil }
+        return { previewChanges() }
+    }
+
+    /// Preview Changes stays on the Map; the plan lands as a review state there.
+    private func previewChanges() {
+        workspace.validateAndQueueRun(onCreated: { id in
+            previewRunID = id
+            selectedRun = id
+            navigationSelection.wrappedValue = .map
+        })
+    }
+
     /// The most recent run that holds a saved, unapplied plan: Preview Changes
     /// shows it on the Map until it is applied or discarded.
     private var previewRun: TerraformRun? {
@@ -374,14 +389,7 @@ struct ContentView: View {
             openFolder: openFolder,
             openRecent: openRecent,
             clearRecents: recentWorkspaces.clear,
-            plan: {
-                // Preview Changes stays on the Map; the plan lands as a review state there.
-                workspace.validateAndQueueRun(onCreated: { id in
-                    previewRunID = id
-                    selectedRun = id
-                    navigationSelection.wrappedValue = .map
-                })
-            },
+            plan: previewChanges,
             initialize: { workspace.initialize() },
             validate: { workspace.validate() },
             canPlan: workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
@@ -530,7 +538,8 @@ struct ContentView: View {
                                  onSelect: { clip in
                                      selectedRun = UUID(uuidString: clip.id)
                                      navigationSelection.wrappedValue = .runs
-                                 }, onShowAll: { navigationSelection.wrappedValue = .runs })
+                                 }, onShowAll: { navigationSelection.wrappedValue = .runs },
+                                 newRunTitle: newRunTitle, onNewRun: newRunAction)
             }
         case .readme: WorkspaceReadmePage(directory: workspace.workingDirectory, presentation: readme)
         case .configuration: ConfigurationPage(workspace: workspace, model: configurationModel,

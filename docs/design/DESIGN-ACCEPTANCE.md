@@ -182,6 +182,16 @@ Still open from the design: Exploration D's empty-map welcome, ⌘K, and preview
 | Changes strip | Hide/show is per window (`SceneStorage`), and the strip clips and slides as one container instead of the chevron, title and content animating separately. | Live: one window collapsed while another stayed open. |
 | Wording | "Checked out from X" became "From X" on Library cards, the window subtitle ("From HCP Terraform · This Mac") and the Map's empty title ("From terraform-fast"). | Live. |
 
+### Round 5 feedback, part two, October 6, 2026
+
+| Feedback | Change | Verified |
+| --- | --- | --- |
+| "Connect first" while connecting | The cloud window showed the disconnected prompt with a small spinner while a stored credential was still connecting. It now shows the purple loading indicator, "Connecting to HCP Terraform…", and the prompt only when there is nothing to connect with. | Built. |
+| "Stuck" workspaces | new-website and the other Needs-attention workspaces have no current state version (their only runs errored before an apply). The Map treated the 404 as "Couldn't read state" and printed `true` where the local window prints a folder path. A workspace with no state version is now an empty Map with "No state recorded yet", the footer notice "HCP Terraform · No state recorded yet", and a History section that says the first applied run creates state. The folder line appears only in local windows. | Live on new-website; 404 confirmed against the API. |
+| Changes footer height | The strip takes its content's height up to the old maximum, so one row of cards leaves no empty space. | Live. |
+| Latest on the right | With no selection the strip scrolls to its right edge on appear and when runs arrive. | Live on Rookery (24 runs). |
+| New-run card | A dotted accent card ends the strip: **Preview Changes** (or **Preview and apply**) in a local window; **New run in HCP Terraform** in the cloud window, which opens the workspace's new-run page since Habitable does not queue remote runs. | Live in both windows; the cloud card's link not clicked. |
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

@@ -8,9 +8,13 @@ struct MapTimelineStrip: View {
     let hint: String
     let onSelect: (MapChangeClip) -> Void
     var onShowAll: (() -> Void)? = nil
+    /// A dotted card at the end of the strip that starts the next change.
+    var newRunTitle: String = "New run"
+    var onNewRun: (() -> Void)? = nil
 
-    private static let height: CGFloat = 142
+    private static let maxHeight: CGFloat = 142
     private static let collapsedHeight: CGFloat = 40
+    private static let newRunID = "map.timeline.new-run"
     /// Per window: one Map can keep its strip open while another hides it.
     @SceneStorage("map.showTimeline") private var expanded = true
 
@@ -18,21 +22,22 @@ struct MapTimelineStrip: View {
         // The header and content are laid out at full height and the container
         // clips, so the whole strip slides as one piece instead of its parts
         // animating separately.
+        // The strip takes its content's height, up to a maximum, so there is no
+        // empty space below a single row of cards.
         VStack(alignment: .leading, spacing: 8) {
             header
-            if clips.isEmpty {
+            if clips.isEmpty && onNewRun == nil {
                 Text("No changes recorded yet. Preview Changes starts the first one.")
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 strip
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(height: Self.height, alignment: .top)
-        .frame(maxWidth: .infinity)
-        .frame(height: expanded ? Self.height : Self.collapsedHeight, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: Self.maxHeight, alignment: .top)
+        .frame(maxHeight: expanded ? Self.maxHeight : Self.collapsedHeight, alignment: .top)
         .clipped()
         .animation(.easeInOut(duration: 0.18), value: expanded)
     }
@@ -78,16 +83,48 @@ struct MapTimelineStrip: View {
                             .padding(.leading, groupIndex > 0 && clipIndex == 0 ? 8 : 0)
                         }
                     }
+                    if let onNewRun {
+                        VStack(alignment: .leading, spacing: 6) {
+                            // Keeps the card level with the dated ones.
+                            Text(clips.isEmpty ? "Next" : " ").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                            newRunCard(title: newRunTitle, action: onNewRun)
+                        }
+                        .id(Self.newRunID)
+                        .padding(.leading, clips.isEmpty ? 0 : 8)
+                    }
                 }
             }
             .onAppear { scrollToSelection(proxy) }
             .onChange(of: selectedID) { _ in scrollToSelection(proxy) }
+            .onChange(of: clips.count) { _ in scrollToSelection(proxy) }
         }
     }
 
+    /// The selection, or else the latest change at the right edge.
     private func scrollToSelection(_ proxy: ScrollViewProxy) {
-        guard let selectedID else { return }
-        proxy.scrollTo(selectedID, anchor: .trailing)
+        if let selectedID { proxy.scrollTo(selectedID, anchor: .trailing); return }
+        if onNewRun != nil { proxy.scrollTo(Self.newRunID, anchor: .trailing) }
+        else if let last = clips.last { proxy.scrollTo(last.id, anchor: .trailing) }
+    }
+
+    private func newRunCard(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
+                Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minWidth: 92, minHeight: 50, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .foregroundStyle(Color.accentColor.opacity(0.7))
+        )
+        .help(title)
     }
 
     /// Green for applied, red for errors, orange while running, quiet otherwise.
