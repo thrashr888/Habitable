@@ -11,14 +11,16 @@ struct MapTimelineStrip: View {
 
     private static let height: CGFloat = 142
     private static let collapsedHeight: CGFloat = 40
-    @AppStorage("map.showTimeline") private var expanded = true
+    /// Per window: one Map can keep its strip open while another hides it.
+    @SceneStorage("map.showTimeline") private var expanded = true
 
     var body: some View {
+        // The header and content are laid out at full height and the container
+        // clips, so the whole strip slides as one piece instead of its parts
+        // animating separately.
         VStack(alignment: .leading, spacing: 8) {
             header
-            if !expanded {
-                EmptyView()
-            } else if clips.isEmpty {
+            if clips.isEmpty {
                 Text("No changes recorded yet. Preview Changes starts the first one.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -28,7 +30,10 @@ struct MapTimelineStrip: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(height: expanded ? Self.height : Self.collapsedHeight)
+        .frame(height: Self.height, alignment: .top)
+        .frame(maxWidth: .infinity)
+        .frame(height: expanded ? Self.height : Self.collapsedHeight, alignment: .top)
+        .clipped()
         .animation(.easeInOut(duration: 0.18), value: expanded)
     }
 

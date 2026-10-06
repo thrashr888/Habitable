@@ -79,7 +79,9 @@ struct ContentView: View {
         let directory = wantsLibrary ? nil : initialDirectory
         // Settings › General › "Open last folder at launch".
         let restoreLast = UserDefaults.standard.object(forKey: "general.restoreLastFolder") as? Bool ?? true
-        _workspace = StateObject(wrappedValue: Workspace(dir: directory, restoreLastDirectory: directory == nil && !wantsLibrary && restoreLast))
+        _workspace = StateObject(wrappedValue: Workspace(
+            dir: directory, restoreLastDirectory: directory == nil && !wantsLibrary && restoreLast,
+            autoInitializeOnOpen: !HabitableAppDelegate.consumeExternal(directory)))
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
@@ -314,7 +316,7 @@ struct ContentView: View {
         var parts: [String] = []
         if workspace.selectedTerraformWorkspace != "default" { parts.append(workspace.selectedTerraformWorkspace) }
         if let link = remoteWorkspaceLink {
-            if case .checkout = link.source { parts.append("Checked out from HCP Terraform") }
+            if case .checkout = link.source { parts.append("From HCP Terraform") }
             else { parts.append(link.isInitialized ? "HCP Terraform state" : "HCP Terraform (not initialized)") }
         } else if workspace.backendIdentity != "unknown backend" {
             parts.append(workspace.backendIdentity.hasPrefix("local") ? "Local state" : workspace.backendIdentity)
@@ -501,13 +503,17 @@ struct ContentView: View {
                                     navigationSelection.wrappedValue = .resources
                                 }, onShowHistory: { navigationSelection.wrappedValue = .runs },
                                 sideFaces: localSideFaces,
-                                emptyTitle: remote.map { link in
-                                    if case .checkout = link.source { return "Checked out from HCP Terraform" }
+                                emptyTitle: workspace.awaitingInitializationConsent ? "Initialize this folder?" : remote.map { link in
+                                    if case .checkout = link.source { return "From \(link.workspaceName ?? "HCP Terraform")" }
                                     return link.isInitialized ? "State managed in HCP Terraform" : "Configured for HCP Terraform"
                                 },
-                                emptyDetail: remote.map(remoteLinkDetail),
-                                emptySymbol: remote == nil ? nil : "cloud",
-                                emptyAction: remote.map { link in
+                                emptyDetail: workspace.awaitingInitializationConsent
+                                    ? "This folder was opened from outside Habitable. Initializing runs terraform init, which downloads the providers its configuration declares and runs them to validate it."
+                                    : remote.map(remoteLinkDetail),
+                                emptySymbol: workspace.awaitingInitializationConsent ? "shippingbox" : (remote == nil ? nil : "cloud"),
+                                emptyAction: workspace.awaitingInitializationConsent
+                                    ? MapEmptyAction(title: "Initialize") { workspace.initialize() }
+                                    : remote.map { link in
                                     MapEmptyAction(title: link.workspaceName.map { "Open \($0) in HCP Terraform" } ?? "Choose the workspace in HCP Terraform") {
                                         onOpenRemoteWorkspace(link)
                                         openWindow(id: "HCP.browser")

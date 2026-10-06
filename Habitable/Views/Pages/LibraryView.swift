@@ -452,11 +452,11 @@ struct LibraryView: View {
         }
     }
 
-    /// "Checked out from Rookery" on a folder, "On this Mac" on its workspace.
+    /// "From Rookery" on a folder, "On this Mac" on its workspace.
     private func checkoutNote(for entry: LibraryEntry) -> String? {
         switch entry.kind {
         case .localFolder(let url, _):
-            return checkout.store.record(forPath: url).map { "Checked out from \($0.workspaceName)" }
+            return checkout.store.record(forPath: url).map { "From \($0.workspaceName)" }
         case .cloud(let workspace, let organization, let hostname):
             let count = checkout.store.records(hostname: hostname, organization: organization, workspaceID: workspace.id).count
             return count > 0 ? "On this Mac" : nil

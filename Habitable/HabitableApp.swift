@@ -17,6 +17,19 @@ final class FolderOpenRequests: ObservableObject {
 
 final class HabitableAppDelegate: NSObject, NSApplicationDelegate {
     @MainActor static let requests = FolderOpenRequests()
+    /// Folders that arrived from outside the app and have not been opened yet.
+    /// Their window asks before `terraform init` runs anything.
+    @MainActor private static var externalFolders = Set<String>()
+
+    @MainActor static func markExternal(_ folder: URL) {
+        externalFolders.insert(RecentWorkspaceStore.canonicalPath(folder))
+    }
+
+    /// True once for a folder that came from outside; the window consumes the mark.
+    @MainActor static func consumeExternal(_ folder: URL?) -> Bool {
+        guard let folder else { return false }
+        return externalFolders.remove(RecentWorkspaceStore.canonicalPath(folder)) != nil
+    }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         let folders = urls.filter { url in
@@ -34,6 +47,7 @@ struct HabitableApp: App {
     @NSApplicationDelegateAdaptor private var delegate: HabitableAppDelegate
     @StateObject private var cloud = HCPWorkspaceViewerModel()
     @StateObject private var agentAccess = HabitableAgentAccess()
+    @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer", for: URL.self) { $directory in
             ContentView(initialDirectory: directory, cloud: cloud, agentAccess: agentAccess, onOpenRemoteWorkspace: { link in
@@ -46,7 +60,7 @@ struct HabitableApp: App {
                 .background(FolderOpenHandler())
         }
         .windowToolbarStyle(.unifiedCompact)
-        .commands { WorkspaceCommands() }
+        .commands { WorkspaceCommands(recentWorkspaces: recentWorkspaces) }
 
         Window("HCP Terraform", id: "HCP.browser") {
             CloudWorkspaceWindow(model: cloud)
@@ -79,6 +93,7 @@ private struct FolderOpenHandler: View {
                     if let existing = NSApp.windows.first(where: { $0.representedURL?.standardizedFileURL == url }) {
                         existing.makeKeyAndOrderFront(nil)
                     } else {
+                        HabitableAppDelegate.markExternal(url)
                         openWindow(id: "Workspace.viewer", value: url)
                     }
                 }
@@ -88,6 +103,22 @@ private struct FolderOpenHandler: View {
 
 private struct WorkspaceCommands: Commands {
     @FocusedValue(\.workspaceWindowActions) private var actions
+    /// Open… and Open Recent work with no window in front: they open a new one.
+    @ObservedObject var recentWorkspaces: RecentWorkspaceStore
+
+    private func openFolderInNewWindow() {
+        let panel = NSOpenPanel()
+        panel.title = "Open Terraform Folder"
+        panel.message = "Choose a local folder containing your Terraform configuration."
+        panel.prompt = "Open"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            openWindow(id: "Workspace.viewer", value: url.standardizedFileURL)
+        }
+    }
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -101,21 +132,26 @@ private struct WorkspaceCommands: Commands {
             Button("New Local Workspace Window") { openWindow(id: "Workspace.viewer") }
             Button("HCP Terraform Window") { openWindow(id: "HCP.browser") }
             Divider()
-            Button { actions?.openFolder() } label: { Label("Open…", systemImage: "folder") }
+            Button {
+                if let actions { actions.openFolder() } else { openFolderInNewWindow() }
+            } label: { Label("Open…", systemImage: "folder") }
                 .keyboardShortcut("o", modifiers: .command)
-                .disabled(actions == nil)
             Menu("Open Recent") {
-                if let actions, !actions.recentFolders.isEmpty {
-                    ForEach(actions.recentFolders, id: \.path) { url in
-                        Button("\(url.lastPathComponent) — \(url.path)") { actions.openRecent(url) }
+                let folders = actions?.recentFolders ?? recentWorkspaces.folders
+                if !folders.isEmpty {
+                    ForEach(folders, id: \.path) { url in
+                        Button("\(url.lastPathComponent) — \(url.path)") {
+                            if let actions { actions.openRecent(url) } else { openWindow(id: "Workspace.viewer", value: url) }
+                        }
                     }
                     Divider()
-                    Button("Clear Recent Folders") { actions.clearRecents() }
+                    Button("Clear Recent Folders") {
+                        if let actions { actions.clearRecents() } else { recentWorkspaces.clear() }
+                    }
                 } else {
                     Text("No Recent Folders").disabled(true)
                 }
             }
-            .disabled(actions == nil)
         }
         CommandMenu("Terraform") {
             Button(actions?.planTitle ?? "Plan") { actions?.plan() }

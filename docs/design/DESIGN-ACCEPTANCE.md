@@ -172,6 +172,16 @@ Open question filed (PAUL-174): why `aws_route53_record.route53_record` folded i
 
 Still open from the design: Exploration D's empty-map welcome, ⌘K, and previewing a cloud workspace's speculative plan on the Map.
 
+### Round 5 feedback, October 6, 2026
+
+| Feedback | Change | Verified |
+| --- | --- | --- |
+| Prompt for folders from outside | A folder handed in by Finder, the Dock or `open -a` no longer initializes itself. The Map shows "Initialize this folder?" with what init does and an **Initialize** button; nothing runs until then. Preview Changes counts as that choice. Folders opened from inside the app still auto-initialize. | Live: no `.terraform` until Initialize was pressed, then init and validate ran. |
+| Open… and Open Recent with no window | Both worked only through the focused window, so closing every window left Open disabled and Open Recent empty. They now open a new window when none is in front. | Live: Open Recent listed ten folders with no window open and opened terraform-fast. |
+| AllBeadsWeb/terraform | Opened an initialized cloud-backend folder: validate and the remote state read take a while, then the Map says the state is in HCP Terraform. The `allbeads-web` workspace truly has no state version and no runs (checked against the API), so the cloud window's "no managed resources" is accurate. | Checked. |
+| Changes strip | Hide/show is per window (`SceneStorage`), and the strip clips and slides as one container instead of the chevron, title and content animating separately. | Live: one window collapsed while another stayed open. |
+| Wording | "Checked out from X" became "From X" on Library cards, the window subtitle ("From HCP Terraform · This Mac") and the Map's empty title ("From terraform-fast"). | Live. |
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.
