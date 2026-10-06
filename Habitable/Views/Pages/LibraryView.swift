@@ -15,6 +15,7 @@ struct LibraryView: View {
     private enum Section: Hashable { case all, thisMac, cloud(String) }
     @State private var section: Section = .all
     @State private var filter = ""
+    @StateObject private var checkout = WorkspaceCheckoutCoordinator()
 
     private var cloudEntries: [LibraryEntry] {
         guard cloud.isConnected, !cloud.selectedOrganization.isEmpty else { return [] }
@@ -26,6 +27,10 @@ struct LibraryView: View {
         let query = filter.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty || entry.title.localizedCaseInsensitiveContains(query)
             || entry.location.localizedCaseInsensitiveContains(query)
+    }
+
+    private var refreshKey: String {
+        library.localEntries.map(\.id).joined(separator: "|") + "||" + cloudEntries.map(\.id).joined(separator: "|")
     }
 
     private var visibleLocal: [LibraryEntry] {
@@ -51,8 +56,22 @@ struct LibraryView: View {
             sheet
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .alert("Check Out", isPresented: Binding(get: { checkout.errorMessage != nil }, set: { if !$0 { checkout.errorMessage = nil } })) {
+            Button("OK", role: .cancel) { checkout.errorMessage = nil }
+        } message: { Text(checkout.errorMessage ?? "") }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in checkout.store.reload() }
         .task(id: recentFolders.map(\.path)) { await library.refreshLocal(folders: recentFolders) }
         .task { if !cloud.isConnected && !cloud.isLoading && cloud.hasStoredCredential { await cloud.connect() } }
+        // Cards fill in the background, a few at a time, and refresh every five
+        // minutes while the Library is open; a card never waits to be scrolled to.
+        .task(id: refreshKey) { await library.refreshAll(library.localEntries + cloudEntries, cloud: cloud) }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                guard !Task.isCancelled else { break }
+                await library.refreshAll(library.localEntries + cloudEntries, cloud: cloud)
+            }
+        }
     }
 
     // MARK: Sidebar
@@ -69,12 +88,15 @@ struct LibraryView: View {
             if cloud.isConnected {
                 ForEach(cloud.organizations.isEmpty ? [HCPOrganization(name: cloud.selectedOrganization, email: nil)] : cloud.organizations) { organization in
                     sidebarRow(organization.name, symbol: "cloud",
-                               count: organization.name == cloud.selectedOrganization ? cloudEntries.count : nil,
-                               tag: .cloud(organization.name))
+                               count: organization.name == cloud.selectedOrganization && !cloud.isLoadingWorkspaces ? cloudEntries.count : nil,
+                               tag: .cloud(organization.name),
+                               busy: organization.name == cloud.selectedOrganization && cloud.isLoadingWorkspaces)
                 }
+            } else if cloud.isLoading {
+                LoadingIndicator(size: 16, label: "Connecting…").padding(.horizontal, 18).padding(.vertical, 6)
             } else {
                 Button(action: onOpenConnections) {
-                    Label(cloud.isLoading ? "Connecting…" : "Connect…", systemImage: "cloud")
+                    Label("Connect…", systemImage: "cloud")
                         .font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                 }.buttonStyle(.plain).padding(.horizontal, 8)
@@ -92,20 +114,21 @@ struct LibraryView: View {
         .padding(.horizontal, 0)
     }
 
-    private func sidebarRow(_ title: String, symbol: String, count: Int?, tag: Section) -> some View {
+    private func sidebarRow(_ title: String, symbol: String, count: Int?, tag: Section, busy: Bool = false) -> some View {
         let selected = section == tag
         return Button {
             section = tag
             if case .cloud(let organization) = tag, organization != cloud.selectedOrganization {
-                cloud.selectedOrganization = organization
-                Task { await cloud.connect() }
+                // Switching organizations keeps the connection; only the workspace list reloads.
+                Task { await cloud.switchOrganization(organization) }
             }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: symbol).foregroundStyle(selected ? Color.accentColor : .secondary).frame(width: 18)
                 Text(title).font(.system(size: 13, weight: selected ? .medium : .regular)).lineLimit(1)
                 Spacer(minLength: 4)
-                if let count { Text(count, format: .number).font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary) }
+                if busy { LoadingIndicator(size: 12) }
+                else if let count { Text(count, format: .number).font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary) }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(selected ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 7))
@@ -119,6 +142,19 @@ struct LibraryView: View {
 
     private var sheet: some View {
         VStack(spacing: 0) {
+            if let job = checkout.job {
+                HStack(spacing: 10) {
+                    LoadingIndicator(size: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Checking out \(job.title)").font(.system(size: 13, weight: .medium))
+                        Text(checkout.progressLine).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Button("Cancel") { checkout.cancel() }.buttonStyle(.borderless)
+                }
+                .padding(.horizontal, 24).padding(.vertical, 10)
+                Divider()
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     HStack(alignment: .firstTextBaseline) {
@@ -135,7 +171,12 @@ struct LibraryView: View {
                         Button("Open Folder…", action: onChooseFolder).buttonStyle(.bordered)
                     }
                     if visibleLocal.isEmpty && visibleCloud.isEmpty {
-                        emptyState
+                        if cloud.isLoadingWorkspaces || (cloud.isLoading && !cloud.isConnected) {
+                            LoadingIndicator(size: 22, label: cloud.isConnected ? "Loading \(cloud.selectedOrganization) workspaces…" : "Connecting to HCP Terraform…")
+                                .padding(.top, 20)
+                        } else {
+                            emptyState
+                        }
                     }
                     if !visibleLocal.isEmpty {
                         group("This Mac", entries: visibleLocal)
@@ -190,8 +231,9 @@ struct LibraryView: View {
                 ForEach(entries) { entry in
                     LibraryCard(entry: entry, summary: summary(for: entry),
                                 isLoading: library.loading.contains(entry.id),
-                                failure: library.failures[entry.id]) { open(entry) }
-                        .task(id: entry.id) { await library.loadSummary(for: entry, cloud: cloud) }
+                                failure: library.failures[entry.id],
+                                checkoutNote: checkoutNote(for: entry)) { open(entry) }
+                        .contextMenu { cardMenu(entry) }
                 }
             }
         }
@@ -205,6 +247,40 @@ struct LibraryView: View {
             return library.summaries[twin.id]
         }
         return nil
+    }
+
+    /// "Checked out from Rookery" on a folder, "On this Mac" on its workspace.
+    private func checkoutNote(for entry: LibraryEntry) -> String? {
+        switch entry.kind {
+        case .localFolder(let url, _):
+            return checkout.store.record(forPath: url).map { "Checked out from \($0.workspaceName)" }
+        case .cloud(let workspace, let organization, let hostname):
+            let count = checkout.store.records(hostname: hostname, organization: organization, workspaceID: workspace.id).count
+            return count > 0 ? "On this Mac" : nil
+        }
+    }
+
+    @ViewBuilder private func cardMenu(_ entry: LibraryEntry) -> some View {
+        switch entry.kind {
+        case .localFolder(let url, _):
+            Button("Open") { onOpenFolder(url) }
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        case .cloud(let workspace, let organization, let hostname):
+            Button("Open in HCP Terraform Window") { onOpenCloud(workspace, organization, hostname) }
+            let folders = checkout.store.records(hostname: hostname, organization: organization, workspaceID: workspace.id)
+            ForEach(folders, id: \.path) { record in
+                Button("Open \(LibraryModel.abbreviatedPath(record.path))") {
+                    onOpenFolder(URL(fileURLWithPath: record.path, isDirectory: true))
+                }
+            }
+            if workspace.vcs?.cloneURL != nil {
+                Divider()
+                Button("Check Out…") {
+                    checkout.checkOut(workspace: workspace, organization: organization, hostname: hostname, onOpen: onOpenFolder)
+                }.disabled(checkout.job != nil)
+            }
+            if let url = workspace.htmlURL { Divider(); Link("Open on the Web", destination: url) }
+        }
     }
 
     private func open(_ entry: LibraryEntry) {
@@ -221,6 +297,7 @@ private struct LibraryCard: View {
     let summary: LibraryStateSummary?
     let isLoading: Bool
     let failure: String?
+    var checkoutNote: String? = nil
     let onOpen: () -> Void
     @State private var hovering = false
 
@@ -229,6 +306,7 @@ private struct LibraryCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 thumb
                     .frame(height: 118)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                     .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(hovering ? 0.2 : 0.1)))
                 VStack(alignment: .leading, spacing: 3) {
@@ -238,6 +316,10 @@ private struct LibraryCard: View {
                     }
                     Text(entry.location).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Text(detailLine).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    if let checkoutNote {
+                        Label(checkoutNote, systemImage: "arrow.down.to.line")
+                            .font(.system(size: 12)).foregroundStyle(Color.accentColor).lineLimit(1)
+                    }
                 }.padding(.horizontal, 4)
             }
             .contentShape(Rectangle())
@@ -269,29 +351,38 @@ private struct LibraryCard: View {
         return lines.joined(separator: "\n")
     }
 
-    /// Rows per populated kind, tiles as small rounded blocks colored by kind:
-    /// a miniature of the real Map, so a workspace is recognizable by shape.
+    /// A miniature of the real Map: one band per populated kind, tiles as small
+    /// rounded blocks colored by kind, scaled to fit so a workspace is
+    /// recognizable by shape. Drawn in a Canvas so it always fits its frame.
     @ViewBuilder private var thumb: some View {
         if let summary, summary.groupCount > 0 {
             let rows = MapKind.allCases.filter { (summary.kindCounts[$0] ?? 0) > 0 }
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(rows, id: \.rawValue) { kind in
-                    HStack(spacing: 4) {
-                        ForEach(0..<min(summary.kindCounts[kind] ?? 0, 8), id: \.self) { _ in
-                            RoundedRectangle(cornerRadius: 3).fill(kind.libraryColor.opacity(0.85))
-                                .frame(width: 18, height: 10)
-                        }
-                        if (summary.kindCounts[kind] ?? 0) > 8 {
-                            Text("+\((summary.kindCounts[kind] ?? 0) - 8)").font(.system(size: 12)).foregroundStyle(.secondary)
-                        }
+            Canvas { context, size in
+                let inset = 10.0, gap = 5.0
+                let bandHeight = min(26, (size.height - inset * 2 - gap * Double(rows.count - 1)) / Double(rows.count))
+                let totalHeight = bandHeight * Double(rows.count) + gap * Double(rows.count - 1)
+                var y = inset + max(0, (size.height - inset * 2 - totalHeight) / 2)
+                for kind in rows {
+                    let count = summary.kindCounts[kind] ?? 0
+                    let band = CGRect(x: inset, y: y, width: size.width - inset * 2, height: bandHeight)
+                    context.fill(Path(roundedRect: band, cornerRadius: 6), with: .color(Color.accentColor.opacity(0.06)))
+                    let shown = min(count, 9)
+                    let tileGap = 4.0, tileHeight = max(6, bandHeight - 10)
+                    let available = band.width - 12 - (count > shown ? 28 : 0)
+                    let tileWidth = min(22, (available - tileGap * Double(shown - 1)) / Double(shown))
+                    var x = band.minX + 6
+                    for _ in 0..<shown {
+                        let tile = CGRect(x: x, y: band.midY - tileHeight / 2, width: tileWidth, height: tileHeight)
+                        context.fill(Path(roundedRect: tile, cornerRadius: 3), with: .color(kind.libraryColor.opacity(0.9)))
+                        x += tileWidth + tileGap
                     }
-                    .padding(.horizontal, 6).padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.accentColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                    if count > shown {
+                        context.draw(Text("+\(count - shown)").font(.system(size: 11)).foregroundColor(.secondary),
+                                     at: CGPoint(x: x + 12, y: band.midY), anchor: .center)
+                    }
+                    y += bandHeight + gap
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .accessibilityHidden(true)
         } else {
             // Ruled lines hold the space until a summary exists, so cards never jump.
@@ -300,7 +391,7 @@ private struct LibraryCard: View {
                     RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.06))
                         .frame(width: [120, 160, 90][index], height: 10)
                 }
-                if isLoading { ProgressView().controlSize(.small).padding(.top, 4) }
+                if isLoading { LoadingIndicator(size: 14).padding(.top, 4) }
             }
             .padding(14)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -321,5 +412,68 @@ private extension MapKind {
         case .network: .blue
         case .identityAndMonitoring, .other: .secondary
         }
+    }
+}
+
+/// Checks a repository-backed cloud workspace out onto this Mac: asks where,
+/// clones with git, remembers the link, and opens the folder.
+@MainActor
+final class WorkspaceCheckoutCoordinator: ObservableObject {
+    struct Job: Equatable { let workspaceID: String; let title: String }
+    @Published private(set) var job: Job?
+    @Published private(set) var progressLine = ""
+    @Published var errorMessage: String?
+    let store = WorkspaceCheckoutStore()
+    private var task: Task<Void, Never>?
+
+    func checkOut(workspace: HCPWorkspace, organization: String, hostname: String, onOpen: @escaping (URL) -> Void) {
+        guard job == nil, let vcs = workspace.vcs, let repository = vcs.cloneURL else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Check Out \(workspace.name)"
+        panel.message = "Choose where to put the \(vcs.displayName) repository."
+        panel.prompt = "Check Out Here"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Workspace", isDirectory: true)
+        panel.begin { [weak self] response in
+            guard response == .OK, let parent = panel.url, let self else { return }
+            let folderName = GitCheckout.suggestedFolderName(identifier: vcs.identifier, repositoryURL: repository, workspaceName: workspace.name)
+            let destination = parent.appendingPathComponent(folderName, isDirectory: true)
+            self.start(workspace: workspace, organization: organization, hostname: hostname,
+                       repository: repository, vcs: vcs, destination: destination, onOpen: onOpen)
+        }
+    }
+
+    private func start(workspace: HCPWorkspace, organization: String, hostname: String, repository: URL,
+                       vcs: HCPVCSRepository, destination: URL, onOpen: @escaping (URL) -> Void) {
+        job = Job(workspaceID: workspace.id, title: workspace.name)
+        progressLine = "Cloning \(vcs.displayName)…"
+        errorMessage = nil
+        let report: @Sendable (String) -> Void = { [weak self] line in
+            Task { @MainActor in self?.progressLine = line }
+        }
+        task = Task {
+            do {
+                let folder = try await GitCheckout.clone(repository: repository, branch: vcs.branch,
+                    workingDirectory: vcs.workingDirectory, destination: destination, progress: report)
+                guard !Task.isCancelled else { return }
+                store.record(path: folder, hostname: hostname, organization: organization,
+                             workspaceName: workspace.name, workspaceID: workspace.id)
+                job = nil
+                onOpen(folder)
+            } catch {
+                job = nil
+                errorMessage = (error as? LocalizedError)?.errorDescription ?? "Check out failed."
+            }
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        job = nil
+        progressLine = ""
     }
 }

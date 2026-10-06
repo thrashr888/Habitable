@@ -111,4 +111,49 @@ final class LibraryModelTests: XCTestCase {
         XCTAssertNil(model.summaries[entry.id])
         XCTAssertEqual(model.failures[entry.id], "State file couldn’t be read.")
     }
+
+    func testNeedsCloudReload() {
+        let map = ResourceMap(tiles: [], connections: [], dataSources: [])
+        let cached = LibraryModel.summary(for: map, recordedAt: nil, serial: nil, versionID: "sv-1")
+        XCTAssertFalse(LibraryModel.needsCloudReload(cached: cached, currentVersionID: "sv-1"))
+        XCTAssertTrue(LibraryModel.needsCloudReload(cached: cached, currentVersionID: "sv-2"))
+        XCTAssertTrue(LibraryModel.needsCloudReload(cached: nil, currentVersionID: "sv-1"))
+        XCTAssertFalse(LibraryModel.needsCloudReload(cached: nil, currentVersionID: nil))
+    }
+
+    func testLocalRereadsWhenModificationDateChanges() async throws {
+        let dir = try folder("changing")
+        let file = dir.appendingPathComponent("terraform.tfstate")
+        try state.write(to: file, atomically: true, encoding: .utf8)
+        let original = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: original], ofItemAtPath: file.path)
+        let model = LibraryModel()
+        await model.refreshLocal(folders: [dir])
+        let entry = try XCTUnwrap(model.localEntries.first)
+        await model.loadSummary(for: entry, cloud: nil)
+        XCTAssertEqual(model.summaries[entry.id]?.serial, 7)
+
+        // Same modification date: cached summary is kept even though content differs.
+        try state.replacingOccurrences(of: "\"serial\":7", with: "\"serial\":8").write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: original], ofItemAtPath: file.path)
+        await model.loadSummary(for: entry, cloud: nil)
+        XCTAssertEqual(model.summaries[entry.id]?.serial, 7)
+
+        // Changed modification date: re-read.
+        try FileManager.default.setAttributes([.modificationDate: original.addingTimeInterval(60)], ofItemAtPath: file.path)
+        await model.loadSummary(for: entry, cloud: nil)
+        XCTAssertEqual(model.summaries[entry.id]?.serial, 8)
+    }
+
+    func testRefreshAllLoadsLocalEntriesAndStamps() async throws {
+        let dir = try folder("all")
+        try state.write(to: dir.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
+        let model = LibraryModel()
+        await model.refreshLocal(folders: [dir])
+        XCTAssertNil(model.lastRefresh)
+        await model.refreshAll(model.localEntries, cloud: nil)
+        XCTAssertEqual(model.summaries.values.first?.resourceCount, 2)
+        XCTAssertNotNil(model.lastRefresh)
+        XCTAssertTrue(model.loading.isEmpty)
+    }
 }

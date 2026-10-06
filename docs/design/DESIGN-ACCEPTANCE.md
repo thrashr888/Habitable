@@ -114,6 +114,19 @@ Follow-up the same day: the local Inputs face was checked live (43 inputs, sensi
 
 Validation: full Swift suite (see commit), native build installed into the stable Preview. Screenshots stay local.
 
+## Library round 2, October 6, 2026
+
+Paul's review: thumbnails overflowed their cards; switching organization reloaded the organization list and showed "Connect…" instead of a loading state; cards loaded only when scrolled to; asked for checkout of HCP workspaces onto this Mac and a purple loading mark.
+
+| Feedback | Change | Verified |
+| --- | --- | --- |
+| Thumbnails | Canvas-drawn miniature: bands and tiles scale to the 118pt thumb, `+N` for overflow, placeholder rules until a summary exists. | Live: Rookery's 15-group thumbnail fits; small workspaces draw one or two tiles. |
+| Organization switching | `switchOrganization` keeps the connection and organization list and reloads only workspaces; the row and sheet show the loading mark. | Live: hc-ric-demo → pthrasher_v2 without a "Connect…" flash. |
+| Loading mark | `LoadingIndicator`: three accent bars rising in turn, static under Reduce Motion; used in the Library, Map loading and Variables loading. | Live in the Library. |
+| Background loading | `refreshAll` loads every card with three workers, local first, refreshes every five minutes while the Library is open, and skips cloud downloads whose state version id is unchanged. | Live: 50 pthrasher_v2 cards populated without scrolling. |
+| Check Out | Repository-backed workspaces get **Check Out…** (card context menu, cloud toolbar when no linked folder): choose a parent folder, `git clone` without prompts, remember the link, open the folder. Folders show "Checked out from …", workspaces "On this Mac". | Model tested against a local bare repository; not yet run against a GitHub-backed workspace live. |
+| Window identity | A Library window stays a Library across relaunch (content keyed on the window value). | Live after relaunch. |
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

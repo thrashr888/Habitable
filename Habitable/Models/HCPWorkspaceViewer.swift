@@ -26,11 +26,13 @@ struct HCPWorkspace: Identifiable, Equatable, Sendable {
     let htmlURL: URL?
     let tagNames: [String]
 
+    /// VCS connection when the workspace is repository-backed; lets the app check it out.
+    let vcs: HCPVCSRepository?
     init(id: String, name: String, terraformVersion: String?, executionMode: String?,
-         locked: Bool, htmlURL: URL?, tagNames: [String] = []) {
+         locked: Bool, htmlURL: URL?, tagNames: [String] = [], vcs: HCPVCSRepository? = nil) {
         self.id = id; self.name = name; self.terraformVersion = terraformVersion
         self.executionMode = executionMode; self.locked = locked; self.htmlURL = htmlURL
-        self.tagNames = tagNames
+        self.tagNames = tagNames; self.vcs = vcs
     }
 }
 
@@ -318,6 +320,20 @@ struct HCPAPIClient: Sendable {
         catch { throw HCPViewerError.invalidResponse }
     }
 
+    /// The current state version id without downloading the state; nil when the
+    /// workspace has no current state version (404).
+    func currentStateVersionID(hostname: String, workspaceID: String, token: String) async throws -> String? {
+        let object: [String: Any]
+        do {
+            object = try await get(path: "/api/v2/workspaces/\(pathComponent(workspaceID))/current-state-version",
+                                   hostname: hostname, token: token)
+        } catch HCPViewerError.response(status: 404, message: _) { return nil }
+        guard let row = object["data"] as? [String: Any], let id = row["id"] as? String, !id.isEmpty else {
+            throw HCPViewerError.invalidResponse
+        }
+        return id
+    }
+
     private func fetchStateArtifact(_ url: URL, hostname: String, token: String) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -411,7 +427,8 @@ struct HCPAPIClient: Sendable {
         return HCPWorkspace(id: id, name: name, terraformVersion: attributes["terraform-version"] as? String,
                             executionMode: attributes["execution-mode"] as? String,
                             locked: attributes["locked"] as? Bool ?? false, htmlURL: url,
-                            tagNames: attributes["tag-names"] as? [String] ?? [])
+                            tagNames: attributes["tag-names"] as? [String] ?? [],
+                            vcs: HCPVCSRepository.decode(attributes: attributes))
     }
 
     private func decodeWorkspaceVariable(_ row: [String: Any]) -> HCPWorkspaceVariable? {
@@ -770,6 +787,17 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     @Published var selectedOrganization: String {
         didSet {
             guard oldValue != selectedOrganization else { return }
+            if isSwitchingOrganization {
+                invalidateMap()
+                cancelPolling(); currentOperation = UUID()
+                isLoading = false
+                workspaces = []; runs = []; selectedRunDetails = nil
+                workspacePage = 1; workspaceHasNextPage = false; runPage = 1; runHasNextPage = false
+                identity.organization = selectedOrganization
+                selectedWorkspaceID = nil
+                persistSelection()
+                return
+            }
             disconnect()
             identity.organization = selectedOrganization
             selectedWorkspaceID = nil
@@ -787,6 +815,8 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
     @Published private(set) var isConnected = false
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingWorkspaces = false
+    private var isSwitchingOrganization = false
     @Published private(set) var isImporting = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var lastUpdated: Date?
@@ -1185,5 +1215,41 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             throw HCPViewerError.noCredential
         }
         return try await client.currentMap(hostname: host, workspaceID: workspace.id, token: token)
+    }
+
+    /// Changes organization while staying connected: no disconnect, no organization
+    /// refetch. Loads page 1 of the new organization's workspaces, bypassing the throttle.
+    func switchOrganization(_ name: String) async {
+        guard !isSample, isConnected, name != selectedOrganization else { return }
+        isSwitchingOrganization = true
+        selectedOrganization = name
+        isSwitchingOrganization = false
+        guard let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
+        workspaceRefreshTime = Date()
+        let host = hostname, organization = selectedOrganization, operation = currentOperation
+        isLoadingWorkspaces = true
+        defer { if currentOperation == operation { isLoadingWorkspaces = false } }
+        do {
+            let result = try await client.workspaces(hostname: host, organization: organization, token: token, page: 1)
+            guard currentOperation == operation, hostname == host, selectedOrganization == organization, isConnected else { return }
+            workspaces = result.items
+            workspacePage = result.page; workspaceHasNextPage = result.hasNextPage
+            lastUpdated = Date(); errorMessage = nil
+        } catch {
+            guard currentOperation == operation, selectedOrganization == organization else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Current state version id for a Library card, without downloading state.
+    /// Same credential handling as `librarySnapshot(for:)`.
+    func librarySnapshotVersionID(for workspace: HCPWorkspace) async throws -> String? {
+        guard !isSample else { throw HCPViewerError.noCredential }
+        let host = hostname
+        guard HCPAPIClient.normalizedHostname(host) != nil else { throw HCPViewerError.invalidHost }
+        guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {
+            throw HCPViewerError.noCredential
+        }
+        return try await client.currentStateVersionID(hostname: host, workspaceID: workspace.id, token: token)
     }
 }
