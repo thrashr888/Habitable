@@ -58,7 +58,8 @@ struct ResourceMapPage: View {
             map: workspace.resourceMap,
             resources: (workspace.state?.resources ?? []).compactMap { resource in
                 guard let address = resource.address, let type = resource.type else { return nil }
-                return MapDisplayResource(address: address, type: type, displayAttributes: resource.displayAttributes)
+                return MapDisplayResource(address: address, type: type, displayAttributes: resource.displayAttributes,
+                                          providerName: resource.provider_name)
             },
             notice: workspace.mapNotice,
             // A remote-state handoff is the explanation; the local state-read error
@@ -71,7 +72,9 @@ struct ResourceMapPage: View {
             workspaceDirectory: workspace.workingDirectory,
             onShowHistory: onShowHistory,
             onShowVariables: onShowVariables,
-            sideFaces: sideFaces)
+            sideFaces: sideFaces,
+            terraformExecutableURL: workspace.runner.executableURL,
+            workspaceInitialized: workspace.isInitialized)
     }
 }
 
@@ -122,6 +125,8 @@ struct ResourceMapContent: View {
     var onShowVariables: (() -> Void)? = nil
     var variablesPanel: AnyView? = nil
     var sideFaces: [MapSideFace] = []
+    var terraformExecutableURL: URL? = nil
+    var workspaceInitialized = false
     @State private var sideFaceID = "inspector"
     @State private var showingVariables = false
     // Settings › General › "Show inventory when a map opens".
@@ -706,6 +711,8 @@ struct ResourceMapContent: View {
                     Divider()
                     sourceSection
                     Divider()
+                    referenceSection.id(selectedMember)
+                    Divider()
                     historySection
                     Divider()
                     DisclosureGroup("Resources · \(tile.resources.count)") {
@@ -798,6 +805,14 @@ struct ResourceMapContent: View {
                 }
             }
             if let workspaceURL { Link("Open workspace in HCP Terraform", destination: workspaceURL).font(.system(size: 13)) }
+        }
+    }
+
+    @ViewBuilder private var referenceSection: some View {
+        if let resource = selectedResource {
+            MapResourceReference(resource: resource, workspaceDirectory: workspaceDirectory,
+                                 terraformExecutableURL: terraformExecutableURL,
+                                 workspaceInitialized: workspaceInitialized)
         }
     }
 
@@ -960,5 +975,156 @@ private final class MapRenderCache: ObservableObject {
         let value = make()
         if routes.count > 24 { routes.removeAll(keepingCapacity: true) }
         routes[key] = value; return value
+    }
+}
+
+/// Registry links, installed-provider attributes and Registry documentation for one resource.
+/// Owns its models, so selecting another resource (keyed by `.id`) starts clean.
+private struct MapResourceReference: View {
+    let resource: MapDisplayResource
+    let workspaceDirectory: URL?
+    let terraformExecutableURL: URL?
+    let workspaceInitialized: Bool
+    @StateObject private var schemaHelp = TerraformProviderSchemaHelpModel()
+    @StateObject private var registryDocs = TerraformRegistryDocsModel()
+    @State private var showsSchema = false
+    @State private var showsDocs = false
+    @State private var expandedAttributes: Set<String> = []
+
+    private var mode: String { resource.address.hasPrefix("data.") || resource.address.contains(".data.") ? "data" : "managed" }
+    private var parts: (namespace: String, name: String)? {
+        resource.providerName.flatMap(TerraformRegistryDocsModel.registryParts)
+    }
+    private var documentation: TerraformProviderDocumentation? {
+        TerraformProviderDocumentation.resolve(
+            providerIdentity: resource.providerName, resourceType: resource.type, resourceMode: mode,
+            lockFile: workspaceDirectory?.appendingPathComponent(".terraform.lock.hcl"))
+    }
+    private var version: String? { documentation?.lockedVersion ?? registryDocs.document?.version }
+    private var resourceURL: URL? {
+        if let url = documentation?.resourceURL { return url }
+        if let url = registryDocs.document?.url { return url }
+        guard let parts, let slug = TerraformRegistryDocsModel.slug(resourceType: resource.type, providerName: parts.name) else { return nil }
+        return URL(string: "https://registry.terraform.io/providers/\(parts.namespace)/\(parts.name)/latest/docs/\(mode == "data" ? "data-sources" : "resources")/\(slug)")
+    }
+    private var providerURL: URL? {
+        if let url = documentation?.providerURL { return url }
+        guard let parts else { return nil }
+        return URL(string: "https://registry.terraform.io/providers/\(parts.namespace)/\(parts.name)/\(version ?? "latest")")
+    }
+    private var canReadSchema: Bool {
+        workspaceDirectory != nil && workspaceInitialized && terraformExecutableURL != nil && resource.providerName != nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Reference").font(.headline)
+            HStack(spacing: 6) {
+                Text(resource.type).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                if let parts {
+                    Text("\(parts.namespace)/\(parts.name)\(version.map { " \($0)" } ?? "")")
+                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            if parts != nil {
+                HStack(spacing: 12) {
+                    if let resourceURL { Link("Open in Registry", destination: resourceURL).font(.system(size: 13)) }
+                    if let providerURL { Link("Provider", destination: providerURL).font(.system(size: 13)) }
+                }
+            } else {
+                Text("This provider isn't in the Terraform Registry.").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            if canReadSchema { schemaDisclosure }
+            if parts != nil { docsDisclosure }
+        }
+    }
+
+    private var schemaDisclosure: some View {
+        DisclosureGroup(isExpanded: $showsSchema) {
+            VStack(alignment: .leading, spacing: 8) {
+                if schemaHelp.isLoading(for: resource.providerName, resourceType: resource.type, mode: mode) {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading installed providers…").font(.system(size: 12)).foregroundStyle(.secondary) }
+                } else if let message = schemaHelp.message(for: resource.providerName, resourceType: resource.type, mode: mode) {
+                    Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                if let attributes = schemaHelp.attributes(for: resource.providerName, resourceType: resource.type, mode: mode) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(attributes) { attribute in attributeRow(attribute) }
+                    }
+                }
+            }.padding(.top, 6)
+        } label: { Text("Attribute reference").font(.system(size: 13)) }
+        .onChange(of: showsSchema) { open in
+            guard open, schemaHelp.attributes(for: resource.providerName, resourceType: resource.type, mode: mode) == nil else { return }
+            schemaHelp.load(directory: workspaceDirectory, executable: terraformExecutableURL,
+                            workspaceInitialized: workspaceInitialized, providerIdentity: resource.providerName,
+                            resourceType: resource.type, mode: mode)
+        }
+    }
+
+    private func attributeRow(_ attribute: TerraformSchemaAttribute) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(attribute.path).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                if attribute.required { chip("Required") }
+                if attribute.optional { chip("Optional") }
+                if attribute.computed { chip("Computed") }
+                if attribute.sensitive { chip("Sensitive") }
+            }
+            if let type = attribute.type {
+                Text(type).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            if let text = attribute.description, !text.isEmpty {
+                let open = expandedAttributes.contains(attribute.path)
+                Text(verbatim: text).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .lineLimit(open ? nil : 3).textSelection(.enabled)
+                    .onTapGesture { if open { expandedAttributes.remove(attribute.path) } else { expandedAttributes.insert(attribute.path) } }
+            }
+        }
+    }
+
+    private func chip(_ label: String) -> some View {
+        Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .overlay(Capsule().stroke(Color.primary.opacity(0.12)))
+    }
+
+    private var docsDisclosure: some View {
+        DisclosureGroup(isExpanded: $showsDocs) {
+            VStack(alignment: .leading, spacing: 8) {
+                if registryDocs.isLoading {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading from the Terraform Registry…").font(.system(size: 12)).foregroundStyle(.secondary) }
+                } else if let message = registryDocs.message {
+                    Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                if let document = registryDocs.document {
+                    ForEach(Array(orderedSections(document.markdown).enumerated()), id: \.offset) { _, section in
+                        DisclosureGroup {
+                            Text(verbatim: section.body).font(.system(size: 13)).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
+                        } label: { Text(verbatim: section.title).font(.system(size: 13, weight: .semibold)) }
+                    }
+                }
+            }.padding(.top, 6)
+        } label: { Text("Registry documentation").font(.system(size: 13)) }
+        .onChange(of: showsDocs) { open in
+            guard open, registryDocs.document == nil, !registryDocs.isLoading else { return }
+            Task {
+                await registryDocs.load(providerIdentity: resource.providerName, resourceType: resource.type,
+                                        mode: mode, preferredVersion: documentation?.lockedVersion)
+            }
+        }
+    }
+
+    private func orderedSections(_ markdown: String) -> [(title: String, body: String)] {
+        let all = TerraformRegistryDocsModel.sections(from: markdown)
+        func rank(_ title: String) -> Int {
+            let lower = title.lowercased()
+            if lower.hasPrefix("argument") { return 0 }
+            if lower.hasPrefix("attribute") { return 1 }
+            return lower == "overview" ? 3 : 2
+        }
+        return Array(all.enumerated().sorted { (rank($0.element.title), $0.offset) < (rank($1.element.title), $1.offset) }
+            .map(\.element).prefix(12))
     }
 }

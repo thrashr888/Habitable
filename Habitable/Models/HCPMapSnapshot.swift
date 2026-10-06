@@ -6,6 +6,7 @@ struct MapDisplayResource: Equatable, Sendable {
     let address: String
     let type: String
     let displayAttributes: [ResourceAttribute]
+    var providerName: String? = nil
 }
 
 extension MapResource {
@@ -73,7 +74,8 @@ struct HCPMapSnapshot: Equatable, Sendable {
                     let address = resource["address"].stringValue
                     details[address] = MapDisplayResource(address: address, type: resource["type"].stringValue,
                         displayAttributes: resourceAttributes(values: resource["values"].dictionary,
-                                                             sensitiveValues: resource["sensitive_values"]))
+                                                             sensitiveValues: resource["sensitive_values"]),
+                        providerName: resource["provider_name"].string)
                 }
                 for child in module["child_modules"].arrayValue { collect(child) }
             }

@@ -55,16 +55,26 @@ struct ContentView: View {
 
     @Environment(\.openWindow) private var openWindow
     private let onOpenRemoteWorkspace: (TerraformRemoteWorkspaceLink) -> Void
+    /// Shared with the cloud and Settings windows; the Library lists its workspaces.
+    @ObservedObject private var cloud: HCPWorkspaceViewerModel
+    @StateObject private var library = LibraryModel()
     @State private var remoteWorkspaceLink: TerraformRemoteWorkspaceLink?
 
     /// `initialDirectory` is supplied when another window opens a specific
     /// folder (for example a cloud workspace's linked local checkout).
-    init(initialDirectory: URL? = nil,
+    /// Opening a window with this value shows the Library instead of restoring
+    /// the last folder (File › Library, or the Library toolbar button).
+    static let libraryURL = URL(string: "habitable://library")!
+
+    init(initialDirectory: URL? = nil, cloud: HCPWorkspaceViewerModel,
          onOpenRemoteWorkspace: @escaping (TerraformRemoteWorkspaceLink) -> Void = { _ in }) {
         self.onOpenRemoteWorkspace = onOpenRemoteWorkspace
+        self.cloud = cloud
+        let wantsLibrary = initialDirectory == Self.libraryURL
+        let directory = wantsLibrary ? nil : initialDirectory
         // Settings › General › "Open last folder at launch".
         let restoreLast = UserDefaults.standard.object(forKey: "general.restoreLastFolder") as? Bool ?? true
-        _workspace = StateObject(wrappedValue: Workspace(dir: initialDirectory, restoreLastDirectory: initialDirectory == nil && restoreLast))
+        _workspace = StateObject(wrappedValue: Workspace(dir: directory, restoreLastDirectory: directory == nil && !wantsLibrary && restoreLast))
     }
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var configurationModel = ConfigurationModel()
@@ -153,7 +163,7 @@ struct ContentView: View {
 
     private var configuredWindowContent: some View {
         windowContent
-        .navigationTitle(workspaceName)
+        .navigationTitle(workspace.workingDirectory == nil ? "Library" : workspaceName)
         .navigationSubtitle(workspaceSubtitle)
         .environmentObject(workspace)
         .environmentObject(editors)
@@ -199,6 +209,10 @@ struct ContentView: View {
                 }
             }
             ToolbarItemGroup(placement: .automatic) {
+                if workspace.workingDirectory != nil {
+                    Button { openWindow(id: "Workspace.viewer", value: Self.libraryURL) } label: { Label("Library", systemImage: "books.vertical") }
+                        .help("Show the Library of folders and cloud workspaces")
+                }
                 if let link = remoteWorkspaceLink {
                     Button {
                         onOpenRemoteWorkspace(link)
@@ -280,10 +294,14 @@ struct ContentView: View {
     private var windowContent: some View {
         Group {
             if workspace.workingDirectory == nil {
-                BlankSlateView(recentFolders: recentWorkspaces.folders,
-                               onChooseFolder: openFolder,
-                               onOpenRecent: openRecent,
-                               onOpenHCP: { openWindow(id: "HCP.browser") })
+                LibraryView(library: library, cloud: cloud, recentFolders: recentWorkspaces.folders,
+                            onOpenFolder: openRecent, onChooseFolder: openFolder,
+                            onOpenCloud: { cloudWorkspace, organization, hostname in
+                                let link = TerraformRemoteWorkspaceLink(hostname: hostname, organization: organization,
+                                    workspaceName: cloudWorkspace.name, url: cloudWorkspace.htmlURL ?? URL(string: "https://\(hostname)")!)
+                                onOpenRemoteWorkspace(link)
+                                openWindow(id: "HCP.browser")
+                            }, onOpenConnections: { openWindow(id: "App.settings") })
             } else {
                 VStack(spacing: 0) {
                     if let page = selection, page != .map {
@@ -582,7 +600,7 @@ private struct NavigationLayoutProbe: NSViewRepresentable {
 }
 
 struct ContentView_Previews: PreviewProvider {
-    static var previews: some View { ContentView() }
+    static var previews: some View { ContentView(cloud: HCPWorkspaceViewerModel()) }
 }
 
 /// Preserve native toolbar controls while removing the OS shared glass capsule.
