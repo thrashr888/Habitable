@@ -127,6 +127,22 @@ Paul's review: thumbnails overflowed their cards; switching organization reloade
 | Check Out | Repository-backed workspaces get **Check Out…** (card context menu, cloud toolbar when no linked folder): choose a parent folder, `git clone` without prompts, remember the link, open the folder. Folders show "Checked out from …", workspaces "On this Mac". | Model tested against a local bare repository; not yet run against a GitHub-backed workspace live. |
 | Window identity | A Library window stays a Library across relaunch (content keyed on the window value). | Live after relaunch. |
 
+## Library round 3, October 6, 2026
+
+| Feedback | Change | Verified |
+| --- | --- | --- |
+| Real checkout | **Check Out…** on the ethertext workspace (thrashr888/ethertext) cloned with the panel's Check Out Here (the panel now defaults to `~/Documents/Habitable`, GitHub Desktop style, changeable in Settings › General › Checkouts), showed "Checking out…" in the toolbar, recorded the link, and opened a local window titled `ethertext · Checked out from HCP Terraform · This Mac` whose Map empty state explains the checkout and links back. The cloud window's toolbar then offers Open local folder for it. | Live. |
+| Window menu | Every window registers with the Window menu (`WindowMenuMembership`). | Live: HCP Terraform, Settings and the local windows listed. |
+| Filter fields | `FilterField` with a clear button and Escape in the Library, the workspace chooser, the Runs column and the Variables page. | Live in the Library. |
+| Variable sets | The Variables page lists applied variable sets (name, Global/Priority chips, description) with their variables as read-only masked rows. | Live: ethertext shows `aws-personal · 3 variables` with secrets masked. |
+| Tags, projects, run status, attention, recent | Workspaces carry project, current run, updated time and HCP's resource count; Explorer rows add drift and check results when the plan allows (silent fallback otherwise). Library sidebar: Recent, Needs attention (only when HCP reports something), project rows under the organization, Tags with counts and stable colors. Cards: status dot + word (Applied, Needs approval, Errored, Drifted…), tag chips, HCP's resource count before state is read. Cloud groups sort by last change; an attention strip leads All infrastructure. | Live: Recent 8, Needs attention 1 (new-website: latest run errored), projects Examples/Health/Personal/meridian-demo, Applied dots. No tags on these workspaces, so the Tags block stays hidden. |
+| Cached details | Summaries persist to `~/Library/Application Support/Habitable/library-summaries.json` (30-day expiry, 4 MiB bound) and restore at launch before the background refresh. | Unit-tested; cache file written on this Mac. |
+| Changes strip | Chevron hides or shows the strip; remembered. | Live. |
+| Remembered views | Cloud section (Map/Runs/Variables) and the inspector face persist per window via SceneStorage. | Built; not exercised across relaunch. |
+| Wording | Status chips and cards say "tiles" instead of "groups": a tile is one thing on the Map, a band is a row of one kind. ethertext's "3 tiles" are Ssl Cert, S3 Distribution and Website Bucket across two bands. | Live. |
+
+Open question filed (PAUL-174): why `aws_route53_record.route53_record` folded into the Ssl Cert tile rather than the CloudFront distribution it points at; the classifier needs real-world validation beyond Rookery.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

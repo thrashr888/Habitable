@@ -127,7 +127,7 @@ struct ResourceMapContent: View {
     var sideFaces: [MapSideFace] = []
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
-    @State private var sideFaceID = "inspector"
+    @SceneStorage("map.sideFace") private var sideFaceID = "inspector"
     @State private var showingVariables = false
     // Settings › General › "Show inventory when a map opens".
     @State private var showingInventory = UserDefaults.standard.object(forKey: "map.showInventory") as? Bool ?? true
@@ -194,7 +194,7 @@ struct ResourceMapContent: View {
                 if map != nil {
                     statusChip(count: tiles.reduce(0) { $0 + $1.resources.count }, label: "resources")
                     statusChip(count: search.isEmpty ? tiles.count : visibleTiles.count,
-                               label: search.isEmpty ? "groups" : "of \(tiles.count) groups")
+                               label: search.isEmpty ? "tiles" : "of \(tiles.count) tiles")
                     if let count = map?.dataSources.count, count > 0 {
                         Button(action: onShowList) { statusChip(count: count, label: "data sources") }
                             .buttonStyle(.plain).help("Open the data sources in List")

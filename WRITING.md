@@ -34,6 +34,7 @@ state or a run actually recorded.
 | Remove, destroy (counts: `to remove`) | Delete and destroy in the same sentence |
 | Inputs | Variables (local Terraform inputs); HCP keeps "Variables" because that is HCP's word |
 | Changes | Runs (the local history strip); the HCP section stays "Runs" |
+| tiles (`15 tiles`) | groups, rows: a tile is one thing on the Map; a band is a row of tiles of one kind |
 | Workspace settings | Settings (when scoped to one folder) |
 | Connections | HCP Terraform / cloud sign-in settings |
 | This Mac | local, locally |

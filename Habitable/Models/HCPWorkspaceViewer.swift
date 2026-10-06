@@ -28,12 +28,50 @@ struct HCPWorkspace: Identifiable, Equatable, Sendable {
 
     /// VCS connection when the workspace is repository-backed; lets the app check it out.
     let vcs: HCPVCSRepository?
+    let projectID: String?
+    let projectName: String?
+    let currentRunStatus: String?
+    let currentRunCreatedAt: Date?
+    let updatedAt: Date?
+    let resourceCount: Int?
     init(id: String, name: String, terraformVersion: String?, executionMode: String?,
-         locked: Bool, htmlURL: URL?, tagNames: [String] = [], vcs: HCPVCSRepository? = nil) {
+         locked: Bool, htmlURL: URL?, tagNames: [String] = [], vcs: HCPVCSRepository? = nil,
+         projectID: String? = nil, projectName: String? = nil, currentRunStatus: String? = nil,
+         currentRunCreatedAt: Date? = nil, updatedAt: Date? = nil, resourceCount: Int? = nil) {
         self.id = id; self.name = name; self.terraformVersion = terraformVersion
         self.executionMode = executionMode; self.locked = locked; self.htmlURL = htmlURL
         self.tagNames = tagNames; self.vcs = vcs
+        self.projectID = projectID; self.projectName = projectName
+        self.currentRunStatus = currentRunStatus; self.currentRunCreatedAt = currentRunCreatedAt
+        self.updatedAt = updatedAt; self.resourceCount = resourceCount
     }
+}
+
+struct HCPVariableSet: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let description: String
+    let isGlobal: Bool
+    let priority: Bool
+    let variables: [HCPWorkspaceVariable]
+}
+
+struct HCPExplorerWorkspace: Equatable, Sendable {
+    let workspaceID: String?
+    let workspaceName: String
+    let projectName: String?
+    let currentRunStatus: String?
+    let currentRunAppliedAt: Date?
+    let drifted: Bool?
+    let resourcesDrifted: Int?
+    let resourcesUndrifted: Int?
+    let resourceCount: Int?
+    let terraformVersion: String?
+    let vcsRepoIdentifier: String?
+    let tags: [String]
+    let checksFailed: Int?
+    let checksErrored: Int?
+    let updatedAt: Date?
 }
 
 struct HCPRun: Identifiable, Equatable, Sendable {
@@ -100,6 +138,7 @@ enum HCPViewerError: LocalizedError, Equatable {
     case rateLimited
     case responseTooLarge
     case transport(String)
+    case featureUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -112,6 +151,7 @@ enum HCPViewerError: LocalizedError, Equatable {
         case .rateLimited: "Refresh is cooling down to respect HCP Terraform's run-history limit. Try again shortly."
         case .responseTooLarge: "HCP Terraform returned more data than Habitable will read for this request."
         case .transport(let message): message
+        case .featureUnavailable: "Explorer isn't available on this organization's plan."
         }
     }
 }
@@ -214,8 +254,9 @@ struct HCPAPIClient: Sendable {
     func workspaces(hostname: String, organization: String, token: String, page: Int,
                     search: [URLQueryItem] = []) async throws -> HCPPage<HCPWorkspace> {
         let path = "/api/v2/organizations/\(pathComponent(organization))/workspaces"
-        let object = try await get(path: path, hostname: hostname, token: token, query: pagination(page) + search)
-        let items = array(object["data"]).compactMap { decodeWorkspace($0, hostname: hostname, organization: organization) }
+        let include = [URLQueryItem(name: "include", value: "project,current_run")]
+        let object = try await get(path: path, hostname: hostname, token: token, query: pagination(page) + search + include)
+        let items = decodeWorkspaces(object, hostname: hostname, organization: organization)
         return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
     }
 
@@ -235,6 +276,31 @@ struct HCPAPIClient: Sendable {
         let object = try await get(path: path, hostname: hostname, token: token, query: pagination(page))
         let items = array(object["data"]).compactMap(decodeWorkspaceVariable)
         return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
+    }
+
+    func explorerWorkspaces(hostname: String, organization: String, token: String, page: Int) async throws -> HCPPage<HCPExplorerWorkspace> {
+        let path = "/api/v2/organizations/\(pathComponent(organization))/explorer"
+        let query = [URLQueryItem(name: "type", value: "workspaces"),
+                     URLQueryItem(name: "page[number]", value: String(max(1, page))),
+                     URLQueryItem(name: "page[size]", value: "100")]
+        let object: [String: Any]
+        do { object = try await get(path: path, hostname: hostname, token: token, query: query) }
+        catch HCPViewerError.response(let status, _) where [402, 403, 404].contains(status) {
+            throw HCPViewerError.featureUnavailable
+        }
+        return decodeExplorerPage(object, page: page)
+    }
+
+    func variableSets(hostname: String, workspaceID: String, token: String) async throws -> [HCPVariableSet] {
+        let path = "/api/v2/workspaces/\(pathComponent(workspaceID))/varsets"
+        var sets: [HCPVariableSet] = []
+        for page in 1...5 {
+            let object = try await get(path: path, hostname: hostname, token: token,
+                                       query: pagination(page) + [URLQueryItem(name: "include", value: "vars")])
+            sets.append(contentsOf: decodeVariableSets(object))
+            guard nextPage(object) != nil else { break }
+        }
+        return sets
     }
 
     func updateWorkspaceVariable(hostname: String, workspaceID: String, variableID: String, value: String, token: String) async throws {
@@ -418,6 +484,76 @@ struct HCPAPIClient: Sendable {
         } catch let error as HCPViewerError { throw error }
         catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
         return (body, response)
+    }
+
+    /// Decodes a workspaces list page, resolving `included` projects and current runs.
+    func decodeWorkspaces(_ object: [String: Any], hostname: String, organization: String) -> [HCPWorkspace] {
+        var projects: [String: [String: Any]] = [:], runs: [String: [String: Any]] = [:]
+        for row in array(object["included"]) {
+            guard let id = row["id"] as? String else { continue }
+            switch row["type"] as? String {
+            case "projects": projects[id] = row["attributes"] as? [String: Any] ?? [:]
+            case "runs": runs[id] = row["attributes"] as? [String: Any] ?? [:]
+            default: break
+            }
+        }
+        return array(object["data"]).compactMap { row in
+            guard let base = decodeWorkspace(row, hostname: hostname, organization: organization) else { return nil }
+            let attributes = row["attributes"] as? [String: Any] ?? [:]
+            let relationships = row["relationships"] as? [String: Any] ?? [:]
+            let projectID = relationshipID(relationships["project"])
+            let run = relationshipID(relationships["current-run"]).flatMap { runs[$0] }
+            return HCPWorkspace(id: base.id, name: base.name, terraformVersion: base.terraformVersion,
+                                executionMode: base.executionMode, locked: base.locked, htmlURL: base.htmlURL,
+                                tagNames: base.tagNames, vcs: base.vcs,
+                                projectID: projectID,
+                                projectName: projectID.flatMap { projects[$0]?["name"] as? String },
+                                currentRunStatus: run?["status"] as? String,
+                                currentRunCreatedAt: (run?["created-at"] as? String).flatMap(isoDate),
+                                updatedAt: (attributes["updated-at"] as? String).flatMap(isoDate),
+                                resourceCount: attributes["resource-count"] as? Int)
+        }
+    }
+
+    func decodeExplorerPage(_ object: [String: Any], page: Int) -> HCPPage<HCPExplorerWorkspace> {
+        func int(_ value: Any?) -> Int? { (value as? Int) ?? (value as? String).flatMap(Int.init) }
+        func bool(_ value: Any?) -> Bool? { (value as? Bool) ?? (value as? String).flatMap { Bool($0) } }
+        func date(_ value: Any?) -> Date? { (value as? String).flatMap(isoDate) }
+        let items = array(object["data"]).compactMap { row -> HCPExplorerWorkspace? in
+            let a = row["attributes"] as? [String: Any] ?? [:]
+            guard let name = a["workspace_name"] as? String else { return nil }
+            let tags: [String]
+            if let list = a["tags"] as? [String] { tags = list }
+            else if let text = a["tags"] as? String { tags = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+            else { tags = [] }
+            return HCPExplorerWorkspace(
+                workspaceID: a["external_id"] as? String, workspaceName: name,
+                projectName: a["project_name"] as? String,
+                currentRunStatus: a["current_run_status"] as? String,
+                currentRunAppliedAt: date(a["current_run_applied_at"]),
+                drifted: bool(a["drifted"]), resourcesDrifted: int(a["resources_drifted"]),
+                resourcesUndrifted: int(a["resources_undrifted"]), resourceCount: int(a["resource_count"]),
+                terraformVersion: a["workspace_terraform_version"] as? String,
+                vcsRepoIdentifier: a["vcs_repo_identifier"] as? String, tags: tags,
+                checksFailed: int(a["checks_failed"]), checksErrored: int(a["checks_errored"]),
+                updatedAt: date(a["workspace_updated_at"]))
+        }
+        return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
+    }
+
+    func decodeVariableSets(_ object: [String: Any]) -> [HCPVariableSet] {
+        var vars: [String: HCPWorkspaceVariable] = [:]
+        for row in array(object["included"]) {
+            if let variable = decodeWorkspaceVariable(row) { vars[variable.id] = variable }
+        }
+        return array(object["data"]).compactMap { row in
+            guard let id = row["id"] as? String, let a = row["attributes"] as? [String: Any],
+                  let name = a["name"] as? String else { return nil }
+            let refs = (((row["relationships"] as? [String: Any])?["vars"] as? [String: Any])?["data"] as? [[String: Any]]) ?? []
+            return HCPVariableSet(id: id, name: name, description: a["description"] as? String ?? "",
+                                  isGlobal: a["global"] as? Bool ?? false, priority: a["priority"] as? Bool ?? false,
+                                  variables: refs.compactMap { ($0["id"] as? String).flatMap { vars[$0] } })
+        }
     }
 
     private func decodeWorkspace(_ row: [String: Any], hostname: String, organization: String) -> HCPWorkspace? {
@@ -621,6 +757,10 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     @Published private(set) var isLoadingVariables = false
     @Published private(set) var variablesError: String?
     @Published private(set) var savingVariableID: String?
+    @Published private(set) var variableSets: [HCPVariableSet] = []
+    @Published private(set) var variableSetsError: String?
+    @Published private(set) var explorerRows: [String: HCPExplorerWorkspace] = [:]
+    @Published private(set) var explorerUnavailable = false
     private var variablesOperation = UUID()
 
     var mapRequestKey: String {
@@ -639,6 +779,8 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         variablesOperation = UUID()
         workspaceVariables = []
         variablesError = nil
+        variableSets = []
+        variableSetsError = nil
         isLoadingVariables = false
         savingVariableID = nil
     }
@@ -654,6 +796,8 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         let host = hostname, organization = selectedOrganization, workspaceID = workspace.id
         workspaceVariables = []
         variablesError = nil
+        variableSets = []
+        variableSetsError = nil
         isLoadingVariables = true
         defer { if variablesOperation == operation { isLoadingVariables = false } }
         do {
@@ -672,7 +816,43 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             guard variablesOperation == operation, isConnected, hostname == host,
                   selectedOrganization == organization, selectedWorkspaceID == workspaceID else { return }
             variablesError = "Couldn’t load workspace variables. Check access and refresh to try again."
+            return
         }
+        do {
+            let sets = try await client.variableSets(hostname: host, workspaceID: workspaceID, token: token)
+            guard !Task.isCancelled, variablesOperation == operation, isConnected, hostname == host,
+                  selectedOrganization == organization, selectedWorkspaceID == workspaceID else { return }
+            variableSets = sets
+        } catch {
+            guard variablesOperation == operation, isConnected, hostname == host,
+                  selectedOrganization == organization, selectedWorkspaceID == workspaceID else { return }
+            variableSetsError = "Couldn’t load variable sets. Check access and refresh to try again."
+        }
+    }
+
+    /// Loads the Explorer view of the organization (drift, resource counts, checks).
+    /// Silent fallback: an unavailable plan sets `explorerUnavailable`; other errors keep current rows.
+    func refreshExplorer() async {
+        guard !isSample, isConnected, let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
+        let host = hostname, organization = selectedOrganization, operation = currentOperation
+        func current() -> Bool { currentOperation == operation && isConnected && hostname == host && selectedOrganization == organization }
+        do {
+            var rows: [String: HCPExplorerWorkspace] = [:]
+            var page = 1
+            while true {
+                let result = try await client.explorerWorkspaces(hostname: host, organization: organization, token: token, page: page)
+                guard !Task.isCancelled, current() else { return }
+                for item in result.items { rows[item.workspaceName] = item }
+                guard result.hasNextPage, page < 10 else { break }
+                page += 1
+            }
+            explorerRows = rows
+            explorerUnavailable = false
+        } catch HCPViewerError.featureUnavailable {
+            guard current() else { return }
+            explorerRows = [:]
+            explorerUnavailable = true
+        } catch {}
     }
 
     @discardableResult
@@ -936,6 +1116,8 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             } else if selectedWorkspace == nil {
                 errorMessage = "The saved workspace was not found in the first 250 workspaces. Load more to locate it."
             }
+            explorerRows = [:]; explorerUnavailable = false
+            Task { await refreshExplorer() }
             if selectedWorkspace != nil { await refreshRuns(force: true) }
         } catch {
             guard currentOperation == operation else { return }
@@ -1224,6 +1406,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         isSwitchingOrganization = true
         selectedOrganization = name
         isSwitchingOrganization = false
+        explorerRows = [:]; explorerUnavailable = false
         guard let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
         workspaceRefreshTime = Date()
         let host = hostname, organization = selectedOrganization, operation = currentOperation
@@ -1235,6 +1418,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             workspaces = result.items
             workspacePage = result.page; workspaceHasNextPage = result.hasNextPage
             lastUpdated = Date(); errorMessage = nil
+            Task { await refreshExplorer() }
         } catch {
             guard currentOperation == operation, selectedOrganization == organization else { return }
             errorMessage = error.localizedDescription

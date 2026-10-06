@@ -878,6 +878,71 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         }
     }
 
+    func testWorkspaceListIncludesProjectAndCurrentRun() async throws {
+        let json = #"{"data":[{"id":"ws-1","type":"workspaces","attributes":{"name":"prod","updated-at":"2026-10-01T10:00:00.000Z","resource-count":12},"relationships":{"project":{"data":{"id":"prj-1","type":"projects"}},"current-run":{"data":{"id":"run-1","type":"runs"}}}},{"id":"ws-2","type":"workspaces","attributes":{"name":"bare"}}],"included":[{"id":"prj-1","type":"projects","attributes":{"name":"Platform"}},{"id":"run-1","type":"runs","attributes":{"status":"applied","created-at":"2026-10-02T11:30:00.000Z"}}],"links":{}}"#
+        HCPURLProtocolStub.responses["/api/v2/organizations/o/workspaces"] = Data(json.utf8)
+        let result = try await makeClient().workspaces(hostname: "app.terraform.io", organization: "o", token: "t", page: 1)
+        let prod = try XCTUnwrap(result.items.first)
+        XCTAssertEqual(prod.projectID, "prj-1")
+        XCTAssertEqual(prod.projectName, "Platform")
+        XCTAssertEqual(prod.currentRunStatus, "applied")
+        XCTAssertNotNil(prod.currentRunCreatedAt)
+        XCTAssertNotNil(prod.updatedAt)
+        XCTAssertEqual(prod.resourceCount, 12)
+        let bare = result.items[1]
+        XCTAssertNil(bare.projectName); XCTAssertNil(bare.currentRunStatus); XCTAssertNil(bare.updatedAt); XCTAssertNil(bare.resourceCount)
+        let query = URLComponents(url: try XCTUnwrap(HCPURLProtocolStub.requests.first?.url), resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(query?.first(where: { $0.name == "include" })?.value, "project,current_run")
+    }
+
+    func testWorkspacePageWithoutIncludedLeavesNewFieldsNil() throws {
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(#"{"data":[{"id":"ws-1","type":"workspaces","attributes":{"name":"a"},"relationships":{"project":{"data":{"id":"prj-9"}}}}]}"#.utf8)) as? [String: Any])
+        let items = makeClient().decodeWorkspaces(object, hostname: "app.terraform.io", organization: "o")
+        XCTAssertEqual(items.first?.projectID, "prj-9")
+        XCTAssertNil(items.first?.projectName)
+        XCTAssertNil(items.first?.currentRunStatus)
+    }
+
+    func testExplorerDecodesTagsAsStringOrArray() async throws {
+        let json = #"{"data":[{"id":"x1","type":"explorer-workspaces","attributes":{"workspace_name":"a","external_id":"ws-1","project_name":"P","current_run_status":"applied","current_run_applied_at":"2026-10-02T11:30:00.000Z","drifted":true,"resources_drifted":2,"resources_undrifted":8,"resource_count":10,"workspace_terraform_version":"1.10.0","vcs_repo_identifier":"o/r","tags":"prod, eu","checks_failed":1,"checks_errored":0,"workspace_updated_at":"2026-10-01T10:00:00Z"}},{"id":"x2","type":"explorer-workspaces","attributes":{"workspace_name":"b","tags":["x","y"]}}],"links":{},"meta":{"pagination":{"total-count":2}}}"#
+        HCPURLProtocolStub.responses["/api/v2/organizations/o/explorer"] = Data(json.utf8)
+        let page = try await makeClient().explorerWorkspaces(hostname: "app.terraform.io", organization: "o", token: "t", page: 1)
+        XCTAssertEqual(page.items.count, 2)
+        let a = page.items[0]
+        XCTAssertEqual(a.workspaceID, "ws-1"); XCTAssertEqual(a.tags, ["prod", "eu"])
+        XCTAssertEqual(a.drifted, true); XCTAssertEqual(a.resourcesDrifted, 2); XCTAssertEqual(a.resourcesUndrifted, 8)
+        XCTAssertEqual(a.checksFailed, 1); XCTAssertEqual(a.vcsRepoIdentifier, "o/r")
+        XCTAssertNotNil(a.currentRunAppliedAt); XCTAssertNotNil(a.updatedAt)
+        XCTAssertEqual(page.items[1].tags, ["x", "y"]); XCTAssertNil(page.items[1].drifted)
+        let query = URLComponents(url: try XCTUnwrap(HCPURLProtocolStub.requests.first?.url), resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(query?.first(where: { $0.name == "type" })?.value, "workspaces")
+        XCTAssertEqual(query?.first(where: { $0.name == "page[size]" })?.value, "100")
+    }
+
+    func testExplorerForbiddenIsFeatureUnavailable() async throws {
+        HCPURLProtocolStub.responses["/api/v2/organizations/o/explorer"] = Data(#"{"errors":[]}"#.utf8)
+        HCPURLProtocolStub.statusCode = 403
+        do {
+            _ = try await makeClient().explorerWorkspaces(hostname: "app.terraform.io", organization: "o", token: "t", page: 1)
+            XCTFail("expected featureUnavailable")
+        } catch { XCTAssertEqual(error as? HCPViewerError, .featureUnavailable) }
+    }
+
+    func testVariableSetsResolveIncludedVariablesAndKeepSensitivity() async throws {
+        let json = #"{"data":[{"id":"varset-1","type":"varsets","attributes":{"name":"Creds","description":"shared","global":true,"priority":false},"relationships":{"vars":{"data":[{"id":"var-1","type":"vars"},{"id":"var-2","type":"vars"}]}}},{"id":"varset-2","type":"varsets","attributes":{"name":"Empty","global":false,"priority":true},"relationships":{"vars":{"data":[]}}}],"included":[{"id":"var-1","type":"vars","attributes":{"key":"REGION","value":"eu","category":"terraform","sensitive":false}},{"id":"var-2","type":"vars","attributes":{"key":"TOKEN","value":"hidden","category":"env","sensitive":true}}],"links":{}}"#
+        HCPURLProtocolStub.responses["/api/v2/workspaces/ws-1/varsets"] = Data(json.utf8)
+        let sets = try await makeClient().variableSets(hostname: "app.terraform.io", workspaceID: "ws-1", token: "t")
+        XCTAssertEqual(sets.map(\.name), ["Creds", "Empty"])
+        XCTAssertTrue(sets[0].isGlobal); XCTAssertFalse(sets[1].isGlobal); XCTAssertTrue(sets[1].priority)
+        XCTAssertEqual(sets[0].description, "shared")
+        XCTAssertEqual(sets[0].variables.map(\.key), ["REGION", "TOKEN"])
+        XCTAssertTrue(sets[0].variables[1].isSensitive)
+        XCTAssertNil(sets[0].variables[1].value)
+        XCTAssertTrue(sets[1].variables.isEmpty)
+        let query = URLComponents(url: try XCTUnwrap(HCPURLProtocolStub.requests.first?.url), resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(query?.first(where: { $0.name == "include" })?.value, "vars")
+    }
+
     private func makeClient() -> HCPAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HCPURLProtocolStub.self]

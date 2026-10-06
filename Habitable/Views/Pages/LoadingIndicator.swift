@@ -39,3 +39,43 @@ struct LoadingIndicator: View {
         return 0.35 + 0.65 * value
     }
 }
+
+/// Keeps every Habitable window in the Window menu. SwiftUI's single `Window`
+/// scenes otherwise leave the menu's window list incomplete.
+struct WindowMenuMembership: NSViewRepresentable {
+    func makeNSView(context: Context) -> MembershipView { MembershipView() }
+    func updateNSView(_ view: MembershipView, context: Context) { view.apply() }
+
+    final class MembershipView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+        }
+        func apply() {
+            guard let window else { return }
+            if window.isExcludedFromWindowsMenu { window.isExcludedFromWindowsMenu = false }
+        }
+    }
+}
+
+/// A filter field with the search glass and a clear button once there is text.
+struct FilterField: View {
+    let placeholder: String
+    @Binding var text: String
+    var accessibilityLabel: String? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(placeholder, text: $text).textFieldStyle(.plain)
+                .accessibilityLabel(accessibilityLabel ?? placeholder)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain).accessibilityLabel("Clear \(placeholder.lowercased())")
+                    .keyboardShortcut(.escape, modifiers: [])
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+}

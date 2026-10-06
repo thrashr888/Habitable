@@ -1,7 +1,7 @@
 import Foundation
 
 /// Plain numbers read from a classified map. Nothing here is inferred.
-struct LibraryStateSummary: Equatable, Sendable {
+struct LibraryStateSummary: Equatable, Sendable, Codable {
     let resourceCount: Int
     let groupCount: Int
     let dataSourceCount: Int
@@ -9,6 +9,61 @@ struct LibraryStateSummary: Equatable, Sendable {
     let recordedAt: Date?
     let serial: Int?
     let versionID: String?
+
+    init(resourceCount: Int, groupCount: Int, dataSourceCount: Int, kindCounts: [MapKind: Int],
+         recordedAt: Date?, serial: Int?, versionID: String?) {
+        self.resourceCount = resourceCount
+        self.groupCount = groupCount
+        self.dataSourceCount = dataSourceCount
+        self.kindCounts = kindCounts
+        self.recordedAt = recordedAt
+        self.serial = serial
+        self.versionID = versionID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case resourceCount, groupCount, dataSourceCount, kindCounts, recordedAt, serial, versionID
+    }
+
+    /// `kindCounts` is stored as `{"<MapKind raw value>": count}` so the JSON stays an object.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        resourceCount = try c.decode(Int.self, forKey: .resourceCount)
+        groupCount = try c.decode(Int.self, forKey: .groupCount)
+        dataSourceCount = try c.decode(Int.self, forKey: .dataSourceCount)
+        let raw = try c.decode([String: Int].self, forKey: .kindCounts)
+        var kinds: [MapKind: Int] = [:]
+        for (key, count) in raw {
+            if let value = Int(key), let kind = MapKind(rawValue: value) { kinds[kind] = count }
+        }
+        kindCounts = kinds
+        recordedAt = try c.decodeIfPresent(Date.self, forKey: .recordedAt)
+        serial = try c.decodeIfPresent(Int.self, forKey: .serial)
+        versionID = try c.decodeIfPresent(String.self, forKey: .versionID)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(resourceCount, forKey: .resourceCount)
+        try c.encode(groupCount, forKey: .groupCount)
+        try c.encode(dataSourceCount, forKey: .dataSourceCount)
+        try c.encode(Dictionary(uniqueKeysWithValues: kindCounts.map { (String($0.key.rawValue), $0.value) }), forKey: .kindCounts)
+        try c.encodeIfPresent(recordedAt, forKey: .recordedAt)
+        try c.encodeIfPresent(serial, forKey: .serial)
+        try c.encodeIfPresent(versionID, forKey: .versionID)
+    }
+}
+
+/// On-disk cache record. Only counts, dates, serial and version id per entry id.
+struct LibraryCacheEntry: Codable, Equatable, Sendable {
+    let id: String
+    let savedAt: Date
+    let summary: LibraryStateSummary
+}
+
+struct LibraryCacheFile: Codable, Equatable, Sendable {
+    var version = 1
+    var entries: [LibraryCacheEntry]
 }
 
 enum LibraryEntryKind: Equatable, Sendable {
@@ -30,13 +85,92 @@ struct LibraryEntry: Identifiable, Equatable, Sendable {
 final class LibraryModel: ObservableObject {
     nonisolated static let maximumLocalEntries = 20
     nonisolated static let maximumStateBytes = 32 * 1_048_576
+    nonisolated static let maximumCacheBytes = 4 * 1_048_576
+    nonisolated static let cacheLifetime: TimeInterval = 30 * 86_400
+    nonisolated static let cacheSaveDelay: Duration = .seconds(1)
+
+    nonisolated static var defaultCacheURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Habitable", isDirectory: true)
+            .appendingPathComponent("library-summaries.json")
+    }
 
     @Published private(set) var localEntries: [LibraryEntry] = []
-    @Published private(set) var summaries: [String: LibraryStateSummary] = [:]
+    @Published private(set) var summaries: [String: LibraryStateSummary] = [:] {
+        didSet { if summaries != oldValue { scheduleCacheSave() } }
+    }
+    /// True once init has loaded the on-disk cache (even if it held nothing usable).
+    @Published private(set) var cacheRestored = false
     @Published private(set) var loading: Set<String> = []
     @Published private(set) var failures: [String: String] = [:]
     @Published private(set) var lastRefresh: Date?
     private var isRefreshingAll = false
+    private let cacheURL: URL?
+    private var verifiedAt: [String: Date] = [:]
+    private var pendingSave: Task<Void, Never>?
+
+    init(cacheURL: URL? = LibraryModel.defaultCacheURL) {
+        self.cacheURL = cacheURL
+        if let cacheURL {
+            let restored = Self.readCache(at: cacheURL, now: Date())
+            for entry in restored {
+                verifiedAt[entry.id] = entry.savedAt
+                summaries[entry.id] = entry.summary
+            }
+        }
+        cacheRestored = true
+    }
+
+    // MARK: Cache
+
+    /// Reads the cache, dropping oversized, unreadable and expired content.
+    nonisolated static func readCache(at url: URL, now: Date) -> [LibraryCacheEntry] {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber, size.intValue <= maximumCacheBytes,
+              let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(LibraryCacheFile.self, from: data),
+              file.version == 1 else { return [] }
+        return file.entries.filter { now.timeIntervalSince($0.savedAt) <= cacheLifetime }
+    }
+
+    nonisolated private static func writeCache(_ entries: [LibraryCacheEntry], to url: URL) {
+        do {
+            let data = try JSONEncoder().encode(LibraryCacheFile(entries: entries.sorted { $0.id < $1.id }))
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            // No persistence is better than a failed refresh.
+        }
+    }
+
+    private func cacheSnapshot() -> [LibraryCacheEntry] {
+        let now = Date()
+        return summaries.map { LibraryCacheEntry(id: $0.key, savedAt: verifiedAt[$0.key] ?? now, summary: $0.value) }
+    }
+
+    private func markVerified(_ id: String) {
+        verifiedAt[id] = Date()
+        scheduleCacheSave()
+    }
+
+    private func scheduleCacheSave() {
+        guard cacheURL != nil else { return }
+        pendingSave?.cancel()
+        pendingSave = Task { [weak self] in
+            try? await Task.sleep(for: Self.cacheSaveDelay)
+            guard !Task.isCancelled else { return }
+            await self?.flushCache()
+        }
+    }
+
+    /// Writes the cache now (encode and write run off the main actor). Normally called by the debounce.
+    func flushCache() async {
+        pendingSave?.cancel()
+        pendingSave = nil
+        guard let cacheURL else { return }
+        let snapshot = cacheSnapshot()
+        await Task.detached(priority: .utility) { Self.writeCache(snapshot, to: cacheURL) }.value
+    }
 
     // MARK: Entries
 
@@ -145,7 +279,9 @@ final class LibraryModel: ObservableObject {
             }.value
             guard !Task.isCancelled else { return }
             switch result {
-            case .unchanged: failures[entry.id] = nil
+            case .unchanged:
+                failures[entry.id] = nil
+                markVerified(entry.id)
             case .absent:
                 summaries[entry.id] = nil
                 failures[entry.id] = nil
@@ -155,6 +291,7 @@ final class LibraryModel: ObservableObject {
             case .summary(let summary):
                 summaries[entry.id] = summary
                 failures[entry.id] = nil
+                markVerified(entry.id)
             }
         case .cloud(let workspace, _, _):
             guard let cloud else { return }
@@ -170,6 +307,7 @@ final class LibraryModel: ObservableObject {
                 }
                 guard Self.needsCloudReload(cached: summaries[entry.id], currentVersionID: versionID) else {
                     failures[entry.id] = nil
+                    markVerified(entry.id)
                     return
                 }
                 let snapshot = try await cloud.librarySnapshot(for: workspace)
@@ -177,6 +315,7 @@ final class LibraryModel: ObservableObject {
                 summaries[entry.id] = Self.summary(for: snapshot.map, recordedAt: snapshot.stateCreatedAt,
                                                    serial: snapshot.stateSerial, versionID: snapshot.versionID)
                 failures[entry.id] = nil
+                markVerified(entry.id)
             } catch {
                 guard !Task.isCancelled else { return }
                 if case HCPViewerError.response(status: 404, message: _) = error {

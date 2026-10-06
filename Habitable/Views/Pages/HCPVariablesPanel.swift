@@ -61,19 +61,69 @@ struct HCPMapVariablesPanel: View {
         .accessibilityHidden(true)
     }
 
+    /// Variable sets applied to this workspace, each with the variables it
+    /// contributes. They are edited on the set in HCP Terraform, not here.
+    @ViewBuilder private var variableSetsSection: some View {
+        let sets = model.variableSets.filter { set in
+            query.isEmpty || set.name.localizedCaseInsensitiveContains(query)
+                || set.variables.contains { $0.key.localizedCaseInsensitiveContains(query) }
+        }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Variable sets").font(.headline)
+                if !model.variableSets.isEmpty {
+                    Text("\(model.variableSets.count) applied").font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+            }
+            if let error = model.variableSetsError {
+                Text(error).font(.system(size: 13)).foregroundStyle(.red)
+            } else if model.variableSets.isEmpty && !model.isLoadingVariables {
+                Text("No variable sets apply to this workspace.").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            ForEach(sets) { set in
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text(set.name).font(.system(size: 13, weight: .semibold))
+                        if set.isGlobal { VariableChip(text: "Global") }
+                        if set.priority { VariableChip(text: "Priority", tint: .orange) }
+                        Spacer()
+                        Text("\(set.variables.count) variable\(set.variables.count == 1 ? "" : "s")")
+                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 9)
+                    if !set.description.isEmpty {
+                        Text(set.description).font(.system(size: 12)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.bottom, 8)
+                    }
+                    Divider()
+                    ForEach(Array(set.variables.filter { query.isEmpty || $0.key.localizedCaseInsensitiveContains(query) }.enumerated()), id: \.element.id) { index, variable in
+                        HCPVariableRow(variable: variable, index: index, compact: compact, keyWidth: keyWidth,
+                                       editDisabled: true, onEdit: {})
+                        Divider()
+                    }
+                }
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
+            }
+            if !model.variableSets.isEmpty {
+                Text("Variable sets are edited on the set itself in HCP Terraform; a priority set overrides workspace values.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(model.selectedWorkspace?.name ?? "Workspace").font(.headline)
                 Text("Changes affect future runs").font(.system(size: 13)).foregroundStyle(.secondary)
                 Spacer()
-                TextField("Filter variables", text: $query).textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260).accessibilityLabel("Filter workspace variables")
+                FilterField(placeholder: "Filter variables", text: $query, accessibilityLabel: "Filter workspace variables")
+                    .frame(maxWidth: 260)
                 Button { Task { await model.refreshVariables() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).accessibilityLabel("Refresh workspace variables")
                     .disabled(model.isLoadingVariables || model.savingVariableID != nil)
             }
-            if model.isLoadingVariables { ProgressView("Loading variables…") }
+            if model.isLoadingVariables { LoadingIndicator(size: 16, label: "Loading variables…") }
             if let error = model.variablesError {
                 Text(error).font(.system(size: 13)).foregroundStyle(.red).textSelection(.enabled)
             }
@@ -101,7 +151,8 @@ struct HCPMapVariablesPanel: View {
                     if !model.isLoadingVariables && model.workspaceVariables.isEmpty && model.variablesError == nil {
                         Text("No workspace-specific variables").font(.headline)
                     }
-                    Text("Inherited variable sets and values from configuration files are not included here.")
+                    variableSetsSection
+                    Text("Values from configuration files are not included here.")
                         .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if let url = model.selectedWorkspace?.htmlURL {
                         Link("Open workspace in HCP Terraform", destination: url)
