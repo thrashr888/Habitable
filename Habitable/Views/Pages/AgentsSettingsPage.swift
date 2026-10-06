@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 struct AgentsSettingsPage: View {
     @ObservedObject var access: HabitableAgentAccess
-    @ObservedObject var workspace: Workspace
     @State private var clients = DetectedAgentClient.discover()
     @State private var errorMessage: String?
     @State private var showingConfigurationPicker = false
@@ -15,74 +14,17 @@ struct AgentsSettingsPage: View {
 
     private var isOn: Binding<Bool> {
         Binding(get: { access.isEnabled || access.isStarting },
-                set: { access.setEnabled($0, in: workspace) })
+                set: { access.setEnabled($0) })
     }
 
+    private var detectedClients: [DetectedAgentClient] { clients.filter(\.isDetected) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-                Text("Agent connections").font(.headline)
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Allow agents to access the selected workspace", isOn: isOn)
-                            .disabled(workspace.workingDirectory == nil || access.isStarting)
-                        Text("Habitable shares read-only workspace metadata and diagnostics. Agents can request a plan-only run; they cannot apply or destroy infrastructure.")
-                            .font(.callout).foregroundStyle(.secondary)
-                        if access.isStarting {
-                            Label("Starting the local server…", systemImage: "hourglass")
-                                .font(.callout).foregroundStyle(.secondary)
-                        } else if let server = access.server, access.isEnabled {
-                            MCPServerStatusView(server: server)
-                        } else if let message = access.message {
-                            Label(message, systemImage: "exclamationmark.triangle")
-                                .font(.callout).foregroundStyle(.orange)
-                        } else {
-                            Label("Off", systemImage: "circle")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                } label: { Text("Habitable MCP") }
-
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if clients.filter(\.isDetected).isEmpty {
-                            Text("No supported agent configuration was found. Choose a configuration file to connect another compatible client.")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
-                        ForEach(clients.filter(\.isDetected)) { client in
-                            clientRow(client)
-                            if client.id != clients.filter(\.isDetected).last?.id { Divider() }
-                        }
-                        Button("Choose another client configuration…") { showingConfigurationPicker = true }
-                            .padding(.top, 4)
-                        if let errorMessage {
-                            Text(errorMessage).font(.callout).foregroundStyle(.red)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                } label: { Text("Detected clients") }
-
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Install Habitable’s workflow guide or optional HashiCorp tools. Each installation is separate from Habitable’s built-in server.")
-                            .font(.callout).foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Button("Install Habitable workflow skill") { installHabitableSkill() }
-                            Button("Install HashiCorp Terraform style guide") { installTerraformSkill() }
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            Button("Install HashiCorp Terraform MCP v1.3.0") { installTerraformMCP() }
-                                .disabled(terraformInstallRunning)
-                            Button("Release notes") {
-                                NSWorkspace.shared.open(HabitableStdioBridgeInstaller.terraformMCPReleaseURL)
-                            }
-                        }
-                        if let skillInstallMessage { Text(skillInstallMessage).font(.caption).foregroundStyle(.secondary) }
-                        if let terraformInstallMessage { Text(terraformInstallMessage).font(.caption).foregroundStyle(.secondary) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                } label: { Text("Optional tools and skills") }
+        VStack(alignment: .leading, spacing: 24) {
+            serverGroup
+            clientsGroup
+            toolsGroup
         }
-            .frame(maxWidth: 760, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .top)
-            .padding(24)
         .fileImporter(isPresented: $showingConfigurationPicker, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
             do {
                 let url = try result.get().first.unwrap()
@@ -92,25 +34,102 @@ struct AgentsSettingsPage: View {
             } catch { errorMessage = "Could not connect this configuration: \(error.localizedDescription)" }
         }
         .onAppear(perform: refreshClients)
-        .onChange(of: workspace.workingDirectory) { _ in access.workspaceChanged(in: workspace) }
+    }
+
+    // MARK: Groups
+
+    private var serverGroup: some View {
+        SettingsGroup("Server", footer: "Habitable shares read-only workspace metadata and diagnostics. Agents can request a plan-only run; they cannot apply or destroy infrastructure. Agents reach Habitable through MCP, the Model Context Protocol.") {
+            SettingsRow("Let agents read this Mac’s open workspace",
+                        subtitle: "Follows the window you used last.") {
+                Toggle("Let agents read this Mac’s open workspace", isOn: isOn).labelsHidden().toggleStyle(.switch)
+                    .disabled(access.isStarting)
+            }
+            SettingsRow("Exposes", subtitle: access.activeWorkspaceName == nil ? nil : "The local folder in your most recent window") {
+                if let name = access.activeWorkspaceName {
+                    Text(name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                } else {
+                    Text("Open a local workspace to expose it")
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+            }
+            if access.isStarting {
+                SettingsRow("Status") {
+                    Label("Starting the local server…", systemImage: "hourglass")
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+            } else if let server = access.server, access.isEnabled {
+                MCPServerStatusRows(server: server)
+            } else if let message = access.message {
+                SettingsRow("Status") {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 13)).foregroundStyle(.orange)
+                }
+            } else {
+                SettingsRow("Status") {
+                    Label("Off", systemImage: "circle").font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var clientsGroup: some View {
+        SettingsGroup("Clients", footer: errorMessage == nil ? "Detected agent apps on this Mac. Connecting adds Habitable to the app’s own configuration." : nil) {
+            if detectedClients.isEmpty {
+                SettingsRow("No supported agent found",
+                            subtitle: "Choose a configuration file to connect another compatible client.") { EmptyView() }
+            }
+            ForEach(detectedClients) { client in
+                clientRow(client)
+            }
+            SettingsRow("Another client") {
+                Button("Choose configuration…") { showingConfigurationPicker = true }.buttonStyle(.bordered)
+                    .accessibilityLabel("Choose another client configuration")
+            }
+            if let errorMessage {
+                SettingsRow("Could not finish") {
+                    Text(errorMessage).font(.system(size: 12)).foregroundStyle(.red)
+                        .multilineTextAlignment(.trailing).textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var toolsGroup: some View {
+        SettingsGroup("Skills and tools", footer: "Each installation is separate from Habitable’s built-in server.") {
+            SettingsRow("Habitable workflow skill", subtitle: skillInstallMessage) {
+                Button("Install") { installHabitableSkill() }.buttonStyle(.bordered)
+                    .accessibilityLabel("Install Habitable workflow skill")
+            }
+            SettingsRow("HashiCorp Terraform style guide") {
+                Button("Install") { installTerraformSkill() }.buttonStyle(.bordered)
+                    .accessibilityLabel("Install HashiCorp Terraform style guide")
+            }
+            SettingsRow("HashiCorp Terraform tools v1.3.0", subtitle: terraformInstallMessage) {
+                HStack(spacing: 8) {
+                    Button("Install") { installTerraformMCP() }.buttonStyle(.bordered)
+                        .disabled(terraformInstallRunning)
+                        .accessibilityLabel("Install HashiCorp Terraform MCP v1.3.0")
+                    Button("Release notes") {
+                        NSWorkspace.shared.open(HabitableStdioBridgeInstaller.terraformMCPReleaseURL)
+                    }.buttonStyle(.borderless)
+                }
+            }
+        }
     }
 
     @ViewBuilder private func clientRow(_ client: DetectedAgentClient) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: client.isConfigured ? "checkmark.circle.fill" : "app.badge")
-                .foregroundStyle(client.isConfigured ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(client.name)
-                let bridgeCurrent = client.hasCurrentBridge(access.server?.bridgeIdentifier ?? "")
-                Text(client.isConfigured ? (!access.isEnabled ? "Configured · Habitable server is off" : bridgeCurrent ? "Configured · live connection not verified" : "Configured · reconnect required") : "Detected · not configured")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if client.isConfigured && (!access.isEnabled || client.hasCurrentBridge(access.server?.bridgeIdentifier ?? "")) {
-                Button("Disconnect") { disconnect(client) }.disabled(codexEditing && client.id == "codex")
+        let bridgeCurrent = client.hasCurrentBridge(access.server?.bridgeIdentifier ?? "")
+        let status = client.isConfigured ? (!access.isEnabled ? "Connected · Habitable server is off" : bridgeCurrent ? "Connected · not yet verified" : "Connected · reconnect required") : "Detected · not connected"
+        SettingsRow(client.name, subtitle: status) {
+            if client.isConfigured && (!access.isEnabled || bridgeCurrent) {
+                Button("Disconnect") { disconnect(client) }.buttonStyle(.bordered)
+                    .disabled(codexEditing && client.id == "codex")
+                    .accessibilityLabel("Disconnect \(client.name)")
             } else {
-                Button("Connect") { connect(client) }
+                Button("Connect") { connect(client) }.buttonStyle(.bordered)
                     .disabled(!access.isEnabled || access.server?.endpointURL == nil || (codexEditing && client.id == "codex"))
+                    .accessibilityLabel("Connect \(client.name)")
             }
         }
     }
@@ -207,30 +226,27 @@ struct AgentsSettingsPage: View {
     private func refreshClients() { clients = DetectedAgentClient.discover() }
 }
 
-private struct MCPServerStatusView: View {
+private struct MCPServerStatusRows: View {
     @ObservedObject var server: HabitableMCPServer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        SettingsRow("Status", subtitle: "Only this Mac can connect, with a private credential.") {
             Label("Running on this Mac", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            HStack {
+                .font(.system(size: 13)).foregroundStyle(.green)
+        }
+        SettingsRow("Endpoint") {
+            HStack(spacing: 8) {
                 Text(server.endpointURL?.absoluteString ?? "Waiting for local address")
-                    .font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                Spacer()
+                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                 if let endpoint = server.endpointURL {
                     Button("Copy endpoint") { NSPasteboard.general.setString(endpoint.absoluteString, forType: .string) }
+                        .buttonStyle(.bordered)
                 }
             }
-            Text("The server is loopback-only and uses a private local credential. Client configuration contains only the bridge path.")
-                .font(.caption).foregroundStyle(.secondary)
-            if !server.recentActivity.isEmpty {
-                Divider()
-                Text("Recent activity").font(.headline)
-                ForEach(Array(server.recentActivity.prefix(5).enumerated()), id: \.offset) { _, item in
-                    Text(item).font(.caption).foregroundStyle(.secondary)
-                }
-            }
+        }
+        if !server.recentActivity.isEmpty {
+            SettingsRow("Recent activity", subtitle: server.recentActivity.prefix(5).joined(separator: "\n")) { EmptyView() }
         }
     }
 }

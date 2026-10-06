@@ -11,7 +11,7 @@ import AppKit
 struct SettingsListPage: View {
     @EnvironmentObject var workspace: Workspace
     @ObservedObject var catalog: TerraformReleaseCatalog
-    @ObservedObject var agentAccess: HabitableAgentAccess = HabitableAgentAccess()
+    var onOpenAppSettings: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -90,7 +90,11 @@ struct SettingsListPage: View {
                 }
 
                 TerraformVersionSettings(workspace: workspace, catalog: catalog)
-                AgentsSettingsPage(access: agentAccess, workspace: workspace)
+                SettingsSection("Agent access", footer: "Agent access is set up for every window in Settings › Agents.") {
+                    Button("Open Settings…") { onOpenAppSettings?() }
+                        .disabled(onOpenAppSettings == nil)
+                        .accessibilityLabel("Open Agent settings")
+                }
 
                 SettingsSection("Execution", footer: "When enabled, a successful plan applies immediately without a review step.") {
                     Toggle("Apply automatically after planning", isOn: $workspace.autoApply)

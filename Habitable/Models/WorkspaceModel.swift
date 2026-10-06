@@ -298,6 +298,10 @@ class Workspace: ObservableObject {
     private var historyActionRequestID = UUID()
     private var gitContextRequestID = UUID()
     private var gitHeadMonitorTask: Task<Void, Never>?
+    private var autoInitRunning = false
+    private var autoInitWaiters: [CheckedContinuation<Void, Never>] = []
+    private var autoInitPreviousNotice: String?
+    private var autoInitAttemptedPath: String?
     private var gitHeadMonitor = GitHeadMonitor()
     private var gitHeadMonitorGeneration = UUID()
     private var gitMonitorSuspended = false
@@ -305,6 +309,8 @@ class Workspace: ObservableObject {
     // state
     @Published var locked = false
     @Published var lockedBy: TerraformRun?
+    /// Consecutive state reads deferred because another command held the workspace.
+    private var stateReadRetries = 0
     @Published private(set) var isCancelingCommand = false
     @Published private var activeCommand: TerraformCommandHandle?
 
@@ -705,7 +711,15 @@ class Workspace: ObservableObject {
         }
         
         checkVariables()
-        validate()
+        if startAutoInit(reason: .opened) {
+            // Init, then validate and read state in one chain, so the Map never first shows "Couldn't read state".
+            Task { @MainActor in
+                let ok = await self.ensureInitialized(reason: .opened)
+                if !ok, !self.autoInitAttempted, self.workingDirectory == dir { self.validate() }
+            }
+        } else {
+            validate()
+        }
         return true
     }
 
@@ -952,11 +966,17 @@ class Workspace: ObservableObject {
         stripTerraformTerminalEscapes(input)
     }
 
+    /// Explicit Initialize: always allowed, and clears the "already tried" record for this folder.
     func initialize() {
-        guard !locked, let workingDirectory = self.workingDirectory else { return }
+        autoInitAttemptedPath = nil
+        runInitialize(validateAfter: true, completion: nil)
+    }
+
+    private func runInitialize(validateAfter: Bool, completion: (@MainActor (Bool) -> Void)?) {
+        guard !locked, let workingDirectory = self.workingDirectory else { completion?(false); return }
         let lease: WorkspaceCommandCoordinator.Lease
         do { lease = try acquireCommandLease() }
-        catch { errorMessage = error.localizedDescription; return }
+        catch { errorMessage = error.localizedDescription; completion?(false); return }
         reset()
         locked = true
         let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
@@ -974,12 +994,73 @@ class Workspace: ObservableObject {
             if let res = res {
                 self.textOutput = redactor.redact(self.cleanANSI(res))
                 self.isInitialized = true
-                self.validate()
+                if validateAfter { self.validate() }
             }
             self.objectWillChange.send()
+            completion?(res != nil && error == nil)
         })
     }
-    
+
+    // MARK: Auto-initialize
+
+    enum InitializationReason { case opened, previewChanges, refresh }
+
+    static let autoInitializeKey = "workspace.autoInitialize"
+    static let initializingNotice = "Initializing Terraform…"
+
+    var autoInitializeEnabled: Bool {
+        preferences.object(forKey: Self.autoInitializeKey) as? Bool ?? true
+    }
+
+    private var autoInitAttempted: Bool {
+        guard let workingDirectory else { return false }
+        return autoInitAttemptedPath == RunHistoryStore.workspacePath(workingDirectory)
+    }
+
+    private var hasTerraformConfiguration: Bool {
+        guard let workingDirectory,
+              let names = try? FileManager.default.contentsOfDirectory(atPath: workingDirectory.path) else { return false }
+        return names.contains { $0.hasSuffix(".tf") || $0.hasSuffix(".tf.json") }
+    }
+
+    /// Whether auto-init would run now: enabled, configuration present, not tried yet, nothing running.
+    private var canAutoInitialize: Bool {
+        !isInitialized && autoInitializeEnabled && !locked && !autoInitRunning
+            && !autoInitAttempted && hasTerraformConfiguration
+    }
+
+    /// Starts init synchronously (so the command lock is held before any caller yields). Returns whether it started.
+    private func startAutoInit(reason: InitializationReason) -> Bool {
+        guard canAutoInitialize, let workingDirectory else { return false }
+        autoInitAttemptedPath = RunHistoryStore.workspacePath(workingDirectory)
+        autoInitPreviousNotice = mapNotice
+        mapNotice = Self.initializingNotice
+        autoInitRunning = true
+        runInitialize(validateAfter: reason == .opened) { [self] _ in
+            autoInitRunning = false
+            let waiters = autoInitWaiters
+            autoInitWaiters = []
+            waiters.forEach { $0.resume() }
+        }
+        return true
+    }
+
+    /// Runs `terraform init` once per opened folder when it has configuration but is not initialized.
+    /// Returns whether the folder is initialized afterwards. After `.opened` the normal validate and
+    /// state read are chained by init itself; for the other reasons the caller continues.
+    func ensureInitialized(reason: InitializationReason) async -> Bool {
+        if isInitialized { return true }
+        if !autoInitRunning, !startAutoInit(reason: reason) { return false }
+        if autoInitRunning { await withCheckedContinuation { autoInitWaiters.append($0) } }
+        // After `.opened`, validation and the state read are already chained; let them finish first.
+        if reason == .opened {
+            let deadline = Date().addingTimeInterval(60)
+            while locked, Date() < deadline { try? await Task.sleep(nanoseconds: 50_000_000) }
+        }
+        if mapNotice == Self.initializingNotice { mapNotice = autoInitPreviousNotice }
+        return isInitialized
+    }
+
     func validate() {
         validateConfiguration { valid in
             if valid { self.refreshResources() }
@@ -990,6 +1071,17 @@ class Workspace: ObservableObject {
     /// or reuse the failed run's artifact.
     func validateAndQueueRun(onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
         guard !isInspectingInputs else { return }
+        guard isInitialized || !(autoInitializeEnabled && hasTerraformConfiguration) || locked else {
+            Task { @MainActor in
+                let ok = await self.ensureInitialized(reason: .previewChanges)
+                // A failed init leaves its error in errorMessage; do not plan on top of it.
+                if !ok, self.autoInitAttempted, !self.isInitialized { return }
+                self.validateConfiguration { valid in
+                    if valid { self.queueRun(triggerSource: "validated", onCreated: onCreated) }
+                }
+            }
+            return
+        }
         validateConfiguration { valid in
             if valid { self.queueRun(triggerSource: "validated", onCreated: onCreated) }
         }
@@ -1004,7 +1096,23 @@ class Workspace: ObservableObject {
         guard !locked, let workingDirectory = self.workingDirectory else { completion(false); return }
         let lease: WorkspaceCommandCoordinator.Lease
         do { lease = try acquireCommandLease() }
+        catch WorkspaceCommandCoordinator.CoordinatorError.busy {
+            // Opening a folder can overlap a short command from another window on
+            // the same folder; wait for it rather than opening with an error.
+            guard stateReadRetries < 20 else {
+                errorMessage = WorkspaceCommandCoordinator.CoordinatorError.busy.localizedDescription
+                completion(false)
+                return
+            }
+            stateReadRetries += 1
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                self.validateConfiguration(completion: completion)
+            }
+            return
+        }
         catch { errorMessage = error.localizedDescription; completion(false); return }
+        stateReadRetries = 0
         reset()
         locked = true
         let redactor = SensitiveInputRedactor(variables: terraformVariables, environmentVariables: environmentVariables)
@@ -1031,9 +1139,28 @@ class Workspace: ObservableObject {
     
     func refreshResources() {
         guard let workingDirectory, !locked else { return }
+        if canAutoInitialize {
+            Task { @MainActor in
+                if await self.ensureInitialized(reason: .refresh) { self.refreshResources() }
+            }
+            return
+        }
         let lease: WorkspaceCommandCoordinator.Lease
         do { lease = try acquireCommandLease() }
+        catch WorkspaceCommandCoordinator.CoordinatorError.busy {
+            // A read that collides with another short command (an init, a plan
+            // review in this or another window) waits its turn instead of surfacing
+            // an error the user would only clear with Refresh.
+            guard stateReadRetries < 20 else { errorMessage = WorkspaceCommandCoordinator.CoordinatorError.busy.localizedDescription; return }
+            stateReadRetries += 1
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                self.refreshResources()
+            }
+            return
+        }
         catch { errorMessage = error.localizedDescription; return }
+        stateReadRetries = 0
         state = nil
         hasState = false
         errorMessage = nil

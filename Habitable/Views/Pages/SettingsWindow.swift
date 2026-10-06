@@ -2,13 +2,14 @@ import SwiftUI
 import AppKit
 
 enum SettingsPaneID: String, CaseIterable, Identifiable {
-    case general, connections, terraform
+    case general, connections, agents, terraform
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "General"
         case .connections: "Connections"
+        case .agents: "Agents"
         case .terraform: "Terraform"
         }
     }
@@ -16,6 +17,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .connections: "network"
+        case .agents: "cpu"
         case .terraform: "shippingbox"
         }
     }
@@ -23,6 +25,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         switch self {
         case .general: .gray
         case .connections: .blue
+        case .agents: .green
         case .terraform: .accentColor
         }
     }
@@ -30,6 +33,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         switch self {
         case .general: "Preferences that apply to every window."
         case .connections: "Sign in to HCP Terraform and your clouds."
+        case .agents: "Let AI agents read this Mac’s open workspace."
         case .terraform: "Which Terraform runs your local previews."
         }
     }
@@ -38,6 +42,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
 /// System Settings shape: a sidebar of sections and one pane.
 struct SettingsWindow: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
+    @ObservedObject var agentAccess: HabitableAgentAccess
     let onOpenWorkspaces: () -> Void
     let onOpenLocalWorkspace: () -> Void
     @AppStorage("settings.section") private var selectionRaw = SettingsPaneID.general.rawValue
@@ -144,6 +149,7 @@ struct SettingsWindow: View {
         switch selection {
         case .general: GeneralPane(onOpenWorkspaces: onOpenWorkspaces, onOpenLocalWorkspace: onOpenLocalWorkspace)
         case .connections: ConnectionsPane(model: model, onOpenWorkspaces: onOpenWorkspaces)
+        case .agents: AgentsSettingsPage(access: agentAccess)
         case .terraform: TerraformPane(onOpenLocalWorkspace: onOpenLocalWorkspace)
         }
     }
@@ -173,6 +179,7 @@ private struct GeneralPane: View {
     let onOpenLocalWorkspace: () -> Void
     @AppStorage("general.restoreLastFolder") private var restoreLastFolder = true
     @AppStorage("map.showInventory") private var showInventory = true
+    @AppStorage(Workspace.autoInitializeKey) private var autoInitialize = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -182,6 +189,9 @@ private struct GeneralPane: View {
                 }
                 SettingsRow("Show inventory when a map opens") {
                     Toggle("Show inventory when a map opens", isOn: $showInventory).labelsHidden().toggleStyle(.switch)
+                }
+                SettingsRow("Initialize folders automatically", subtitle: "Runs terraform init when a folder with configuration opens or before Preview Changes.") {
+                    Toggle("Initialize folders automatically", isOn: $autoInitialize).labelsHidden().toggleStyle(.switch)
                 }
             }
             SettingsGroup("Checkouts", footer: "Repositories checked out from HCP Terraform workspaces go here, each in its own folder.") {

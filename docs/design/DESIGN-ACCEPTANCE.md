@@ -158,6 +158,20 @@ Open question filed (PAUL-174): why `aws_route53_record.route53_record` folded i
 | Sorting | Library sort menu: Last change (default), Name, Resources, Status; remembered. | Built. |
 | Checkout folder | Default `~/Documents/Habitable`, Settings › General › Checkouts. | Live: Paul checked terraform-fast out there. |
 
+## Round 5: gaps against the design, October 6, 2026
+
+| Gap | Change | Verified |
+| --- | --- | --- |
+| Preview Changes on the Map (Exploration C) | A local folder's saved plan now renders on the Map itself: existing tiles stay in place and dim when untouched; planned creates become dashed green tiles with a **New** badge; updates, replacements and removals take amber, pink and red outlines with a word. The footer becomes the review bar (to add / to change / to replace / to remove, **Changes only**, **Discard Preview**, **Review and Apply…**). Pressing Preview Changes stays on the Map instead of jumping to Runs. `MapChangePreview` builds the overlay from `terraform show -json` without reclassifying existing tiles. | Live on a random-provider folder: +2 overlay, New badges, Discard clears. Unit-tested (6 cases). Restored runs from an earlier launch carry no parsed plan, so they do not preview; filed. |
+| Agents settings | Agent access is app-wide in Settings › Agents (one switch, what it exposes, status, client connect rows) instead of per-workspace. | Live. |
+| Auto-init | A folder with configuration initializes itself on open and before Preview Changes; Settings › General › "Initialize folders automatically". | Live: scratch folder gained `.terraform` and the lock file on open with no prompt. |
+| Opening errors | Opening a folder could show "Couldn't read state" because the open-time validation collided with another short command on the same folder (a lease held by the window SwiftUI tears down while restoring). Busy state reads and validations now wait and retry quietly instead of surfacing that error. | Live: reopen is clean where it previously errored every time. |
+| Folders from Finder | The app accepts folders from Finder's Open With, the Dock, and `open -a` (`public.folder` document type). A folder has one window; the window carries the folder as its represented file (proxy icon), and a second open brings it forward. | Live via `open -a`. |
+| Changes → state (cloud) | Clicking a change card now verified live: banner "State as recorded Jan 13, 2024 at 8:53 PM · revision 2" on terraform-fast, card highlighted, footer updated. The Inspector's History section follows the viewed version instead of always showing the current one. Cards keep their press action for assistive technology (the label-flattening modifiers had removed it). | Live. |
+| Tile subtitles | A tile with no recorded anchor (planned, or outside the known schemas) names its resource types instead of repeating the card's count line. | Live: "Port · random_integer · 1 resource". |
+
+Still open from the design: Exploration D's empty-map welcome, ⌘K, and previewing a cloud workspace's speculative plan on the Map.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

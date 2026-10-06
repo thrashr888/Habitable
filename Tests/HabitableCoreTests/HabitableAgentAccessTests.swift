@@ -22,15 +22,16 @@ final class HabitableAgentAccessTests: XCTestCase {
             descriptionStore: WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions")),
             workspaceInputStore: WorkspaceInputStore(root: root.appendingPathComponent("inputs")))
         let access = HabitableAgentAccess()
-        access.setEnabled(true, in: workspace)
-        XCTAssertNil(access.server)
-        XCTAssertFalse(access.isEnabled)
+        access.activate(workspace)
+        XCTAssertNil(access.activeWorkspaceName, "A workspace without a folder exposes nothing")
         workspace.runner = Runner(executableURL: URL(fileURLWithPath: path))
         workspace.workingDirectory = root
+        access.workspaceChanged(in: workspace)
+        XCTAssertEqual(access.activeWorkspaceName, root.lastPathComponent)
         workspace.initialize()
         try await waitUntil { !workspace.locked && workspace.isInitialized && workspace.isValid }
         workspace.autoApply = true
-        access.setEnabled(true, in: workspace)
+        access.setEnabled(true)
         try await waitUntil { access.isEnabled }
         let server = try XCTUnwrap(access.server)
         let endpoint = try XCTUnwrap(server.endpointURL)
@@ -58,15 +59,56 @@ final class HabitableAgentAccessTests: XCTestCase {
         guard case .text(let status, _, _) = try XCTUnwrap(statusReply.first) else { return XCTFail("Expected run status") }
         XCTAssertTrue(status.contains(RunStatus.planned.rawValue))
         workspace.workingDirectory = nil
-        let (scopeReply, _) = try await client.callTool(name: "workspace_status", arguments: [:])
-        guard case .text(let scope, _, _) = try XCTUnwrap(scopeReply.first) else { return XCTFail("Expected disabled scope") }
-        XCTAssertEqual(scope, "Agent access disabled.", "Old callbacks cannot inherit a different folder")
         access.workspaceChanged(in: workspace)
-        XCTAssertNil(access.server)
-        XCTAssertFalse(access.isEnabled)
+        XCTAssertNil(access.activeWorkspaceName)
+        XCTAssertTrue(access.isEnabled, "The server stays up with no folder open")
+        let (scopeReply, _) = try await client.callTool(name: "workspace_status", arguments: [:])
+        guard case .text(let scope, _, _) = try XCTUnwrap(scopeReply.first) else { return XCTFail("Expected no-workspace reply") }
+        XCTAssertEqual(scope, HabitableAgentAccess.noWorkspaceMessage)
         await client.disconnect()
         await server.stop()
         XCTAssertNil(server.endpointURL)
+    }
+
+    @MainActor
+    func testActiveWorkspaceFollowsActivationAndEnablingWithoutOneKeepsServerUp() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = root.appendingPathComponent("first"), second = root.appendingPathComponent("second")
+        for url in [first, second] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        defer { try? FileManager.default.removeItem(at: root) }
+        func makeWorkspace(_ dir: URL, _ name: String) -> Workspace {
+            let defaults = UserDefaults(suiteName: "Habitable-agent-active-\(UUID())")!
+            return Workspace(dir: dir, restoreLastDirectory: false, defaults: defaults,
+                historyStore: RunHistoryStore(directory: root.appendingPathComponent("history-\(name)")),
+                commandCoordinator: WorkspaceCommandCoordinator(directory: root.appendingPathComponent("coordination-\(name)")),
+                descriptionStore: WorkspaceDescriptionStore(directory: root.appendingPathComponent("descriptions-\(name)")),
+                workspaceInputStore: WorkspaceInputStore(root: root.appendingPathComponent("inputs-\(name)")))
+        }
+        let a = makeWorkspace(first, "a"), b = makeWorkspace(second, "b")
+        let access = HabitableAgentAccess()
+
+        // No active workspace: enabling still starts the server.
+        access.setEnabled(true)
+        XCTAssertNotNil(access.server, "Enabling needs no open workspace")
+        XCTAssertTrue(access.isStarting || access.isEnabled)
+        XCTAssertNil(access.message)
+        XCTAssertNil(access.activeWorkspaceName)
+
+        access.activate(a)
+        XCTAssertEqual(access.activeWorkspaceName, "first")
+        access.activate(b)
+        XCTAssertEqual(access.activeWorkspaceName, "second")
+
+        access.deactivate(a)
+        XCTAssertEqual(access.activeWorkspaceName, "second", "Deactivating a non-active workspace is a no-op")
+        access.deactivate(b)
+        XCTAssertNil(access.activeWorkspaceName)
+        XCTAssertNotNil(access.server, "Closing the last window leaves the server running")
+
+        access.setEnabled(false)
+        XCTAssertNil(access.server)
+        XCTAssertFalse(access.isEnabled)
+        XCTAssertFalse(access.isStarting)
     }
 
     @MainActor private func waitUntil(_ condition: () -> Bool) async throws {

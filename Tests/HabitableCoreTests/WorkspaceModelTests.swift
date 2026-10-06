@@ -661,6 +661,106 @@ final class WorkspaceModelTests: XCTestCase {
     }
 
     @MainActor
+    // MARK: Auto-initialize
+
+    private func autoInitFixture(initFails: Bool = false, config: Bool = true) throws -> (URL, URL) {
+        let log = root.appendingPathComponent("calls.log")
+        let initBody = initFails ? "echo 'init boom' >&2; exit 1" : "echo 'Terraform has been successfully initialized!'"
+        let executable = try fakeTerraform("""
+        echo "$1" >> '\(log.path)'
+        case "$1" in
+          version) echo '{"terraform_version":"1.16.4"}' ;;
+          init) \(initBody) ;;
+          validate) echo '{"valid":true}' ;;
+          show) echo '{"values":{"root_module":{"resources":[]}}}' ;;
+        esac
+        """)
+        if config { try "terraform {}\n".write(to: directory.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8) }
+        return (executable, log)
+    }
+
+    private func calls(_ log: URL) -> [String] {
+        ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    }
+
+    private func makeWorkspace(_ executable: URL, defaults: UserDefaults? = nil) -> Workspace {
+        let w = Workspace(restoreLastDirectory: false, defaults: defaults ?? testDefaults,
+                          commandCoordinator: testCommandCoordinator, descriptionStore: testDescriptionStore)
+        w.runner = Runner(executableURL: executable)
+        return w
+    }
+
+    func testOpeningConfiguredFolderInitializesOnceThenReadsState() async throws {
+        let (executable, log) = try autoInitFixture()
+        let workspace = makeWorkspace(executable)
+        XCTAssertTrue(workspace.openWorkspaceDirectory(directory))
+        XCTAssertEqual(workspace.mapNotice, "Initializing Terraform…")
+        try await waitUntil { !workspace.locked && workspace.isValid && workspace.hasState }
+        let names = calls(log).filter { ["init", "validate", "show"].contains($0) }
+        XCTAssertEqual(names.filter { $0 == "init" }.count, 1)
+        XCTAssertLessThan(try XCTUnwrap(names.firstIndex(of: "init")), try XCTUnwrap(names.firstIndex(of: "show")))
+        XCTAssertTrue(workspace.isInitialized)
+        XCTAssertNil(workspace.errorMessage)
+    }
+
+    func testFolderWithoutConfigurationIsNotInitialized() async throws {
+        let (executable, log) = try autoInitFixture(config: false)
+        let workspace = makeWorkspace(executable)
+        XCTAssertTrue(workspace.openWorkspaceDirectory(directory))
+        try await waitUntil { !workspace.locked }
+        _ = await workspace.ensureInitialized(reason: .previewChanges)
+        XCTAssertFalse(calls(log).contains("init"))
+    }
+
+    func testAutoInitializeSwitchOffSkipsInit() async throws {
+        let (executable, log) = try autoInitFixture()
+        let defaults = testDefaults
+        defaults.set(false, forKey: Workspace.autoInitializeKey)
+        let workspace = makeWorkspace(executable, defaults: defaults)
+        XCTAssertFalse(workspace.autoInitializeEnabled)
+        XCTAssertTrue(workspace.openWorkspaceDirectory(directory))
+        try await waitUntil { !workspace.locked }
+        _ = await workspace.ensureInitialized(reason: .opened)
+        XCTAssertFalse(calls(log).contains("init"))
+    }
+
+    func testFailedAutoInitIsRecordedAndNotRetried() async throws {
+        let (executable, log) = try autoInitFixture(initFails: true)
+        let workspace = makeWorkspace(executable)
+        XCTAssertTrue(workspace.openWorkspaceDirectory(directory))
+        try await waitUntil { !workspace.locked && workspace.errorMessage != nil }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertFalse(workspace.isInitialized)
+        XCTAssertNil(workspace.mapNotice)
+        workspace.refreshResources()
+        let again = await workspace.ensureInitialized(reason: .refresh)
+        XCTAssertFalse(again)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(calls(log).filter { $0 == "init" }.count, 1)
+    }
+
+    func testPreviewChangesInitializesFirstAndSurfacesInitFailure() async throws {
+        let (executable, log) = try autoInitFixture()
+        let workspace = makeWorkspace(executable)
+        workspace.workingDirectory = directory
+        workspace.validateAndQueueRun()
+        try await waitUntil { calls(log).contains("validate") }
+        let names = calls(log)
+        XCTAssertLessThan(try XCTUnwrap(names.firstIndex(of: "init")), try XCTUnwrap(names.firstIndex(of: "validate")))
+
+        let failing = root.appendingPathComponent("failing")
+        try FileManager.default.createDirectory(at: failing, withIntermediateDirectories: true)
+        try "terraform {}\n".write(to: failing.appendingPathComponent("main.tf"), atomically: true, encoding: .utf8)
+        let validatesBefore = calls(log).filter { $0 == "validate" }.count
+        let (badExecutable, badLog) = try autoInitFixture(initFails: true)
+        let bad = makeWorkspace(badExecutable)
+        bad.workingDirectory = failing
+        bad.validateAndQueueRun()
+        try await waitUntil { bad.errorMessage != nil && !bad.locked }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(calls(badLog).filter { $0 == "validate" }.count, validatesBefore, "A failed init must not plan or validate")
+    }
+
     private func waitUntil(_ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(5)
         while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }

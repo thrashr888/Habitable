@@ -5,21 +5,45 @@
 //  Created by Paul Thrasher on 4/28/21.
 //
 
+import AppKit
 import SwiftUI
+
+/// Folders handed to the app from outside: Finder's Open With, a drop on the
+/// Dock icon, or `open -a Habitable <folder>`. Each one gets its own window.
+@MainActor
+final class FolderOpenRequests: ObservableObject {
+    @Published var pending: [URL] = []
+}
+
+final class HabitableAppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor static let requests = FolderOpenRequests()
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let folders = urls.filter { url in
+            var isDirectory: ObjCBool = false
+            return url.isFileURL && FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
+        guard !folders.isEmpty else { return }
+        Task { @MainActor in Self.requests.pending.append(contentsOf: folders) }
+    }
+}
 
 @main
 struct HabitableApp: App {
+    @NSApplicationDelegateAdaptor private var delegate: HabitableAppDelegate
     @StateObject private var cloud = HCPWorkspaceViewerModel()
+    @StateObject private var agentAccess = HabitableAgentAccess()
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer", for: URL.self) { $directory in
-            ContentView(initialDirectory: directory, cloud: cloud, onOpenRemoteWorkspace: { link in
+            ContentView(initialDirectory: directory, cloud: cloud, agentAccess: agentAccess, onOpenRemoteWorkspace: { link in
                 Task { await cloud.openLinkedWorkspace(link) }
             })
                 // The restored window value can arrive after the first render; rebuilding
                 // on it keeps a Library window a Library and a folder window its folder.
                 .id(directory)
                 .frame(minWidth: 900, minHeight: 560)
-                .background(WindowMenuMembership())
+                .background(FolderOpenHandler())
         }
         .windowToolbarStyle(.unifiedCompact)
         .commands { WorkspaceCommands() }
@@ -31,10 +55,34 @@ struct HabitableApp: App {
         }.windowToolbarStyle(.unifiedCompact).defaultSize(width: 1400, height: 880)
 
         Window("Settings", id: "App.settings") {
-            ConnectionsSettingsWindow(model: cloud)
+            ConnectionsSettingsWindow(model: cloud, agentAccess: agentAccess)
                 .frame(minWidth: 660, minHeight: 560)
                 .background(WindowMenuMembership())
         }.windowToolbarStyle(.unifiedCompact)
+    }
+}
+
+/// Opens a window for each folder the system hands the app. Any one window
+/// drains the queue; the rest see it empty.
+private struct FolderOpenHandler: View {
+    @ObservedObject private var requests = HabitableAppDelegate.requests
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .onReceive(requests.$pending.dropFirst()) { folders in
+                guard !folders.isEmpty else { return }
+                requests.pending = []
+                for folder in folders {
+                    let url = folder.standardizedFileURL
+                    // One window per folder: a second open brings the existing window forward.
+                    if let existing = NSApp.windows.first(where: { $0.representedURL?.standardizedFileURL == url }) {
+                        existing.makeKeyAndOrderFront(nil)
+                    } else {
+                        openWindow(id: "Workspace.viewer", value: url)
+                    }
+                }
+            }
     }
 }
 
@@ -155,10 +203,11 @@ private struct CloudWorkspaceWindow: View {
 
 private struct ConnectionsSettingsWindow: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
+    @ObservedObject var agentAccess: HabitableAgentAccess
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        SettingsWindow(model: model,
+        SettingsWindow(model: model, agentAccess: agentAccess,
             onOpenWorkspaces: { openWindow(id: "HCP.browser") },
             onOpenLocalWorkspace: { openWindow(id: "Workspace.viewer") })
             .navigationTitle("Settings")

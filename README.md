@@ -1,6 +1,28 @@
 # Habitable
 
-A native macOS app for exploring local Terraform workspaces, reviewing plans, applying changes, and inspecting resources and outputs.
+A native macOS app for managing infrastructure, not code: your Terraform resources on a map, with configuration and runs as supporting detail. Works with local folders and HCP Terraform workspaces.
+
+## Golden workflows
+
+Habitable is built around a few short paths. Each starts in the **Library** (File › Library, ⌘⇧L), which lists every folder you have opened on this Mac and every HCP Terraform workspace you can reach.
+
+**Local folder: see it, preview a change, apply it.**
+
+1. Open a Terraform folder: Open Folder…, a Library card, Finder's Open With, a drop on the Dock icon, or `open -a Habitable <folder>`. Habitable initializes it on first open (Settings › General) and reads its state. A folder has one window; opening it again brings that window forward.
+2. The **Map** shows what exists, grouped by what it does. Click a tile to inspect facts, endpoints, connections, where it is defined, and the provider's reference.
+3. Edit configuration in your editor ("Defined in" opens the file). Press **Preview Changes**: the Map switches into review, with new things outlined green, changes amber, replacements pink, removals red, and the counts beside the decision.
+4. **Review and Apply…** opens the saved plan; apply from there. The **Changes** strip below the Map records every run.
+
+**HCP Terraform workspace: browse, review, and bring it to this Mac.**
+
+1. Sign in once in **Settings › Connections**. The Library then shows each organization, its projects and tags, and every workspace with its latest run status.
+2. Open a workspace: the Map reads its current state. The **Changes** strip lists its runs; click one to see the Map as it was after that run, then return to the current state.
+3. **Variables** shows workspace variables and the variable sets applied to it; private values stay hidden.
+4. **Check Out…** clones a repository-backed workspace into `~/Documents/Habitable` and opens it as a local folder. From then on the two windows link to each other, and "Defined in" resolves file and line from the checkout with a link to the repository host.
+
+**Between the two.** A local folder whose backend is HCP Terraform opens its workspace with one click, and a workspace knows which folders on this Mac belong to it, whether by backend or by checkout.
+
+Not yet in these paths: previewing a cloud workspace's speculative plan on the Map, and the Needs attention view only reflects what HCP Terraform itself records.
 
 ## Install
 
@@ -18,8 +40,8 @@ Requires macOS 13 or later and a Terraform CLI downloaded in Settings or install
 
 1. Open `Habitable.xcodeproj` in Xcode and let Swift packages resolve.
 2. Select the **Habitable** scheme and **My Mac**, then press **⌘R**. Local builds use **Sign to Run Locally**; no developer team is required.
-3. Choose a Terraform directory, initialize it, then open **Runs → Queue plan**.
-4. Review the plan and select **Confirm and apply** to execute that saved plan.
+3. Choose a Terraform directory and press **Preview Changes**; the Map shows the saved plan in review.
+4. **Review and Apply…** opens the plan; select **Confirm and apply** to execute exactly that saved plan.
 
 ## Terraform versions
 

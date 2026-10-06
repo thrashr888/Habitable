@@ -43,10 +43,15 @@ struct LoadingIndicator: View {
 /// Keeps every Habitable window in the Window menu. SwiftUI's single `Window`
 /// scenes otherwise leave the menu's window list incomplete.
 struct WindowMenuMembership: NSViewRepresentable {
+    /// The folder this window shows, when it shows one. It becomes the window's
+    /// represented file, so a second request to open the folder finds this window.
+    var folder: URL? = nil
+
     func makeNSView(context: Context) -> MembershipView { MembershipView() }
-    func updateNSView(_ view: MembershipView, context: Context) { view.apply() }
+    func updateNSView(_ view: MembershipView, context: Context) { view.folder = folder; view.apply() }
 
     final class MembershipView: NSView {
+        var folder: URL?
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             apply()
@@ -54,6 +59,7 @@ struct WindowMenuMembership: NSViewRepresentable {
         func apply() {
             guard let window else { return }
             if window.isExcludedFromWindowsMenu { window.isExcludedFromWindowsMenu = false }
+            if window.representedURL != folder { window.representedURL = folder }
         }
     }
 }
