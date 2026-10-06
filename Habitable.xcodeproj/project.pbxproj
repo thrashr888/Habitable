@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC21000000000000000002 /* MapConnectionRoute.swift */; };
+		AA60400000000000000000BC /* LibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000BD /* LibraryModel.swift */; };
+		AA60400000000000000000BE /* TerraformRegistryDocs.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000BF /* TerraformRegistryDocs.swift */; };
 		AA60400000000000000000B4 /* HCPVariablesPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B5 /* HCPVariablesPanel.swift */; };
 		AA60400000000000000000B6 /* HCPRunLogPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B7 /* HCPRunLogPresentation.swift */; };
 		AA60400000000000000000B2 /* RunPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B3 /* RunPresentation.swift */; };
@@ -16,6 +18,7 @@
 		AA6040000000000000000040 /* HCPMapSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000041 /* HCPMapSnapshot.swift */; };
 		AA6040000000000000000030 /* ResourceMapSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000031 /* ResourceMapSample.swift */; };
 		AA6040000000000000000020 /* ResourceMapPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000021 /* ResourceMapPage.swift */; };
+		AA60400000000000000000C0 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000C1 /* LibraryView.swift */; };
 		AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B9 /* ConnectionsPane.swift */; };
 		AA60400000000000000000BA /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000BB /* SettingsWindow.swift */; };
 		AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B1 /* MapTimelineStrip.swift */; };
@@ -93,6 +96,8 @@
 
 /* Begin PBXFileReference section */
 		AACC21000000000000000002 /* MapConnectionRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapConnectionRoute.swift; sourceTree = "<group>"; };
+		AA60400000000000000000BD /* LibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryModel.swift; sourceTree = "<group>"; };
+		AA60400000000000000000BF /* TerraformRegistryDocs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformRegistryDocs.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B5 /* HCPVariablesPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPVariablesPanel.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B7 /* HCPRunLogPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPRunLogPresentation.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B3 /* RunPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunPresentation.swift; sourceTree = "<group>"; };
@@ -101,6 +106,7 @@
 		AA6040000000000000000041 /* HCPMapSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPMapSnapshot.swift; sourceTree = "<group>"; };
 		AA6040000000000000000031 /* ResourceMapSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapSample.swift; sourceTree = "<group>"; };
 		AA6040000000000000000021 /* ResourceMapPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapPage.swift; sourceTree = "<group>"; };
+		AA60400000000000000000C1 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B9 /* ConnectionsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsPane.swift; sourceTree = "<group>"; };
 		AA60400000000000000000BB /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B1 /* MapTimelineStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapTimelineStrip.swift; sourceTree = "<group>"; };
@@ -214,6 +220,8 @@
 				AACC10000000000000000002 /* LocalCloudConnections.swift */,
 				AACC20000000000000000002 /* MapResourcePresentation.swift */,
 				AACC21000000000000000002 /* MapConnectionRoute.swift */,
+				AA60400000000000000000BD /* LibraryModel.swift */,
+				AA60400000000000000000BF /* TerraformRegistryDocs.swift */,
 				AA60400000000000000000B7 /* HCPRunLogPresentation.swift */,
 				AA60400000000000000000B3 /* RunPresentation.swift */,
 				0DA1D3D7DF064B02A07D6747 /* TerraformConfigurationInspector.swift */,
@@ -273,6 +281,7 @@
 				8AA12B0D264260570048A4A9 /* RunListPage.swift */,
 				8A926B65264E4A5500FDBA5C /* RunPage.swift */,
 				AA6040000000000000000021 /* ResourceMapPage.swift */,
+				AA60400000000000000000C1 /* LibraryView.swift */,
 				AA60400000000000000000B9 /* ConnectionsPane.swift */,
 				AA60400000000000000000BB /* SettingsWindow.swift */,
 				AA60400000000000000000B5 /* HCPVariablesPanel.swift */,
@@ -425,6 +434,8 @@
 				AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */,
 				AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */,
 				AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */,
+				AA60400000000000000000BC /* LibraryModel.swift in Sources */,
+				AA60400000000000000000BE /* TerraformRegistryDocs.swift in Sources */,
 				AA60400000000000000000B4 /* HCPVariablesPanel.swift in Sources */,
 				AA60400000000000000000B6 /* HCPRunLogPresentation.swift in Sources */,
 				AA60400000000000000000B2 /* RunPresentation.swift in Sources */,
@@ -460,6 +471,7 @@
 				8AA12B0C26425FB00048A4A9 /* WorkspaceModel.swift in Sources */,
 				8A926B582648C48E00FDBA5C /* ndjson.swift in Sources */,
 				AA6040000000000000000020 /* ResourceMapPage.swift in Sources */,
+				AA60400000000000000000C0 /* LibraryView.swift in Sources */,
 				AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */,
 				AA60400000000000000000BA /* SettingsWindow.swift in Sources */,
 				AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */,

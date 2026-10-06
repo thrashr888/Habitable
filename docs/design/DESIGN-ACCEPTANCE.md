@@ -105,6 +105,15 @@ Taken from Alchemy's inspector and System Settings shapes (see `DESIGN.md` §2).
 
 Follow-up the same day: the local Inputs face was checked live (43 inputs, sensitive values masked, defaults labelled). Light mode was checked by forcing the preview app's appearance: light canvas with white tiles and hairlines, readable timeline and chips, Settings panes correct; nothing needed changing. The two General toggles now feed the next local window (open last folder) and the next Map (inventory shown). Terraform version changes stay in Workspace settings.
 
+## Library and Inspector Reference, October 6, 2026
+
+| Area | Reference | Now | Verified |
+| --- | --- | --- | --- |
+| Library | Refresh p6 (Exploration A): every workspace as a card with a miniature map, sidebar of This Mac / HCP, needs-attention lead | A local window with no folder shows the Library: 220pt sidebar (All infrastructure, This Mac, one row per HCP organization, Open Folder…), a sheet of cards grouped This Mac / `<org> · HCP Terraform` with a filter field, and a status line (`5 folders · 50 cloud workspaces`). Cards: a miniature of the map (one row per populated kind, blocks colored by kind), name, location, `N resources · N groups · <relative date>`. Summaries come only from `terraform.tfstate` (local backend) or the workspace's current state version (cloud, cached by version); a remote-state folder borrows its linked workspace's summary. Opening a card opens the folder in this window or the workspace in the cloud window. File › Library (⌘⇧L) and a Library toolbar button open it from a workspace. | Live: 5 folders and 50 pthrasher_v2 workspaces; Rookery folder and workspace both show the 57-resource thumbnail; test workspaces without state say "No recorded state". No attention/drift chips: nothing recorded supports them. |
+| Inspector reference | Refresh p7 (Inspector: exact detail one step away) and Paul's request for Registry info | A Reference section after Defined in: type, provider and version (locked version locally; Registry-resolved in the cloud), Open in Registry and Provider links, Attribute reference from the installed provider schema (local, initialized), and Registry documentation fetched read-only from the public Registry API with Argument/Attribute Reference first. | Live in the cloud window on `aws_db_instance.postgres`: `hashicorp/aws 6.67.0`, links, Registry documentation sections loaded. Local Attribute reference not exercised live (Rookery's state is remote). |
+
+Validation: full Swift suite (see commit), native build installed into the stable Preview. Screenshots stay local.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

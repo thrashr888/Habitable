@@ -1173,4 +1173,17 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
     }
+
+    /// Current state for a Library card: bounded, read-only, no selection change and
+    /// no published state touched. Sample models have no real state, so this throws
+    /// `HCPViewerError.noCredential` for them rather than inventing a snapshot.
+    func librarySnapshot(for workspace: HCPWorkspace) async throws -> HCPMapSnapshot {
+        guard !isSample else { throw HCPViewerError.noCredential }
+        let host = hostname
+        guard HCPAPIClient.normalizedHostname(host) != nil else { throw HCPViewerError.invalidHost }
+        guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {
+            throw HCPViewerError.noCredential
+        }
+        return try await client.currentMap(hostname: host, workspaceID: workspace.id, token: token)
+    }
 }

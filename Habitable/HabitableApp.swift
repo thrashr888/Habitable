@@ -12,7 +12,7 @@ struct HabitableApp: App {
     @StateObject private var cloud = HCPWorkspaceViewerModel()
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer", for: URL.self) { $directory in
-            ContentView(initialDirectory: directory, onOpenRemoteWorkspace: { link in
+            ContentView(initialDirectory: directory, cloud: cloud, onOpenRemoteWorkspace: { link in
                 Task { await cloud.openLinkedWorkspace(link) }
             })
                 .frame(minWidth: 900, minHeight: 560)
@@ -42,6 +42,8 @@ private struct WorkspaceCommands: Commands {
                 .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(after: .newItem) {
+            Button("Library") { openWindow(id: "Workspace.viewer", value: ContentView.libraryURL) }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
             Button("New Local Workspace Window") { openWindow(id: "Workspace.viewer") }
             Button("HCP Terraform Window") { openWindow(id: "HCP.browser") }
             Divider()
