@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 import os
 
 struct WorkspaceWindowActions {
@@ -57,6 +58,8 @@ struct ContentView: View {
     private let onOpenRemoteWorkspace: (TerraformRemoteWorkspaceLink) -> Void
     /// Shared with the cloud and Settings windows; the Library lists its workspaces.
     @ObservedObject private var cloud: HCPWorkspaceViewerModel
+    /// App-wide agent server; this window offers its folder while it is the one in use.
+    @ObservedObject private var agentAccess: HabitableAgentAccess
     @StateObject private var library = LibraryModel()
     @StateObject private var checkouts = WorkspaceCheckoutStore()
     @State private var remoteWorkspaceLink: TerraformRemoteWorkspaceLink?
@@ -67,10 +70,11 @@ struct ContentView: View {
     /// the last folder (File › Library, or the Library toolbar button).
     static let libraryURL = URL(string: "habitable://library")!
 
-    init(initialDirectory: URL? = nil, cloud: HCPWorkspaceViewerModel,
+    init(initialDirectory: URL? = nil, cloud: HCPWorkspaceViewerModel, agentAccess: HabitableAgentAccess,
          onOpenRemoteWorkspace: @escaping (TerraformRemoteWorkspaceLink) -> Void = { _ in }) {
         self.onOpenRemoteWorkspace = onOpenRemoteWorkspace
         self.cloud = cloud
+        self.agentAccess = agentAccess
         let wantsLibrary = initialDirectory == Self.libraryURL
         let directory = wantsLibrary ? nil : initialDirectory
         // Settings › General › "Open last folder at launch".
@@ -83,9 +87,12 @@ struct ContentView: View {
     @StateObject private var editors = ExternalEditorStore()
     @StateObject private var readme = WorkspaceReadmePresentation()
     @StateObject private var navigationTrace = NavigationTrace()
-    @StateObject private var agentAccess = HabitableAgentAccess()
     @State private var selection: NavigationItem? = .map
     @State private var selectedRun: UUID?
+    /// The run whose saved plan the Map is previewing, and a tick that re-renders
+    /// when that run's own published state (plan result, status) changes.
+    @State private var previewRunID: UUID?
+    @State private var previewTick = 0
     @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
     @State private var selectedOutput: String?
@@ -118,7 +125,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: workspace.workingDirectory) { directory in
-            agentAccess.workspaceChanged(in: workspace)
+            offerToAgents()
             if let directory, isAvailableDirectory(directory) {
                 recentWorkspaces.recordSuccessfulOpen(directory)
                 navigationSelection.wrappedValue = .map
@@ -130,6 +137,7 @@ struct ContentView: View {
             Text(presentedOpenError ?? "The selected folder could not be opened.")
         }
         .onAppear {
+            offerToAgents()
             editors.refresh()
             if let directory = workspace.workingDirectory, isAvailableDirectory(directory) {
                 recentWorkspaces.recordSuccessfulOpen(directory)
@@ -145,7 +153,13 @@ struct ContentView: View {
             selectedResource = nil
             selectedOutput = nil
         }
-        .onDisappear { agentAccess.setEnabled(false, in: workspace) }
+        .onDisappear { agentAccess.deactivate(workspace) }
+        .background(WindowKeyObserver(onBecomeKey: offerToAgents))
+        // The folder is the window's represented file: proxy icon, and one window per folder.
+        .background(WindowMenuMembership(folder: workspace.workingDirectory))
+        .onReceive(previewRun?.objectWillChange.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()) { _ in
+            previewTick &+= 1
+        }
         .onChange(of: selectedRun) { id in
             selectedRunDetail = workspace.runs.first { $0.id == id }
                 ?? (workspace.latestOverviewRun?.id == id ? workspace.latestOverviewRun : nil)
@@ -255,6 +269,22 @@ struct ContentView: View {
         })
     }
 
+    /// The most recent run that holds a saved, unapplied plan: Preview Changes
+    /// shows it on the Map until it is applied or discarded.
+    private var previewRun: TerraformRun? {
+        let candidates = workspace.runs.filter { $0.planDiff != nil && $0.status == .planned }
+        if let id = previewRunID, let run = candidates.first(where: { $0.id == id }) { return run }
+        return candidates.max { $0.createdAt < $1.createdAt }
+    }
+
+    private var mapPreview: MapChangePreview? {
+        _ = previewTick
+        guard let run = previewRun, let plan = run.planDiff else { return nil }
+        // A folder with no recorded state yet has no map; the preview is then all new tiles.
+        let map = workspace.resourceMap ?? ResourceMap(tiles: [], connections: [], dataSources: [])
+        return try? MapChangePreview.build(plan: plan, currentMap: map)
+    }
+
     /// Changes and Inputs ride the Map's inspector as faces (DESIGN.md §2).
     private var localSideFaces: [MapSideFace] {
         [
@@ -343,9 +373,11 @@ struct ContentView: View {
             openRecent: openRecent,
             clearRecents: recentWorkspaces.clear,
             plan: {
+                // Preview Changes stays on the Map; the plan lands as a review state there.
                 workspace.validateAndQueueRun(onCreated: { id in
+                    previewRunID = id
                     selectedRun = id
-                    navigationSelection.wrappedValue = .runs
+                    navigationSelection.wrappedValue = .map
                 })
             },
             initialize: { workspace.initialize() },
@@ -480,6 +512,11 @@ struct ContentView: View {
                                         onOpenRemoteWorkspace(link)
                                         openWindow(id: "HCP.browser")
                                     }
+                                },
+                                preview: mapPreview,
+                                onDiscardPreview: { previewRun?.doDiscard(); previewRunID = nil },
+                                onReviewPreview: {
+                                    if let run = previewRun { selectedRun = run.id; navigationSelection.wrappedValue = .runs }
                                 })
                 Divider()
                 MapTimelineStrip(clips: localChangeClips, selectedID: selectedRun?.uuidString,
@@ -494,7 +531,7 @@ struct ContentView: View {
                                                declarationRequest: $declarationRequest)
         case .variables: VariableListPage(showMissingOnly: showMissingInputs)
         case .envVariables: EnvVarListPage()
-        case .settings: SettingsListPage(catalog: releaseCatalog, agentAccess: agentAccess)
+        case .settings: SettingsListPage(catalog: releaseCatalog, onOpenAppSettings: { openWindow(id: "App.settings") })
         default: WorkspacePage(onReviewRun: { id in
             selectedRun = id
             navigationSelection.wrappedValue = .runs
@@ -607,8 +644,53 @@ private struct NavigationLayoutProbe: NSViewRepresentable {
     }
 }
 
+extension ContentView {
+    /// Makes this window's folder the one agents reach. Library windows have none to offer.
+    fileprivate func offerToAgents() {
+        if workspace.workingDirectory != nil {
+            agentAccess.activate(workspace)
+            agentAccess.workspaceChanged(in: workspace)
+        } else {
+            agentAccess.deactivate(workspace)
+        }
+    }
+}
+
+/// Calls `onBecomeKey` whenever the hosting window becomes the key window.
+private struct WindowKeyObserver: NSViewRepresentable {
+    let onBecomeKey: () -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.onBecomeKey = onBecomeKey
+        DispatchQueue.main.async { context.coordinator.attach(to: view.window) }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @MainActor final class Coordinator {
+        var onBecomeKey: () -> Void = {}
+        private weak var window: NSWindow?
+        nonisolated(unsafe) private var token: NSObjectProtocol?
+
+        func attach(to window: NSWindow?) {
+            guard window !== self.window else { return }
+            if let token { NotificationCenter.default.removeObserver(token) }
+            self.window = window
+            guard let window else { token = nil; return }
+            token = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onBecomeKey() }
+            }
+            if window.isKeyWindow { onBecomeKey() }
+        }
+
+        deinit { if let token { NotificationCenter.default.removeObserver(token) } }
+    }
+}
+
 struct ContentView_Previews: PreviewProvider {
-    static var previews: some View { ContentView(cloud: HCPWorkspaceViewerModel()) }
+    static var previews: some View { ContentView(cloud: HCPWorkspaceViewerModel(), agentAccess: HabitableAgentAccess()) }
 }
 
 /// Preserve native toolbar controls while removing the OS shared glass capsule.

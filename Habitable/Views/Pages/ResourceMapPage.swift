@@ -50,6 +50,9 @@ struct ResourceMapPage: View {
     var emptyDetail: String? = nil
     var emptySymbol: String? = nil
     var emptyAction: MapEmptyAction? = nil
+    var preview: MapChangePreview? = nil
+    var onDiscardPreview: (() -> Void)? = nil
+    var onReviewPreview: (() -> Void)? = nil
 
     var body: some View {
         ResourceMapContent(
@@ -73,6 +76,7 @@ struct ResourceMapPage: View {
             onShowHistory: onShowHistory,
             onShowVariables: onShowVariables,
             sideFaces: sideFaces,
+            preview: preview, onDiscardPreview: onDiscardPreview, onReviewPreview: onReviewPreview,
             terraformExecutableURL: workspace.runner.executableURL,
             workspaceInitialized: workspace.isInitialized)
     }
@@ -133,6 +137,11 @@ struct ResourceMapContent: View {
     var historyBanner: (text: String, dismiss: () -> Void)? = nil
     /// The workspace's own description, shown when nothing is selected.
     var workspaceDescription: String? = nil
+    /// Preview Changes (Exploration C): the same map in a review state.
+    var preview: MapChangePreview? = nil
+    var onDiscardPreview: (() -> Void)? = nil
+    var onReviewPreview: (() -> Void)? = nil
+    @State private var changesOnly = false
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
     @SceneStorage("map.sideFace") private var sideFaceID = "inspector"
@@ -150,14 +159,17 @@ struct ResourceMapContent: View {
     @State private var sourceDeclarationIdentity = ""
     private var sourceIdentity: String { identity + "|" + (selectedMember ?? "") }
 
-    private var tiles: [MapTile] { map?.tiles ?? [] }
+    private var tiles: [MapTile] { (preview?.map ?? map)?.tiles ?? [] }
+    private func action(for tile: MapTile) -> MapChangeAction { preview?.tileActions[tile.id] ?? .none }
     private var selectedTile: MapTile? { tiles.first { $0.id == selectedTileID } }
     private var selectedResource: MapDisplayResource? {
         resources.first { $0.address == selectedMember }
     }
     private var visibleTiles: [MapTile] {
-        guard !search.isEmpty else { return tiles }
-        return tiles.filter { $0.title.localizedCaseInsensitiveContains(search) ||
+        var result = tiles
+        if preview != nil, changesOnly { result = result.filter { action(for: $0) != .none } }
+        guard !search.isEmpty else { return result }
+        return result.filter { $0.title.localizedCaseInsensitiveContains(search) ||
             $0.resources.contains { $0.localizedCaseInsensitiveContains(search) } }
     }
 
@@ -209,6 +221,9 @@ struct ResourceMapContent: View {
                 }
             }.frame(minHeight: 0, maxHeight: .infinity)
             Divider()
+            if let preview {
+                reviewBar(preview)
+            } else {
             HStack(spacing: 8) {
                 if map != nil {
                     statusChip(count: tiles.reduce(0) { $0 + $1.resources.count }, label: "resources")
@@ -226,6 +241,7 @@ struct ResourceMapContent: View {
                 }
             }
             .font(.system(size: 13)).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
+            }
         }
         .task(id: sourceIdentity) {
             sourceDeclaration = nil
@@ -342,6 +358,10 @@ struct ResourceMapContent: View {
                                 HStack(alignment: .top, spacing: 8) {
                                     Image(systemName: symbol(for: tile)).foregroundStyle(tile.kind.color).frame(width: 16)
                                     Text(tile.title).font(.system(size: 13)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                                        .opacity(preview != nil && action(for: tile) == .none ? 0.5 : 1)
+                                    if preview != nil, action(for: tile) != .none, action(for: tile) != .read {
+                                        Circle().fill(actionColor(action(for: tile))).frame(width: 7, height: 7)
+                                    }
                                     Text("\(tile.resources.count)").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
                                 }.padding(8).contentShape(Rectangle())
                                     .background(selectedTileID == tile.id ? Color.accentColor.opacity(0.17) : .clear, in: RoundedRectangle(cornerRadius: 7))
@@ -519,7 +539,7 @@ struct ResourceMapContent: View {
         let steppedWidth = (max(580, (width - 24) / canvasZoom) / 24).rounded(.down) * 24
         let key = "\(identity)|\(search)|\(steppedWidth)"
         return renderCache.layout(key: key) {
-            MapCanvasLayout(map: ResourceMap(tiles: visibleTiles, connections: map?.connections ?? [], dataSources: []),
+            MapCanvasLayout(map: ResourceMap(tiles: visibleTiles, connections: (preview?.map ?? map)?.connections ?? [], dataSources: []),
                             width: steppedWidth)
         }
     }
@@ -624,7 +644,16 @@ struct ResourceMapContent: View {
             }
             .padding(12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(selectedTileID == tile.id ? Color.accentColor : Color.primary.opacity(0.09), lineWidth: selectedTileID == tile.id ? 2 : 1))
+            .overlay(tileOutline(tile))
+            .overlay(alignment: .bottomTrailing) {
+                if preview != nil, let word = actionWord(action(for: tile)) {
+                    Text(word).font(.system(size: 12, weight: .semibold)).foregroundStyle(actionColor(action(for: tile)))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(actionColor(action(for: tile)).opacity(0.14), in: Capsule())
+                        .padding(8)
+                }
+            }
+            .opacity(preview != nil && action(for: tile) == .none ? 0.45 : 1)
             .background {
                 if copies > 1 {
                     RoundedRectangle(cornerRadius: 13).fill(Color(nsColor: .controlBackgroundColor))
@@ -645,6 +674,88 @@ struct ResourceMapContent: View {
         .accessibilityLabel("\(tile.title), \(tile.resources.count) \(tile.resources.count == 1 ? "resource" : "resources"), \(tile.kind.title)")
         .accessibilityAddTraits(selectedTileID == tile.id ? [.isSelected] : [])
         .help(tile.resources.joined(separator: "\n"))
+    }
+
+    // MARK: Preview Changes
+
+    /// Change semantics never share a color with resource kinds (DESIGN.md §3).
+    private func actionColor(_ action: MapChangeAction) -> Color {
+        switch action {
+        case .create: .green
+        case .update: .orange
+        case .replace: Color(red: 0.86, green: 0.25, blue: 0.55)
+        case .delete: .red
+        case .read, .none: .secondary
+        }
+    }
+
+    private func actionWord(_ action: MapChangeAction) -> String? {
+        switch action {
+        case .create: "New"
+        case .update: "Will change"
+        case .replace: "Will be replaced"
+        case .delete: "Will be removed"
+        case .read: "Read"
+        case .none: nil
+        }
+    }
+
+    @ViewBuilder private func tileOutline(_ tile: MapTile) -> some View {
+        let selected = selectedTileID == tile.id
+        let action = action(for: tile)
+        if preview != nil, action != .none, action != .read {
+            // New things arrive as dashed outlines; everything else gets a solid colored edge.
+            RoundedRectangle(cornerRadius: 13)
+                .strokeBorder(actionColor(action), style: StrokeStyle(lineWidth: selected ? 2.5 : 2, dash: action == .create ? [6, 4] : []))
+                .shadow(color: actionColor(action).opacity(0.35), radius: 6)
+        } else {
+            RoundedRectangle(cornerRadius: 13)
+                .strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.09), lineWidth: selected ? 2 : 1)
+        }
+    }
+
+    /// Consequences beside the decision (Exploration C): counts, the one thing
+    /// that can hurt you, then Discard and Review.
+    private func reviewBar(_ preview: MapChangePreview) -> some View {
+        let c = preview.consequences
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 18) {
+                consequence(c.create, "to add", .green)
+                consequence(c.update, "to change", .orange)
+                consequence(c.replace, "to replace", actionColor(.replace))
+                consequence(c.destroy, "to remove", .red)
+                Spacer()
+                Toggle("Changes only", isOn: $changesOnly).toggleStyle(.checkbox).font(.system(size: 13))
+                if let onDiscardPreview { Button("Discard Preview", action: onDiscardPreview).buttonStyle(.bordered) }
+                if let onReviewPreview { Button("Review and Apply…", action: onReviewPreview).buttonStyle(.borderedProminent) }
+            }
+            if let warning = previewWarning(preview) {
+                Text(warning).font(.system(size: 13)).foregroundStyle(actionColor(.replace))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func consequence(_ count: Int, _ label: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(count, format: .number).font(.system(size: 22, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(count > 0 ? color : .secondary)
+            Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The first replacement or removal, named by its tile: the thing to read before applying.
+    private func previewWarning(_ preview: MapChangePreview) -> String? {
+        if let tile = tiles.first(where: { preview.tileActions[$0.id] == .replace }) {
+            return "\(tile.title) will be replaced. Terraform recreates it; anything only it holds is lost once the new one is up."
+        }
+        if let tile = tiles.first(where: { preview.tileActions[$0.id] == .delete }) {
+            return "\(tile.title) will be removed."
+        }
+        return nil
     }
 
     /// The right pane: a segmented control first, then the chosen face. With no
@@ -809,7 +920,8 @@ struct ResourceMapContent: View {
     /// Link to the declaring file on the repository host when the workspace is
     /// repository-backed (GitHub-style blob URLs with a line anchor).
     private func repositoryFileURL(file: String, line: Int?) -> URL? {
-        guard let repository, let base = repository.repositoryHTTPURL else { return nil }
+        // Only https repository hosts; the URL comes from the API and must not open other schemes.
+        guard let repository, let base = repository.cloneURL, base.scheme?.lowercased() == "https" else { return nil }
         var path = file
         if let directory = repository.workingDirectory?.trimmingCharacters(in: CharacterSet(charactersIn: "/")), !directory.isEmpty {
             path = directory + "/" + file
@@ -851,7 +963,7 @@ struct ResourceMapContent: View {
                         Link(destination: url) { Label("Open on \(url.host ?? "the repository")", systemImage: "arrow.up.right.square") }
                             .font(.system(size: 13))
                     }
-                } else if let repository, let base = repository.repositoryHTTPURL {
+                } else if let repository, let base = repository.cloneURL, base.scheme?.lowercased() == "https" {
                     Text(workspaceDirectory == nil && sourceDirectory == nil
                          ? "File and line are not included in remote Terraform state. Check the repository out to resolve them."
                          : "No matching source declaration found in the checkout.")

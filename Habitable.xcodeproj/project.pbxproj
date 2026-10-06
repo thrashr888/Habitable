@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACC21000000000000000002 /* MapConnectionRoute.swift */; };
+		AA60400000000000000000C6 /* MapChangePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000C7 /* MapChangePreview.swift */; };
 		AA60400000000000000000C2 /* WorkspaceCheckout.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000C3 /* WorkspaceCheckout.swift */; };
 		AA60400000000000000000BC /* LibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000BD /* LibraryModel.swift */; };
 		AA60400000000000000000BE /* TerraformRegistryDocs.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000BF /* TerraformRegistryDocs.swift */; };
@@ -98,6 +99,7 @@
 
 /* Begin PBXFileReference section */
 		AACC21000000000000000002 /* MapConnectionRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapConnectionRoute.swift; sourceTree = "<group>"; };
+		AA60400000000000000000C7 /* MapChangePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapChangePreview.swift; sourceTree = "<group>"; };
 		AA60400000000000000000C3 /* WorkspaceCheckout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceCheckout.swift; sourceTree = "<group>"; };
 		AA60400000000000000000BD /* LibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryModel.swift; sourceTree = "<group>"; };
 		AA60400000000000000000BF /* TerraformRegistryDocs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformRegistryDocs.swift; sourceTree = "<group>"; };
@@ -224,6 +226,7 @@
 				AACC10000000000000000002 /* LocalCloudConnections.swift */,
 				AACC20000000000000000002 /* MapResourcePresentation.swift */,
 				AACC21000000000000000002 /* MapConnectionRoute.swift */,
+				AA60400000000000000000C7 /* MapChangePreview.swift */,
 				AA60400000000000000000C3 /* WorkspaceCheckout.swift */,
 				AA60400000000000000000BD /* LibraryModel.swift */,
 				AA60400000000000000000BF /* TerraformRegistryDocs.swift */,
@@ -440,6 +443,7 @@
 				AACC10000000000000000001 /* LocalCloudConnections.swift in Sources */,
 				AACC20000000000000000001 /* MapResourcePresentation.swift in Sources */,
 				AACC21000000000000000001 /* MapConnectionRoute.swift in Sources */,
+				AA60400000000000000000C6 /* MapChangePreview.swift in Sources */,
 				AA60400000000000000000C2 /* WorkspaceCheckout.swift in Sources */,
 				AA60400000000000000000BC /* LibraryModel.swift in Sources */,
 				AA60400000000000000000BE /* TerraformRegistryDocs.swift in Sources */,

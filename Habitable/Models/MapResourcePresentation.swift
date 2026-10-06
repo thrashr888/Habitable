@@ -57,9 +57,28 @@ struct MapResourcePresentation: Equatable, Sendable {
             }
             subtitle = serviceSubtitle(for: anchor.type, values: values)
         } else {
-            subtitle = "\(members.count) resource\(members.count == 1 ? "" : "s")"
+            // No recorded anchor (a planned tile, or one outside the known schemas):
+            // name the resource types rather than repeat the card's own count line.
+            var types: [String] = []
+            for address in addresses {
+                let type = resources.first { $0.address == address }?.type ?? resourceType(inAddress: address)
+                if let type, !types.contains(type) { types.append(type) }
+            }
+            subtitle = types.count <= 2 ? types.joined(separator: ", ")
+                : types.prefix(2).joined(separator: ", ") + " and \(types.count - 2) more"
         }
         return MapResourcePresentation(subtitle: subtitle, facts: facts, endpoints: endpoints)
+    }
+
+    /// The resource type in an address such as `module.a.aws_instance.web[0]`.
+    static func resourceType(inAddress address: String) -> String? {
+        var parts = address.split(separator: ".").map(String.init)
+        if let last = parts.last, let bracket = last.firstIndex(of: "[") { parts[parts.count - 1] = String(last[..<bracket]) }
+        // Strip module prefixes and an index on each module segment.
+        while parts.count > 2, parts[0] == "module" { parts.removeFirst(2) }
+        if parts.first == "data" { parts.removeFirst() }
+        guard parts.count >= 2 else { return nil }
+        return parts[parts.count - 2]
     }
 
     private static func schema(for type: String) -> (facts: [(path: String, label: String)], endpoints: [(path: String, label: String)]) {

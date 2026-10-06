@@ -110,6 +110,10 @@ struct MapTimelineStrip: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(minWidth: 92, maxWidth: 150, alignment: .leading)
+            // Flatten the label only; the Button itself keeps its press action for
+            // assistive technology.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel(for: clip))
         }
         .buttonStyle(.plain)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
@@ -117,9 +121,7 @@ struct MapTimelineStrip: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 2 : 1)
         )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel(for: clip))
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
