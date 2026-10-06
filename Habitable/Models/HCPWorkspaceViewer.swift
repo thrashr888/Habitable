@@ -34,10 +34,13 @@ struct HCPWorkspace: Identifiable, Equatable, Sendable {
     let currentRunCreatedAt: Date?
     let updatedAt: Date?
     let resourceCount: Int?
+    let description: String?
     init(id: String, name: String, terraformVersion: String?, executionMode: String?,
          locked: Bool, htmlURL: URL?, tagNames: [String] = [], vcs: HCPVCSRepository? = nil,
          projectID: String? = nil, projectName: String? = nil, currentRunStatus: String? = nil,
-         currentRunCreatedAt: Date? = nil, updatedAt: Date? = nil, resourceCount: Int? = nil) {
+         currentRunCreatedAt: Date? = nil, updatedAt: Date? = nil, resourceCount: Int? = nil,
+         description: String? = nil) {
+        self.description = description
         self.id = id; self.name = name; self.terraformVersion = terraformVersion
         self.executionMode = executionMode; self.locked = locked; self.htmlURL = htmlURL
         self.tagNames = tagNames; self.vcs = vcs
@@ -119,6 +122,15 @@ struct HCPRunDetails: Equatable, Sendable {
     let applyLogs: String?
     let planReviewURL: URL?
     let runURL: URL?
+}
+
+/// One recorded state version of a workspace. The run is the one that produced it, when HCP names one.
+struct HCPStateVersionSummary: Identifiable, Equatable, Sendable {
+    let id: String
+    let serial: Int?
+    let createdAt: Date?
+    let runID: String?
+    let resourceCount: Int?
 }
 
 struct HCPPage<T: Sendable>: Sendable {
@@ -362,13 +374,48 @@ struct HCPAPIClient: Sendable {
     func currentMap(hostname: String, workspaceID: String, token: String) async throws -> HCPMapSnapshot {
         let object = try await get(path: "/api/v2/workspaces/\(pathComponent(workspaceID))/current-state-version",
                                    hostname: hostname, token: token)
+        return try await mapSnapshot(from: object, expectedWorkspaceID: workspaceID, hostname: hostname, token: token)
+    }
+
+    /// The map as of one recorded state version (state is authoritative; this is that version's state, not a reconstruction).
+    func map(hostname: String, stateVersionID: String, token: String) async throws -> HCPMapSnapshot {
+        let object = try await get(path: "/api/v2/state-versions/\(pathComponent(stateVersionID))",
+                                   hostname: hostname, token: token)
+        guard let row = object["data"] as? [String: Any], row["id"] as? String == stateVersionID else {
+            throw HCPViewerError.invalidResponse
+        }
+        return try await mapSnapshot(from: object, expectedWorkspaceID: nil, hostname: hostname, token: token)
+    }
+
+    func stateVersions(hostname: String, organization: String, workspaceName: String, token: String,
+                       page: Int) async throws -> HCPPage<HCPStateVersionSummary> {
+        let query = [URLQueryItem(name: "filter[workspace][name]", value: workspaceName),
+                     URLQueryItem(name: "filter[organization][name]", value: organization),
+                     URLQueryItem(name: "page[number]", value: String(max(1, page))),
+                     URLQueryItem(name: "page[size]", value: "100")]
+        let object = try await get(path: "/api/v2/state-versions", hostname: hostname, token: token, query: query)
+        let items = array(object["data"]).compactMap { row -> HCPStateVersionSummary? in
+            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+            let attributes = row["attributes"] as? [String: Any] ?? [:]
+            let relationships = row["relationships"] as? [String: Any] ?? [:]
+            return HCPStateVersionSummary(
+                id: id, serial: attributes["serial"] as? Int,
+                createdAt: (attributes["created-at"] as? String).flatMap(isoDate),
+                runID: relationshipID(relationships["run"]),
+                resourceCount: attributes["resource-count"] as? Int)
+        }
+        return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
+    }
+
+    private func mapSnapshot(from object: [String: Any], expectedWorkspaceID workspaceID: String?,
+                             hostname: String, token: String) async throws -> HCPMapSnapshot {
         guard let row = object["data"] as? [String: Any], let id = row["id"] as? String,
               row["type"] as? String == "state-versions",
               let attributes = row["attributes"] as? [String: Any],
               let rawURLString = attributes["hosted-state-download-url"] as? String,
               let rawURL = secureArtifactURL(rawURLString) else { throw HCPViewerError.invalidResponse }
         if let relationships = row["relationships"] as? [String: Any],
-           let related = relationshipID(relationships["workspace"]), related != workspaceID {
+           let related = relationshipID(relationships["workspace"]), let workspaceID, related != workspaceID {
             throw HCPViewerError.invalidResponse
         }
         let raw = try await fetchStateArtifact(rawURL, hostname: hostname, token: token)
@@ -511,7 +558,8 @@ struct HCPAPIClient: Sendable {
                                 currentRunStatus: run?["status"] as? String,
                                 currentRunCreatedAt: (run?["created-at"] as? String).flatMap(isoDate),
                                 updatedAt: (attributes["updated-at"] as? String).flatMap(isoDate),
-                                resourceCount: attributes["resource-count"] as? Int)
+                                resourceCount: attributes["resource-count"] as? Int,
+                                description: base.description)
         }
     }
 
@@ -564,7 +612,8 @@ struct HCPAPIClient: Sendable {
                             executionMode: attributes["execution-mode"] as? String,
                             locked: attributes["locked"] as? Bool ?? false, htmlURL: url,
                             tagNames: attributes["tag-names"] as? [String] ?? [],
-                            vcs: HCPVCSRepository.decode(attributes: attributes))
+                            vcs: HCPVCSRepository.decode(attributes: attributes),
+                            description: (attributes["description"] as? String).flatMap { $0.isEmpty ? nil : $0 })
     }
 
     private func decodeWorkspaceVariable(_ row: [String: Any]) -> HCPWorkspaceVariable? {
@@ -753,6 +802,12 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     @Published private(set) var isLoadingMap = false
     @Published private(set) var mapError: String?
     private var mapOperation = UUID()
+    @Published private(set) var stateVersions: [HCPStateVersionSummary] = []
+    @Published private(set) var viewingStateVersion: HCPStateVersionSummary?
+    @Published private(set) var historicalSnapshot: HCPMapSnapshot?
+    @Published private(set) var isLoadingHistory = false
+    @Published private(set) var historyError: String?
+    private var historyOperation = UUID()
     @Published private(set) var workspaceVariables: [HCPWorkspaceVariable] = []
     @Published private(set) var isLoadingVariables = false
     @Published private(set) var variablesError: String?
@@ -772,7 +827,83 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         mapSnapshot = nil
         mapError = nil
         isLoadingMap = false
+        invalidateHistory()
         invalidateVariables()
+    }
+
+    private func invalidateHistory() {
+        historyOperation = UUID()
+        stateVersions = []
+        viewingStateVersion = nil
+        historicalSnapshot = nil
+        historyError = nil
+        isLoadingHistory = false
+    }
+
+    func returnToCurrentState() {
+        historyOperation = UUID()
+        viewingStateVersion = nil
+        historicalSnapshot = nil
+        historyError = nil
+        isLoadingHistory = false
+    }
+
+    func refreshStateVersions() async {
+        guard !isSample, isConnected, let workspace = selectedWorkspace,
+              let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
+        let operation = historyOperation
+        let host = hostname, organization = selectedOrganization
+        func current() -> Bool {
+            !Task.isCancelled && historyOperation == operation && isConnected && hostname == host
+                && selectedOrganization == organization && selectedWorkspaceID == workspace.id
+        }
+        var collected: [HCPStateVersionSummary] = []
+        do {
+            for page in 1...2 {
+                let result = try await client.stateVersions(hostname: host, organization: organization,
+                                                            workspaceName: workspace.name, token: token, page: page)
+                guard current() else { return }
+                collected += result.items
+                if !result.hasNextPage { break }
+            }
+            stateVersions = collected.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+        } catch {
+            guard current() else { return }
+            historyError = "Couldn’t load this workspace’s state versions."
+        }
+    }
+
+    func showStateVersion(_ version: HCPStateVersionSummary) async {
+        guard !isSample, isConnected, let workspace = selectedWorkspace else { return }
+        let operation = UUID()
+        historyOperation = operation
+        let host = hostname, organization = selectedOrganization
+        viewingStateVersion = version
+        historicalSnapshot = nil
+        historyError = nil
+        guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {
+            historyError = "Your HCP credential is unavailable. Reconnect to load that state version."
+            return
+        }
+        isLoadingHistory = true
+        defer { if historyOperation == operation { isLoadingHistory = false } }
+        do {
+            let snapshot = try await client.map(hostname: host, stateVersionID: version.id, token: token)
+            guard !Task.isCancelled, historyOperation == operation, isConnected, hostname == host,
+                  selectedOrganization == organization, selectedWorkspaceID == workspace.id else { return }
+            historicalSnapshot = snapshot
+        } catch {
+            guard !Task.isCancelled, historyOperation == operation, isConnected else { return }
+            historyError = "Couldn’t load that state version."
+        }
+    }
+
+    /// Finds the state version produced by a run (refreshing the list if needed) and shows it; false when the run produced none (plan-only, errored).
+    func showStateVersion(forRunID runID: String) async -> Bool {
+        if !stateVersions.contains(where: { $0.runID == runID }) { await refreshStateVersions() }
+        guard let version = stateVersions.first(where: { $0.runID == runID }) else { return false }
+        await showStateVersion(version)
+        return true
     }
 
     private func invalidateVariables() {

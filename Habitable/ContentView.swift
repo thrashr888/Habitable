@@ -258,13 +258,7 @@ struct ContentView: View {
     /// Changes and Inputs ride the Map's inspector as faces (DESIGN.md §2).
     private var localSideFaces: [MapSideFace] {
         [
-            MapSideFace(id: "changes", title: "Changes", count: workspace.runs.isEmpty ? nil : workspace.runs.count) {
-                MapChangesList(clips: localChangeClips, selectedID: selectedRun?.uuidString,
-                               onSelect: { clip in
-                                   selectedRun = UUID(uuidString: clip.id)
-                                   navigationSelection.wrappedValue = .runs
-                               }, onShowAll: { navigationSelection.wrappedValue = .runs })
-            },
+            // Changes live in the strip below the Map; the inspector keeps Inputs only.
             MapSideFace(id: "inputs", title: "Inputs", count: workspace.terraformVariables.isEmpty ? nil : workspace.terraformVariables.count) {
                 LocalInputsFace(variables: workspace.terraformVariables,
                                 onOpen: { showMissingInputs = false; navigationSelection.wrappedValue = .variables },

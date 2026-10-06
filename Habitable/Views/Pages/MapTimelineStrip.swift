@@ -85,14 +85,26 @@ struct MapTimelineStrip: View {
         proxy.scrollTo(selectedID, anchor: .trailing)
     }
 
+    /// Green for applied, red for errors, orange while running, quiet otherwise.
+    private func statusColor(for clip: MapChangeClip) -> Color {
+        if clip.isApplied { return .green }
+        let status = clip.status.lowercased()
+        if status.contains("error") || status.contains("cancel") { return .red }
+        if status.contains("planning") || status.contains("applying") || status.contains("pending") || status.contains("queued") { return .orange }
+        return .secondary
+    }
+
     private func card(for clip: MapChangeClip) -> some View {
         let selected = clip.id == selectedID
         return Button { onSelect(clip) } label: {
             VStack(alignment: .leading, spacing: 3) {
-                Text(clip.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                    .opacity(clip.isApplied ? 1 : 0.75)
+                HStack(spacing: 6) {
+                    Circle().fill(statusColor(for: clip)).frame(width: 7, height: 7)
+                    Text(clip.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                        .opacity(clip.isApplied ? 1 : 0.75)
+                }
                 countsLine(for: clip)
             }
             .padding(.horizontal, 10)

@@ -143,6 +143,21 @@ Paul's review: thumbnails overflowed their cards; switching organization reloade
 
 Open question filed (PAUL-174): why `aws_route53_record.route53_record` folded into the Ssl Cert tile rather than the CloudFront distribution it points at; the classifier needs real-world validation beyond Rookery.
 
+## Library round 4, October 6, 2026
+
+| Feedback | Change | Verified |
+| --- | --- | --- |
+| Changes → state | Clicking a change in the cloud window's Changes strip now shows the Map as HCP Terraform recorded it after that run (its state version), with a banner "State as recorded <date> · revision N" and **Return to current state**. Runs that produced no state (plan-only, errored) open the run instead. Current state is never replaced; the historical snapshot is a separate read-only download. | Built and unit-tested (state-version list, state-version map without credentials on the download, forRunID true/false, clearing on workspace change). Live click not completed in this session (input blocked while Paul was typing). |
+| Runs in the inspector | The Runs face is gone from the cloud inspector and the Changes face from the local one; the strip carries a status dot (green applied, red errored, orange running) on every card. | Built. |
+| Source links | "Defined in" resolves file and line from a checkout of the workspace's repository and links **Open on github.com** (blob URL with line anchor; GitLab/Bitbucket forms too). Without a checkout, a repository-backed workspace shows an Open <repo> link and says a checkout would resolve the line. | Built; needs a checked-out repository-backed workspace with state to see a resolved line. |
+| Inspector attributes | Each resource in a tile is its own disclosure; opening one shows that resource's type and attributes beneath it. No more flat attribute list under a list of resources. | Built. |
+| Disclosure headers | `HeaderDisclosureStyle`: the whole header toggles. Applied in the cloud window, Library and Settings. | Built. |
+| Tags | Tags sit under their organization, after its projects: top 8 by count, "N more…" folds the rest with a tooltip listing them. | Built; pthrasher_v2 has no tags to show. |
+| gym-* workspaces | 144 empty `gym-*` workspaces in pthrasher_v2 deleted with HCP's safe-delete (refuses workspaces that manage resources). | Done, 144 of 144. |
+| Descriptions | Workspace descriptions decode and show on Library cards (two lines) and in the cloud inspector when nothing is selected. | Live: terraform-fast's description in the inspector. |
+| Sorting | Library sort menu: Last change (default), Name, Resources, Status; remembered. | Built. |
+| Checkout folder | Default `~/Documents/Habitable`, Settings › General › Checkouts. | Live: Paul checked terraform-fast out there. |
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

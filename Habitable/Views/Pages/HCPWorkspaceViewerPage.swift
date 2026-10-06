@@ -21,6 +21,7 @@ struct HCPWorkspaceViewer: View {
     }
     @State private var showingWorkspaces = false
     @State private var inspectorRequest: HCPMapInspectorRequest?
+    @StateObject private var checkouts = WorkspaceCheckoutStore()
 
     init(model: HCPWorkspaceViewerModel, connectionOnly: Bool = false,
          onOpenConnections: @escaping () -> Void = {}, onOpenWorkspaces: @escaping () -> Void = {}) {
@@ -69,6 +70,8 @@ struct HCPWorkspaceViewer: View {
         .padding(connectionOnly || section != .map ? 16 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .disclosureGroupStyle(HeaderDisclosureStyle())
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in checkouts.reload() }
         .toolbar {
             if !connectionOnly && model.isConnected {
               QuietToolbar {
@@ -271,12 +274,13 @@ struct HCPWorkspaceViewer: View {
                 .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
         VStack(spacing: 0) {
+        let shown = model.viewingStateVersion != nil ? model.historicalSnapshot : model.mapSnapshot
         ResourceMapContent(title: model.selectedWorkspace?.name ?? "Choose a workspace",
-            identity: model.mapRequestKey + "|" + (model.mapSnapshot?.versionID ?? ""),
-            map: model.mapSnapshot?.map, resources: model.mapSnapshot?.resources ?? [],
-            notice: model.mapSnapshot?.notice ?? (model.mapSnapshot == nil ? nil : "HCP Terraform · Current state"),
-            errorMessage: model.mapError,
-            isLoading: model.isLoadingMap, canRefresh: model.selectedWorkspace != nil && !model.isLoadingMap,
+            identity: model.mapRequestKey + "|" + (shown?.versionID ?? ""),
+            map: shown?.map, resources: shown?.resources ?? [],
+            notice: historyNotice ?? shown?.notice ?? (shown == nil ? nil : "HCP Terraform · Current state"),
+            errorMessage: model.historyError ?? model.mapError,
+            isLoading: model.isLoadingMap || model.isLoadingHistory, canRefresh: model.selectedWorkspace != nil && !model.isLoadingMap,
             refresh: { Task { await model.refreshMap() } },
             onShowList: { inspectorRequest = HCPMapInspectorRequest(address: nil) },
             onOpenResource: { address in inspectorRequest = HCPMapInspectorRequest(address: address) },
@@ -287,14 +291,22 @@ struct HCPWorkspaceViewer: View {
             stateSerial: model.mapSnapshot?.stateSerial,
             onShowHistory: { section = .runs },
             onShowVariables: { section = .variables },
-            sideFaces: remoteSideFaces)
+            sideFaces: remoteSideFaces,
+            sourceDirectory: checkoutFolder, repository: model.selectedWorkspace?.vcs,
+            historyBanner: historyNotice.map { text in (text: text, dismiss: { model.returnToCurrentState() }) },
+            workspaceDescription: model.selectedWorkspace?.description)
         .task(id: model.mapRequestKey) { await model.refreshMap() }
         Divider()
-        MapTimelineStrip(clips: remoteChangeClips, selectedID: model.selectedRunID,
-                         hint: model.runs.isEmpty ? "" : "Select a change to review its remote run",
+        MapTimelineStrip(clips: remoteChangeClips, selectedID: model.viewingStateVersion?.runID,
+                         hint: model.runs.isEmpty ? "" : "Select a change to see the Map as it was after that run",
                          onSelect: { clip in
-                             runSelection.wrappedValue = clip.id
-                             section = .runs
+                             Task {
+                                 // Applied runs have a state version; anything else opens the run itself.
+                                 if await model.showStateVersion(forRunID: clip.id) == false {
+                                     runSelection.wrappedValue = clip.id
+                                     section = .runs
+                                 }
+                             }
                          }, onShowAll: { section = .runs })
         }
         }
@@ -303,18 +315,27 @@ struct HCPWorkspaceViewer: View {
     /// Runs and Variables ride the cloud Map's inspector as faces (DESIGN.md §2).
     private var remoteSideFaces: [MapSideFace] {
         [
-            MapSideFace(id: "runs", title: "Runs", count: model.runs.isEmpty ? nil : model.runs.count) {
-                MapChangesList(clips: remoteChangeClips, selectedID: model.selectedRunID,
-                               onSelect: { clip in
-                                   runSelection.wrappedValue = clip.id
-                                   section = .runs
-                               }, onShowAll: { section = .runs })
-            },
+            // Runs live in the Changes strip; a second list in the inspector was duplicative.
             MapSideFace(id: "variables", title: "Variables",
                         count: model.workspaceVariables.isEmpty ? nil : model.workspaceVariables.count) {
                 RemoteVariablesFace(model: model, onOpen: { section = .variables })
             }
         ]
+    }
+
+    private var historyNotice: String? {
+        guard let version = model.viewingStateVersion else { return nil }
+        var parts = ["State as recorded"]
+        if let date = version.createdAt { parts[0] += " \(date.formatted(date: .abbreviated, time: .shortened))" }
+        if let serial = version.serial { parts.append("revision \(serial)") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// A folder this app checked out from the selected workspace, for source lookups.
+    private var checkoutFolder: URL? {
+        guard let workspace = model.selectedWorkspace else { return nil }
+        return checkouts.records(hostname: model.hostname, organization: model.selectedOrganization, workspaceID: workspace.id)
+            .first.map { URL(fileURLWithPath: $0.path, isDirectory: true) }
     }
 
     /// Loaded remote runs, oldest first. HCP run lists carry no per-run change
