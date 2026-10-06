@@ -10,11 +10,15 @@ struct MapTimelineStrip: View {
     var onShowAll: (() -> Void)? = nil
 
     private static let height: CGFloat = 142
+    private static let collapsedHeight: CGFloat = 40
+    @AppStorage("map.showTimeline") private var expanded = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            if clips.isEmpty {
+            if !expanded {
+                EmptyView()
+            } else if clips.isEmpty {
                 Text("No changes recorded yet. Preview Changes starts the first one.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -24,12 +28,22 @@ struct MapTimelineStrip: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(height: Self.height)
+        .frame(height: expanded ? Self.height : Self.collapsedHeight)
+        .animation(.easeInOut(duration: 0.18), value: expanded)
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("Changes").font(.headline)
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    Text("Changes").font(.headline)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Hide changes" : "Show changes")
+            .help(expanded ? "Hide the Changes strip" : "Show the Changes strip")
             Text(MapTimelinePresentation.summary(for: clips)).foregroundStyle(.secondary)
             Spacer()
             Text(hint).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)

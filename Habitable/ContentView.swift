@@ -58,6 +58,7 @@ struct ContentView: View {
     /// Shared with the cloud and Settings windows; the Library lists its workspaces.
     @ObservedObject private var cloud: HCPWorkspaceViewerModel
     @StateObject private var library = LibraryModel()
+    @StateObject private var checkouts = WorkspaceCheckoutStore()
     @State private var remoteWorkspaceLink: TerraformRemoteWorkspaceLink?
 
     /// `initialDirectory` is supplied when another window opens a specific
@@ -98,10 +99,16 @@ struct ContentView: View {
         .task(id: workspace.workingDirectory) {
             remoteWorkspaceLink = nil
             guard let directory = workspace.workingDirectory else { return }
-            let link = await Task.detached(priority: .utility) {
+            var link = await Task.detached(priority: .utility) {
                 TerraformRemoteWorkspaceLink.resolve(workingDirectory: directory)
             }.value
             guard !Task.isCancelled, directory == workspace.workingDirectory else { return }
+            if link == nil, let record = checkouts.record(forPath: directory),
+               let url = URL(string: "https://\(record.hostname)/app/\(record.organization)/workspaces/\(record.workspaceName)") {
+                // A folder Habitable cloned from a workspace is linked to it even before init.
+                link = TerraformRemoteWorkspaceLink(hostname: record.hostname, organization: record.organization,
+                    selector: .name(record.workspaceName), source: .checkout(workspaceID: record.workspaceID), url: url)
+            }
             remoteWorkspaceLink = link
         }
         .onChange(of: workspace.workspaceOpenError) { error in
@@ -283,7 +290,8 @@ struct ContentView: View {
         var parts: [String] = []
         if workspace.selectedTerraformWorkspace != "default" { parts.append(workspace.selectedTerraformWorkspace) }
         if let link = remoteWorkspaceLink {
-            parts.append(link.isInitialized ? "HCP Terraform state" : "HCP Terraform (not initialized)")
+            if case .checkout = link.source { parts.append("Checked out from HCP Terraform") }
+            else { parts.append(link.isInitialized ? "HCP Terraform state" : "HCP Terraform (not initialized)") }
         } else if workspace.backendIdentity != "unknown backend" {
             parts.append(workspace.backendIdentity.hasPrefix("local") ? "Local state" : workspace.backendIdentity)
         }
@@ -363,6 +371,8 @@ struct ContentView: View {
             parts.append("Open the remote workspace to view its Map. Local configuration and inputs remain available in this window.")
         case .configuration(let file):
             parts.append("\(file) declares \(link.organization) / \(link.selectorDescription) on \(link.hostname). This folder has not been initialized yet.")
+        case .checkout:
+            parts.append("This folder was checked out from \(link.organization) / \(link.selectorDescription). Runs happen in HCP Terraform; open the workspace to see its Map and state.")
         }
         if !link.isExact {
             parts.append("Terraform selects among \(link.selectorDescription); choose the one this folder uses in the HCP Terraform window.")
@@ -373,6 +383,7 @@ struct ContentView: View {
     private func remoteLinkHelp(_ link: TerraformRemoteWorkspaceLink) -> String {
         var text = "\(link.organization) / \(link.selectorDescription) on \(link.hostname)"
         if case .configuration(let file) = link.source { text += " · declared in \(file), not initialized" }
+        if case .checkout = link.source { text += " · checked out from this workspace" }
         return text
     }
 
@@ -464,7 +475,10 @@ struct ContentView: View {
                                     navigationSelection.wrappedValue = .resources
                                 }, onShowHistory: { navigationSelection.wrappedValue = .runs },
                                 sideFaces: localSideFaces,
-                                emptyTitle: remote.map { $0.isInitialized ? "State managed in HCP Terraform" : "Configured for HCP Terraform" },
+                                emptyTitle: remote.map { link in
+                                    if case .checkout = link.source { return "Checked out from HCP Terraform" }
+                                    return link.isInitialized ? "State managed in HCP Terraform" : "Configured for HCP Terraform"
+                                },
                                 emptyDetail: remote.map(remoteLinkDetail),
                                 emptySymbol: remote == nil ? nil : "cloud",
                                 emptyAction: remote.map { link in

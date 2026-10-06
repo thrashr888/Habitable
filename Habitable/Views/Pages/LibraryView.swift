@@ -12,7 +12,7 @@ struct LibraryView: View {
     let onOpenCloud: (HCPWorkspace, String, String) -> Void
     let onOpenConnections: () -> Void
 
-    private enum Section: Hashable { case all, thisMac, cloud(String) }
+    private enum Section: Hashable { case all, recent, attention, thisMac, cloud(String), project(String), tag(String) }
     @State private var section: Section = .all
     @State private var filter = ""
     @StateObject private var checkout = WorkspaceCheckoutCoordinator()
@@ -33,19 +33,79 @@ struct LibraryView: View {
         library.localEntries.map(\.id).joined(separator: "|") + "||" + cloudEntries.map(\.id).joined(separator: "|")
     }
 
+    // MARK: Facts behind the sidebar sections (HCP-recorded only)
+
+    private func workspace(of entry: LibraryEntry) -> HCPWorkspace? {
+        if case .cloud(let workspace, _, _) = entry.kind { return workspace }
+        return nil
+    }
+
+    private func explorer(for entry: LibraryEntry) -> HCPExplorerWorkspace? {
+        workspace(of: entry).flatMap { cloud.explorerRows[$0.name] }
+    }
+
+    /// What HCP Terraform itself reports as needing a person: an errored or
+    /// waiting run, recorded drift, or failed checks. Nothing is inferred.
+    private func attentionReason(for entry: LibraryEntry) -> String? {
+        guard let workspace = workspace(of: entry) else { return nil }
+        let row = explorer(for: entry)
+        if let drifted = row?.resourcesDrifted, drifted > 0 { return "\(drifted) resource\(drifted == 1 ? "" : "s") drifted" }
+        if row?.drifted == true { return "Drift recorded" }
+        if let failed = row?.checksFailed, failed > 0 { return "\(failed) check\(failed == 1 ? "" : "s") failed" }
+        if let errored = row?.checksErrored, errored > 0 { return "\(errored) check\(errored == 1 ? "" : "s") errored" }
+        switch workspace.currentRunStatus ?? row?.currentRunStatus {
+        case "errored": return "Latest run errored"
+        case "planned", "policy_override", "post_plan_awaiting_decision", "pre_apply_awaiting_decision": return "Run is waiting for approval"
+        default: return nil
+        }
+    }
+
+    private func lastChange(of entry: LibraryEntry) -> Date? {
+        if let workspace = workspace(of: entry) { return workspace.updatedAt ?? explorer(for: entry)?.updatedAt }
+        return library.summaries[entry.id]?.recordedAt
+    }
+
+    private var attentionEntries: [LibraryEntry] { cloudEntries.filter { attentionReason(for: $0) != nil } }
+
+    private var recentEntries: [LibraryEntry] {
+        (library.localEntries + cloudEntries).sorted { (lastChange(of: $0) ?? .distantPast) > (lastChange(of: $1) ?? .distantPast) }
+            .prefix(8).map { $0 }
+    }
+
+    private var projectNames: [String] {
+        Array(Set(cloudEntries.compactMap { workspace(of: $0)?.projectName })).sorted()
+    }
+
+    private var tagCounts: [(tag: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for entry in cloudEntries { for tag in workspace(of: entry)?.tagNames ?? [] { counts[tag, default: 0] += 1 } }
+        return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(6).map { ($0.key, $0.value) }
+    }
+
+    private func byLastChange(_ entries: [LibraryEntry]) -> [LibraryEntry] {
+        entries.sorted { (lastChange(of: $0) ?? .distantPast) > (lastChange(of: $1) ?? .distantPast) }
+    }
+
     private var visibleLocal: [LibraryEntry] {
         switch section {
         case .all, .thisMac: library.localEntries.filter(matches)
-        case .cloud: []
+        case .recent: recentEntries.filter { $0.isLocal && matches($0) }
+        case .cloud, .project, .tag, .attention: []
         }
     }
 
     private var visibleCloud: [LibraryEntry] {
         switch section {
-        case .all: cloudEntries.filter(matches)
+        case .all: byLastChange(cloudEntries.filter(matches))
         case .thisMac: []
+        case .recent: recentEntries.filter { $0.isCloud && matches($0) }
+        case .attention: byLastChange(attentionEntries.filter(matches))
         case .cloud(let organization):
-            organization == cloud.selectedOrganization ? cloudEntries.filter(matches) : []
+            organization == cloud.selectedOrganization ? byLastChange(cloudEntries.filter(matches)) : []
+        case .project(let name):
+            byLastChange(cloudEntries.filter { workspace(of: $0)?.projectName == name && matches($0) })
+        case .tag(let tag):
+            byLastChange(cloudEntries.filter { workspace(of: $0)?.tagNames.contains(tag) == true && matches($0) })
         }
     }
 
@@ -80,17 +140,39 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
                 sidebarRow("All infrastructure", symbol: "globe", count: library.localEntries.count + cloudEntries.count, tag: .all)
+                sidebarRow("Recent", symbol: "clock", count: recentEntries.count, tag: .recent)
+                if !attentionEntries.isEmpty {
+                    sidebarRow("Needs attention", symbol: "exclamationmark.triangle", count: attentionEntries.count, tag: .attention, tint: .orange)
+                }
                 sidebarRow("This Mac", symbol: "folder", count: library.localEntries.count, tag: .thisMac)
             }
             .padding(.top, 12)
             Text("HCP Terraform").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                 .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
             if cloud.isConnected {
-                ForEach(cloud.organizations.isEmpty ? [HCPOrganization(name: cloud.selectedOrganization, email: nil)] : cloud.organizations) { organization in
-                    sidebarRow(organization.name, symbol: "cloud",
-                               count: organization.name == cloud.selectedOrganization && !cloud.isLoadingWorkspaces ? cloudEntries.count : nil,
-                               tag: .cloud(organization.name),
-                               busy: organization.name == cloud.selectedOrganization && cloud.isLoadingWorkspaces)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(cloud.organizations.isEmpty ? [HCPOrganization(name: cloud.selectedOrganization, email: nil)] : cloud.organizations) { organization in
+                            sidebarRow(organization.name, symbol: "cloud",
+                                       count: organization.name == cloud.selectedOrganization && !cloud.isLoadingWorkspaces ? cloudEntries.count : nil,
+                                       tag: .cloud(organization.name),
+                                       busy: organization.name == cloud.selectedOrganization && cloud.isLoadingWorkspaces)
+                            if organization.name == cloud.selectedOrganization {
+                                ForEach(projectNames, id: \.self) { project in
+                                    sidebarRow(project, symbol: nil,
+                                               count: cloudEntries.filter { workspace(of: $0)?.projectName == project }.count,
+                                               tag: .project(project), indent: true)
+                                }
+                            }
+                        }
+                        if !tagCounts.isEmpty {
+                            Text("Tags").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
+                            ForEach(tagCounts, id: \.tag) { item in
+                                sidebarRow(item.tag, symbol: nil, count: item.count, tag: .tag(item.tag), dot: tagColor(item.tag))
+                            }
+                        }
+                    }
                 }
             } else if cloud.isLoading {
                 LoadingIndicator(size: 16, label: "Connecting…").padding(.horizontal, 18).padding(.vertical, 6)
@@ -114,7 +196,16 @@ struct LibraryView: View {
         .padding(.horizontal, 0)
     }
 
-    private func sidebarRow(_ title: String, symbol: String, count: Int?, tag: Section, busy: Bool = false) -> some View {
+    /// Tags carry no color in HCP; a stable hash over a small palette keeps
+    /// the same tag the same color everywhere.
+    private func tagColor(_ tag: String) -> Color {
+        let palette: [Color] = [.red, .orange, .yellow, .green, .teal, .blue, .indigo, .pink]
+        let hash = tag.unicodeScalars.reduce(5381) { ($0 << 5) &+ $0 &+ Int($1.value) }
+        return palette[abs(hash) % palette.count]
+    }
+
+    private func sidebarRow(_ title: String, symbol: String?, count: Int?, tag: Section, busy: Bool = false,
+                            indent: Bool = false, tint: Color? = nil, dot: Color? = nil) -> some View {
         let selected = section == tag
         return Button {
             section = tag
@@ -124,7 +215,13 @@ struct LibraryView: View {
             }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: symbol).foregroundStyle(selected ? Color.accentColor : .secondary).frame(width: 18)
+                if let dot {
+                    Circle().fill(dot).frame(width: 8, height: 8).frame(width: 18)
+                } else if let symbol {
+                    Image(systemName: symbol).foregroundStyle(selected ? Color.accentColor : (tint ?? .secondary)).frame(width: 18)
+                } else {
+                    Color.clear.frame(width: indent ? 18 : 0, height: 1)
+                }
                 Text(title).font(.system(size: 13, weight: selected ? .medium : .regular)).lineLimit(1)
                 Spacer(minLength: 4)
                 if busy { LoadingIndicator(size: 12) }
@@ -160,15 +257,11 @@ struct LibraryView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Library").font(.system(size: 22, weight: .semibold))
                         Spacer()
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField("Filter workspaces", text: $filter).textFieldStyle(.plain)
-                                .accessibilityLabel("Filter workspaces")
-                        }
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                        .frame(maxWidth: 260)
+                        FilterField(placeholder: "Filter workspaces", text: $filter).frame(maxWidth: 260)
                         Button("Open Folder…", action: onChooseFolder).buttonStyle(.bordered)
+                    }
+                    if case .all = section, !attentionEntries.isEmpty, filter.isEmpty {
+                        attentionStrip
                     }
                     if visibleLocal.isEmpty && visibleCloud.isEmpty {
                         if cloud.isLoadingWorkspaces || (cloud.isLoading && !cloud.isConnected) {
@@ -179,10 +272,10 @@ struct LibraryView: View {
                         }
                     }
                     if !visibleLocal.isEmpty {
-                        group("This Mac", entries: visibleLocal)
+                        group(section == .recent ? "Recent on this Mac" : "This Mac", entries: visibleLocal)
                     }
                     if !visibleCloud.isEmpty {
-                        group("\(cloud.selectedOrganization) · HCP Terraform", entries: visibleCloud)
+                        group(cloudGroupTitle, entries: visibleCloud, subtitle: "Sorted by last change")
                     }
                     if case .cloud = section, cloud.workspaceHasNextPage {
                         Button("Load More Workspaces") { Task { await cloud.loadNextWorkspacePage() } }
@@ -194,6 +287,38 @@ struct LibraryView: View {
             Divider()
             Text(statusLine).font(.system(size: 12)).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity).padding(.vertical, 7)
+        }
+    }
+
+    private var cloudGroupTitle: String {
+        switch section {
+        case .recent: "Recent in \(cloud.selectedOrganization)"
+        case .attention: "Needs attention"
+        case .project(let name): "\(name) · \(cloud.selectedOrganization)"
+        case .tag(let tag): "#\(tag) · \(cloud.selectedOrganization)"
+        default: "\(cloud.selectedOrganization) · HCP Terraform"
+        }
+    }
+
+    /// The mock's lead: up to three things HCP Terraform says need a person.
+    private var attentionStrip: some View {
+        HStack(spacing: 12) {
+            ForEach(attentionEntries.prefix(3)) { entry in
+                Button { section = .attention } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(entry.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                            Text(attentionReason(for: entry) ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.1)))
+                    .contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
         }
     }
 
@@ -220,10 +345,14 @@ struct LibraryView: View {
         }.padding(.top, 20)
     }
 
-    private func group(_ title: String, entries: [LibraryEntry]) -> some View {
+    private func group(_ title: String, entries: [LibraryEntry], subtitle: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(spacing: 6) {
-                Text(title).font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(title).font(.system(size: 15, weight: .semibold))
+                    if let subtitle { Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary) }
+                    Spacer()
+                }
                 Divider()
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 212, maximum: 260), spacing: 16, alignment: .top)],
@@ -232,7 +361,10 @@ struct LibraryView: View {
                     LibraryCard(entry: entry, summary: summary(for: entry),
                                 isLoading: library.loading.contains(entry.id),
                                 failure: library.failures[entry.id],
-                                checkoutNote: checkoutNote(for: entry)) { open(entry) }
+                                checkoutNote: checkoutNote(for: entry),
+                                recordedCount: workspace(of: entry)?.resourceCount ?? explorer(for: entry)?.resourceCount,
+                                status: status(for: entry),
+                                tags: workspace(of: entry)?.tagNames ?? [], tagColor: tagColor) { open(entry) }
                         .contextMenu { cardMenu(entry) }
                 }
             }
@@ -247,6 +379,22 @@ struct LibraryView: View {
             return library.summaries[twin.id]
         }
         return nil
+    }
+
+    /// Run status as HCP recorded it; drift only when Explorer recorded it.
+    private func status(for entry: LibraryEntry) -> LibraryCard.Status? {
+        guard let workspace = workspace(of: entry) else { return nil }
+        let row = explorer(for: entry)
+        if let drifted = row?.resourcesDrifted, drifted > 0 { return .init(word: "Drifted", color: .orange) }
+        guard let raw = workspace.currentRunStatus ?? row?.currentRunStatus else { return nil }
+        let word = raw.replacingOccurrences(of: "_", with: " ").capitalized
+        switch raw {
+        case "applied", "planned_and_finished": return .init(word: raw == "applied" ? "Applied" : "Planned, no changes", color: .green)
+        case "errored", "canceled", "force_canceled": return .init(word: word, color: .red)
+        case "planned", "policy_override", "post_plan_awaiting_decision", "pre_apply_awaiting_decision": return .init(word: "Needs approval", color: Color.accentColor)
+        case "planning", "applying", "pending", "queuing", "fetching", "confirmed", "apply_queued", "plan_queued": return .init(word: word, color: .orange)
+        default: return .init(word: word, color: .secondary)
+        }
     }
 
     /// "Checked out from Rookery" on a folder, "On this Mac" on its workspace.
@@ -298,8 +446,14 @@ private struct LibraryCard: View {
     let isLoading: Bool
     let failure: String?
     var checkoutNote: String? = nil
+    var recordedCount: Int? = nil
+    var status: Status? = nil
+    var tags: [String] = []
+    var tagColor: (String) -> Color = { _ in .secondary }
     let onOpen: () -> Void
     @State private var hovering = false
+
+    struct Status { let word: String; let color: Color }
 
     var body: some View {
         Button(action: onOpen) {
@@ -315,7 +469,29 @@ private struct LibraryCard: View {
                         Text(entry.title).font(.system(size: 14, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                     }
                     Text(entry.location).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Text(detailLine).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(detailLine).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let status {
+                            HStack(spacing: 4) {
+                                Circle().fill(status.color).frame(width: 7, height: 7)
+                                Text(status.word).font(.system(size: 12)).foregroundStyle(status.color == .secondary ? Color.secondary : status.color)
+                            }.lineLimit(1)
+                        }
+                    }
+                    if !tags.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(tags.prefix(3), id: \.self) { tag in
+                                HStack(spacing: 4) {
+                                    Circle().fill(tagColor(tag)).frame(width: 6, height: 6)
+                                    Text(tag).font(.system(size: 12))
+                                }
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Color.primary.opacity(0.05), in: Capsule())
+                            }
+                            if tags.count > 3 { Text("+\(tags.count - 3)").font(.system(size: 12)).foregroundStyle(.secondary) }
+                        }.lineLimit(1)
+                    }
                     if let checkoutNote {
                         Label(checkoutNote, systemImage: "arrow.down.to.line")
                             .font(.system(size: 12)).foregroundStyle(Color.accentColor).lineLimit(1)
@@ -333,11 +509,15 @@ private struct LibraryCard: View {
     private var detailLine: String {
         if let summary {
             var parts = ["\(summary.resourceCount) resource\(summary.resourceCount == 1 ? "" : "s")"]
-            if summary.groupCount > 0 { parts.append("\(summary.groupCount) group\(summary.groupCount == 1 ? "" : "s")") }
+            if summary.groupCount > 0 { parts.append("\(summary.groupCount) tile\(summary.groupCount == 1 ? "" : "s")") }
             if let recordedAt = summary.recordedAt {
                 parts.append(recordedAt.formatted(.relative(presentation: .named)))
             }
             return parts.joined(separator: " · ")
+        }
+        if let recordedCount {
+            // HCP's own count when the state itself hasn't been read yet.
+            return "\(recordedCount) resource\(recordedCount == 1 ? "" : "s")" + (isLoading ? " · reading state…" : "")
         }
         if isLoading { return "Reading state…" }
         if let failure { return failure }
@@ -436,7 +616,7 @@ final class WorkspaceCheckoutCoordinator: ObservableObject {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Workspace", isDirectory: true)
+        panel.directoryURL = WorkspaceCheckoutStore.ensureCheckoutFolder()
         panel.begin { [weak self] response in
             guard response == .OK, let parent = panel.url, let self else { return }
             let folderName = GitCheckout.suggestedFolderName(identifier: vcs.identifier, repositoryURL: repository, workspaceName: workspace.name)

@@ -13,7 +13,12 @@ struct HCPWorkspaceViewer: View {
     let onOpenConnections: () -> Void
     let onOpenWorkspaces: () -> Void
     @State private var workspaceSearch = ""
-    @State private var section: HCPWorkspaceSection = .map
+    // Remembered per window so Variables, Runs and Map come back the way they were left.
+    @SceneStorage("hcp.section") private var sectionStorage = HCPWorkspaceSection.map.rawValue
+    private var section: HCPWorkspaceSection {
+        get { HCPWorkspaceSection(rawValue: sectionStorage) ?? .map }
+        nonmutating set { sectionStorage = newValue.rawValue }
+    }
     @State private var showingWorkspaces = false
     @State private var inspectorRequest: HCPMapInspectorRequest?
 
@@ -163,10 +168,8 @@ struct HCPWorkspaceViewer: View {
     private var compactSelection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                TextField("Filter workspaces", text: $workspaceSearch)
-                    .textFieldStyle(.roundedBorder)
+                FilterField(placeholder: "Filter workspaces", text: $workspaceSearch, accessibilityLabel: "Filter HCP workspaces")
                     .frame(maxWidth: 220)
-                    .accessibilityLabel("Filter HCP workspaces")
                 Text("\(filteredWorkspaces.count) of \(model.workspaces.count) workspaces")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
@@ -347,8 +350,7 @@ struct HCPWorkspaceViewer: View {
                 Spacer()
                 Text("\(model.workspaces.count)").font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            TextField("Filter workspaces", text: $workspaceSearch)
-                .textFieldStyle(.roundedBorder)
+            FilterField(placeholder: "Filter workspaces", text: $workspaceSearch)
             ScrollView {
                 LazyVStack(spacing: 4) {
                     ForEach(filteredWorkspaces) { workspace in

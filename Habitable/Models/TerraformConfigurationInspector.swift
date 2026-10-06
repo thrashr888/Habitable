@@ -103,7 +103,12 @@ struct TerraformConfigurationMetadata: Sendable {
 /// No remote lookup or credential access is performed.
 struct TerraformRemoteWorkspaceLink: Equatable, Sendable {
     enum Selector: Equatable, Sendable { case name(String), tags([String]), prefix(String) }
-    enum Source: Equatable, Sendable { case initializedBackend, configuration(sourceFile: String) }
+    enum Source: Equatable, Sendable {
+        case initializedBackend
+        case configuration(sourceFile: String)
+        /// This folder was cloned by Habitable from that workspace's repository.
+        case checkout(workspaceID: String)
+    }
 
     let hostname: String
     let organization: String

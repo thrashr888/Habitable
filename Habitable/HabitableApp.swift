@@ -19,6 +19,7 @@ struct HabitableApp: App {
                 // on it keeps a Library window a Library and a folder window its folder.
                 .id(directory)
                 .frame(minWidth: 900, minHeight: 560)
+                .background(WindowMenuMembership())
         }
         .windowToolbarStyle(.unifiedCompact)
         .commands { WorkspaceCommands() }
@@ -26,11 +27,13 @@ struct HabitableApp: App {
         Window("HCP Terraform", id: "HCP.browser") {
             CloudWorkspaceWindow(model: cloud)
                 .frame(minWidth: 900, minHeight: 560)
+                .background(WindowMenuMembership())
         }.windowToolbarStyle(.unifiedCompact).defaultSize(width: 1400, height: 880)
 
         Window("Settings", id: "App.settings") {
             ConnectionsSettingsWindow(model: cloud)
                 .frame(minWidth: 660, minHeight: 560)
+                .background(WindowMenuMembership())
         }.windowToolbarStyle(.unifiedCompact)
     }
 }

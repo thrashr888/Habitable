@@ -152,6 +152,23 @@ struct SettingsWindow: View {
 // MARK: - General
 
 private struct GeneralPane: View {
+    @AppStorage(WorkspaceCheckoutStore.folderDefaultsKey) private var checkoutFolderPath = ""
+
+    private func chooseCheckoutFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Checkout Folder"
+        panel.message = "Choose where Habitable checks out repositories."
+        panel.prompt = "Use This Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = WorkspaceCheckoutStore.ensureCheckoutFolder()
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            checkoutFolderPath = url.path
+        }
+    }
+
     let onOpenWorkspaces: () -> Void
     let onOpenLocalWorkspace: () -> Void
     @AppStorage("general.restoreLastFolder") private var restoreLastFolder = true
@@ -165,6 +182,17 @@ private struct GeneralPane: View {
                 }
                 SettingsRow("Show inventory when a map opens") {
                     Toggle("Show inventory when a map opens", isOn: $showInventory).labelsHidden().toggleStyle(.switch)
+                }
+            }
+            SettingsGroup("Checkouts", footer: "Repositories checked out from HCP Terraform workspaces go here, each in its own folder.") {
+                SettingsRow("Check out into", subtitle: LibraryModel.abbreviatedPath(WorkspaceCheckoutStore.checkoutFolder.path)) {
+                    HStack(spacing: 8) {
+                        Button("Choose…") { chooseCheckoutFolder() }.buttonStyle(.bordered)
+                            .accessibilityLabel("Choose the checkout folder")
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([WorkspaceCheckoutStore.ensureCheckoutFolder()])
+                        }.buttonStyle(.borderless)
+                    }
                 }
             }
             SettingsGroup("Links") {

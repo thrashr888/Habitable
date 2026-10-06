@@ -60,6 +60,22 @@ final class WorkspaceCheckoutStore: ObservableObject {
     }
 
     static let defaultsKey = "workspaceCheckouts"
+    /// Where checkouts go unless Settings says otherwise: ~/Documents/Habitable,
+    /// the way GitHub Desktop keeps ~/Documents/GitHub. Created on first use.
+    static let folderDefaultsKey = "checkout.folder"
+    static var checkoutFolder: URL {
+        if let path = UserDefaults.standard.string(forKey: folderDefaultsKey), !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("Habitable", isDirectory: true)
+    }
+    static func ensureCheckoutFolder() -> URL {
+        let folder = checkoutFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
 
     @Published private(set) var records: [Record]
     private let defaults: UserDefaults

@@ -59,7 +59,7 @@ final class LibraryModelTests: XCTestCase {
         let plain = try folder("plain")
         let missing = root.appendingPathComponent("missing")
 
-        let model = LibraryModel()
+        let model = LibraryModel(cacheURL: nil)
         await model.refreshLocal(folders: [linked, plain, missing, plain])
         XCTAssertEqual(model.localEntries.map(\.title), ["linked", "plain"])
         XCTAssertEqual(model.localEntries[0].id, "local:" + LibraryModel.canonicalPath(linked))
@@ -78,7 +78,7 @@ final class LibraryModelTests: XCTestCase {
     func testLoadSummaryReadsLocalState() async throws {
         let dir = try folder("withstate")
         try state.write(to: dir.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
-        let model = LibraryModel()
+        let model = LibraryModel(cacheURL: nil)
         await model.refreshLocal(folders: [dir])
         let entry = try XCTUnwrap(model.localEntries.first)
         await model.loadSummary(for: entry, cloud: nil)
@@ -93,7 +93,7 @@ final class LibraryModelTests: XCTestCase {
 
     func testLoadSummaryWithoutStateIsNotAFailure() async throws {
         let dir = try folder("empty")
-        let model = LibraryModel()
+        let model = LibraryModel(cacheURL: nil)
         await model.refreshLocal(folders: [dir])
         let entry = try XCTUnwrap(model.localEntries.first)
         await model.loadSummary(for: entry, cloud: nil)
@@ -104,7 +104,7 @@ final class LibraryModelTests: XCTestCase {
     func testUnreadableStateReportsFailure() async throws {
         let dir = try folder("broken")
         try "not json".write(to: dir.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
-        let model = LibraryModel()
+        let model = LibraryModel(cacheURL: nil)
         await model.refreshLocal(folders: [dir])
         let entry = try XCTUnwrap(model.localEntries.first)
         await model.loadSummary(for: entry, cloud: nil)
@@ -127,7 +127,7 @@ final class LibraryModelTests: XCTestCase {
         try state.write(to: file, atomically: true, encoding: .utf8)
         let original = Date(timeIntervalSince1970: 1_700_000_000)
         try FileManager.default.setAttributes([.modificationDate: original], ofItemAtPath: file.path)
-        let model = LibraryModel()
+        let model = LibraryModel(cacheURL: nil)
         await model.refreshLocal(folders: [dir])
         let entry = try XCTUnwrap(model.localEntries.first)
         await model.loadSummary(for: entry, cloud: nil)
@@ -148,12 +148,101 @@ final class LibraryModelTests: XCTestCase {
     func testRefreshAllLoadsLocalEntriesAndStamps() async throws {
         let dir = try folder("all")
         try state.write(to: dir.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
-        let model = LibraryModel()
+        let model = LibraryModel(cacheURL: nil)
         await model.refreshLocal(folders: [dir])
         XCTAssertNil(model.lastRefresh)
         await model.refreshAll(model.localEntries, cloud: nil)
         XCTAssertEqual(model.summaries.values.first?.resourceCount, 2)
         XCTAssertNotNil(model.lastRefresh)
         XCTAssertTrue(model.loading.isEmpty)
+    }
+
+    // MARK: Cache
+
+    private func sampleSummary(versionID: String? = "sv-1") -> LibraryStateSummary {
+        LibraryStateSummary(resourceCount: 5, groupCount: 3, dataSourceCount: 1,
+                            kindCounts: [.data: 2, .network: 1], recordedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                            serial: 9, versionID: versionID)
+    }
+
+    private func cacheURL() -> URL { root.appendingPathComponent("cache/library-summaries.json") }
+
+    func testCacheRoundTripRestoresSummaries() async throws {
+        let url = cacheURL()
+        let dir = try folder("rt")
+        try state.write(to: dir.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
+        let model = LibraryModel(cacheURL: url)
+        XCTAssertTrue(model.cacheRestored)
+        XCTAssertTrue(model.summaries.isEmpty)
+        await model.refreshLocal(folders: [dir])
+        let entry = try XCTUnwrap(model.localEntries.first)
+        await model.loadSummary(for: entry, cloud: nil)
+        await model.flushCache()
+        let expected = try XCTUnwrap(model.summaries[entry.id])
+
+        let restored = LibraryModel(cacheURL: url)
+        XCTAssertTrue(restored.cacheRestored)
+        XCTAssertEqual(restored.summaries[entry.id], expected)
+        XCTAssertTrue(restored.failures.isEmpty)
+        XCTAssertTrue(restored.loading.isEmpty)
+
+        let cloud = LibraryModel(cacheURL: url)
+        XCTAssertEqual(cloud.summaries.count, 1)
+    }
+
+    func testCacheRestoresKindCountsAndVersionID() throws {
+        let url = cacheURL()
+        let summary = sampleSummary()
+        let file = LibraryCacheFile(entries: [LibraryCacheEntry(id: "cloud:h/o/ws-1", savedAt: Date(), summary: summary)])
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(file).write(to: url)
+        let model = LibraryModel(cacheURL: url)
+        let restored = try XCTUnwrap(model.summaries["cloud:h/o/ws-1"])
+        XCTAssertEqual(restored.kindCounts, [.data: 2, .network: 1])
+        XCTAssertEqual(restored.versionID, "sv-1")
+        XCTAssertEqual(restored, summary)
+        // Version skip still works against a restored cloud summary.
+        XCTAssertFalse(LibraryModel.needsCloudReload(cached: restored, currentVersionID: "sv-1"))
+        XCTAssertTrue(LibraryModel.needsCloudReload(cached: restored, currentVersionID: "sv-2"))
+    }
+
+    func testCacheDropsEntriesOlderThanThirtyDays() throws {
+        let url = cacheURL()
+        let file = LibraryCacheFile(entries: [
+            LibraryCacheEntry(id: "old", savedAt: Date().addingTimeInterval(-31 * 86_400), summary: sampleSummary()),
+            LibraryCacheEntry(id: "fresh", savedAt: Date().addingTimeInterval(-29 * 86_400), summary: sampleSummary()),
+        ])
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(file).write(to: url)
+        let model = LibraryModel(cacheURL: url)
+        XCTAssertNil(model.summaries["old"])
+        XCTAssertNotNil(model.summaries["fresh"])
+    }
+
+    func testUnreadableCacheIsIgnored() throws {
+        let url = cacheURL()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: url)
+        let model = LibraryModel(cacheURL: url)
+        XCTAssertTrue(model.cacheRestored)
+        XCTAssertTrue(model.summaries.isEmpty)
+
+        let oversized = root.appendingPathComponent("big.json")
+        try Data(count: LibraryModel.maximumCacheBytes + 1).write(to: oversized)
+        XCTAssertTrue(LibraryModel(cacheURL: oversized).summaries.isEmpty)
+    }
+
+    func testCacheContainsOnlySummaryFields() async throws {
+        let url = cacheURL()
+        let dir = try folder("secretname")
+        try state.write(to: dir.appendingPathComponent("terraform.tfstate"), atomically: true, encoding: .utf8)
+        let model = LibraryModel(cacheURL: url)
+        await model.refreshLocal(folders: [dir])
+        let entry = try XCTUnwrap(model.localEntries.first)
+        await model.loadSummary(for: entry, cloud: nil)
+        await model.flushCache()
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(text.contains("aws_s3_bucket"))
+        XCTAssertFalse(text.contains("failures"))
     }
 }
