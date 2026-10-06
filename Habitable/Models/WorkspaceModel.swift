@@ -335,6 +335,10 @@ class Workspace: ObservableObject {
     // config
     @Published var isValid = false
     @Published var isInitialized = false
+    /// A folder handed in from outside the app (Finder, the Dock, `open`) waits for
+    /// the user before `terraform init` downloads and runs its providers.
+    @Published private(set) var awaitingInitializationConsent = false
+    private var autoInitializeOnNextOpen = true
     @Published var hasState = false
     @Published var hasVariables = false
 
@@ -400,7 +404,8 @@ class Workspace: ObservableObject {
         terraformVariables.compactMap(\.declaration).sorted { $0.name < $1.name }
     }
 
-    init(dir: URL? = nil, restoreLastDirectory: Bool = true, defaults: UserDefaults = .standard,
+    init(dir: URL? = nil, restoreLastDirectory: Bool = true, autoInitializeOnOpen: Bool = true,
+         defaults: UserDefaults = .standard,
          historyStore: RunHistoryStore = RunHistoryStore(),
          commandCoordinator: WorkspaceCommandCoordinator = .shared,
          descriptionStore: WorkspaceDescriptionStore = WorkspaceDescriptionStore(),
@@ -413,6 +418,7 @@ class Workspace: ObservableObject {
         managedTerraformVersion = defaults.string(forKey: TerraformReleaseService.selectionKey)
         runner = Runner(executableURL: TerraformReleaseService.selectedExecutable(defaults: defaults))
         refreshTerraformVersion()
+        autoInitializeOnNextOpen = autoInitializeOnOpen
         if restoreLastDirectory, dir == nil, let lastDir = lastWorkingDirectory {
             updateWorkingDirectory(dir: lastDir)
             return
@@ -711,7 +717,12 @@ class Workspace: ObservableObject {
         }
         
         checkVariables()
-        if startAutoInit(reason: .opened) {
+        let consentRequired = !autoInitializeOnNextOpen && !isInitialized && autoInitializeEnabled && hasTerraformConfiguration
+        autoInitializeOnNextOpen = true
+        awaitingInitializationConsent = consentRequired
+        if consentRequired {
+            // Nothing runs until the user chooses Initialize; the Map explains why.
+        } else if startAutoInit(reason: .opened) {
             // Init, then validate and read state in one chain, so the Map never first shows "Couldn't read state".
             Task { @MainActor in
                 let ok = await self.ensureInitialized(reason: .opened)
@@ -969,6 +980,7 @@ class Workspace: ObservableObject {
     /// Explicit Initialize: always allowed, and clears the "already tried" record for this folder.
     func initialize() {
         autoInitAttemptedPath = nil
+        awaitingInitializationConsent = false
         runInitialize(validateAfter: true, completion: nil)
     }
 
@@ -1072,6 +1084,7 @@ class Workspace: ObservableObject {
     func validateAndQueueRun(onCreated: (@MainActor @Sendable (UUID) -> Void)? = nil) {
         guard !isInspectingInputs else { return }
         guard isInitialized || !(autoInitializeEnabled && hasTerraformConfiguration) || locked else {
+            awaitingInitializationConsent = false
             Task { @MainActor in
                 let ok = await self.ensureInitialized(reason: .previewChanges)
                 // A failed init leaves its error in errorMessage; do not plan on top of it.

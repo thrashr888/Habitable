@@ -8,7 +8,7 @@ Habitable is built around a few short paths. Each starts in the **Library** (Fil
 
 **Local folder: see it, preview a change, apply it.**
 
-1. Open a Terraform folder: Open Folder…, a Library card, Finder's Open With, a drop on the Dock icon, or `open -a Habitable <folder>`. Habitable initializes it on first open (Settings › General) and reads its state. A folder has one window; opening it again brings that window forward.
+1. Open a Terraform folder: Open Folder…, a Library card, Finder's Open With, a drop on the Dock icon, or `open -a Habitable <folder>`. Folders opened from inside the app initialize on first open (Settings › General); a folder handed in from Finder or the Dock asks first, since init downloads and runs the providers it declares. A folder has one window; opening it again brings that window forward.
 2. The **Map** shows what exists, grouped by what it does. Click a tile to inspect facts, endpoints, connections, where it is defined, and the provider's reference.
 3. Edit configuration in your editor ("Defined in" opens the file). Press **Preview Changes**: the Map switches into review, with new things outlined green, changes amber, replacements pink, removals red, and the counts beside the decision.
 4. **Review and Apply…** opens the saved plan; apply from there. The **Changes** strip below the Map records every run.
