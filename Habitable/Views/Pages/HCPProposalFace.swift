@@ -229,6 +229,17 @@ struct HCPProposalFace: View {
             steps(for: proposal.step)
             if case .errored(let detail) = proposal.step {
                 Text(detail).font(.system(size: 13)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                if let log = model.proposalLog {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(log).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(8)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    if let hint = terraformVersionHint(log: log) {
+                        Text(hint).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             HStack {
                 if let run = model.runs.first(where: { $0.id == proposal.runID }), let url = run.htmlURL {
@@ -262,16 +273,20 @@ struct HCPProposalFace: View {
             case .errored, .discarded: return 0
             }
         }()
-        return HStack(spacing: 6) {
-            ForEach(order, id: \.1) { label, index in
-                HStack(spacing: 4) {
-                    Circle().fill(index <= reached ? Color.accentColor : Color.secondary.opacity(0.3)).frame(width: 7, height: 7)
-                    Text(label).font(.system(size: 12)).foregroundStyle(index <= reached ? .primary : .secondary)
+        // Labels never wrap; the row scrolls sideways if the pane is narrow.
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(order, id: \.1) { label, index in
+                    HStack(spacing: 4) {
+                        Circle().fill(index <= reached ? Color.accentColor : Color.secondary.opacity(0.3)).frame(width: 7, height: 7)
+                        Text(label).font(.system(size: 12)).foregroundStyle(index <= reached ? .primary : .secondary)
+                            .fixedSize()
+                    }
+                    if index < order.count - 1 { Rectangle().fill(Color.secondary.opacity(0.3)).frame(width: 12, height: 1) }
                 }
-                if index < order.count - 1 { Rectangle().fill(Color.secondary.opacity(0.3)).frame(width: 14, height: 1) }
+                if case .planning = step { ProgressView().controlSize(.mini) }
+                if case .applying = step { ProgressView().controlSize(.mini) }
             }
-            if case .planning = step { ProgressView().controlSize(.mini) }
-            if case .applying = step { ProgressView().controlSize(.mini) }
         }
     }
 
@@ -321,6 +336,13 @@ struct HCPProposalFace: View {
             Circle().fill(color).frame(width: 7, height: 7)
             Text(word).font(.system(size: 13)).foregroundStyle(.secondary)
         }
+    }
+
+    /// A `cloud` block needs Terraform 1.1 or later; older workspaces reject it at init.
+    private func terraformVersionHint(log: String) -> String? {
+        guard log.contains("Blocks of type \"cloud\" are not expected") || log.contains("Unsupported block type"),
+              let version = workspace?.terraformVersion else { return nil }
+        return "This workspace runs Terraform \(version). The folder's cloud block needs 1.1 or later; change the workspace's Terraform version in HCP Terraform, or use a remote backend block instead."
     }
 
     private var footnote: some View {

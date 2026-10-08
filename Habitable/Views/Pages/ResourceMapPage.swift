@@ -213,7 +213,7 @@ struct ResourceMapContent: View {
                     HSplitView {
                         canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                         if selectedTile != nil || !sideFaces.isEmpty {
-                            sidePane.frame(minWidth: 280, idealWidth: 330, maxWidth: 390, maxHeight: .infinity)
+                            sidePane.frame(minWidth: 320, idealWidth: 360, maxWidth: 440, maxHeight: .infinity)
                         }
                     }
                 }
