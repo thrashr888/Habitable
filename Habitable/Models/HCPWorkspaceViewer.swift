@@ -812,6 +812,16 @@ struct HCPAPIClient: Sendable {
               labels.allSatisfy({ !$0.isEmpty && $0.first != "-" && $0.last != "-" && $0.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" } }) else { return nil }
         return value
     }
+    /// The last meaningful lines of a log, for an error summary.
+    static func logTail(_ log: String?, lines: Int = 30) -> String? {
+        guard let log else { return nil }
+        let kept = log.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !kept.isEmpty else { return nil }
+        return kept.suffix(lines).joined(separator: "\n")
+    }
+
     static func redactLogs(_ raw: String?) -> String? {
         guard let raw else { return nil }
         var output = raw.split(separator: "\n", omittingEmptySubsequences: false).map { line in
@@ -1065,6 +1075,8 @@ final class HCPWorkspaceViewerModel: ObservableObject {
 
     @Published private(set) var proposal: HCPProposal?
     @Published private(set) var proposalError: String?
+    /// The tail of the failed run's plan log, redacted, so the reason is readable here.
+    @Published private(set) var proposalLog: String?
     @Published private(set) var proposalPreview: MapChangePreview?
     @Published private(set) var isProposing = false
     @Published private(set) var previewedRunID: String?
@@ -1073,6 +1085,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     private var proposalPlanAttempted = false
 
     private func invalidateProposal() {
+        proposalLog = nil
         proposalOperation = UUID()
         proposalTask?.cancel()
         proposalTask = nil
@@ -1234,7 +1247,14 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             case .applied:
                 await finishProposalRefresh(operation: operation)
                 return true
-            case .needsConfirmation, .errored, .discarded, .uploading:
+            case .errored:
+                // Bring the log here; the failure's cause is usually in its last lines.
+                if let details = try? await client.runDetails(hostname: host, organization: organization, run: run, token: token),
+                   proposalOperation == operation {
+                    proposalLog = HCPAPIClient.logTail(details.planLogs ?? details.applyLogs)
+                }
+                return true
+            case .needsConfirmation, .discarded, .uploading:
                 return true
             }
         } catch {
