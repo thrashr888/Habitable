@@ -146,6 +146,8 @@ struct ResourceTableView: View {
             .width(min: 180, ideal: 320)
             TableColumn("Module", value: \.module) { row in Text(row.module).lineLimit(1) }
                 .width(min: 70, ideal: 110)
+            TableColumn("Kind", value: \.kind) { row in Text(row.kind).lineLimit(1).foregroundStyle(row.kind.isEmpty ? .secondary : .primary) }
+                .width(min: 90, ideal: 130)
             TableColumn("Type", value: \.type) { row in Text(row.type).font(.system(size: 12, design: .monospaced)).lineLimit(1).help(row.type) }
                 .width(min: 120, ideal: 200)
             TableColumn("Status", value: \.status) { row in statusLabel(row.status) }

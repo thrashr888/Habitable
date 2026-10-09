@@ -216,9 +216,9 @@ struct ContentView: View {
                         .help(workspace.autoApply
                               ? "Preview changes, then apply them automatically when the preview succeeds"
                               : "Preview what Terraform would change. Nothing changes until you apply.")
-                    Button { navigationSelection.wrappedValue = .variables } label: { Label("Inputs", systemImage: "slider.horizontal.3") }
+                    Button { navigationSelection.wrappedValue = .variables } label: { Label("Inputs", systemImage: "slider.horizontal.3").labelStyle(.titleAndIcon) }
                         .help("Terraform input variables for this folder")
-                    Button { navigationSelection.wrappedValue = .runs } label: { Label("Changes", systemImage: "clock.arrow.circlepath") }
+                    Button { navigationSelection.wrappedValue = .runs } label: { Label("Changes", systemImage: "clock.arrow.circlepath").labelStyle(.titleAndIcon) }
                         .help("Previewed and applied changes")
                     Menu {
                         Button("Overview") { navigationSelection.wrappedValue = .workspace }
@@ -480,12 +480,6 @@ struct ContentView: View {
     @ViewBuilder private var collection: some View {
         switch selection {
         case .runs: RunListPage(selection: $selectedRun)
-        case .resources:
-            ResourceListPage(selection: $selectedResource, preview: mapPreview,
-                             onShowOnMap: { address in
-                                 mapSelectionRequest = MapSelectionRequest(address: address)
-                                 navigationSelection.wrappedValue = .map
-                             })
         case .outputs: OutputsListPage(selection: $selectedOutput)
         default: EmptyView()
         }
@@ -521,7 +515,7 @@ struct ContentView: View {
 
     @ViewBuilder private var page: some View {
         switch selection {
-        case .map:
+        case .map, .resources:
             // A folder whose state lives in HCP Terraform keeps the Map window shape:
             // the canvas explains and links to the remote workspace, while Inputs and
             // Changes stay on the right.
@@ -555,7 +549,12 @@ struct ContentView: View {
                                 onReviewPreview: {
                                     if let run = previewRun { selectedRun = run.id; navigationSelection.wrappedValue = .runs }
                                 },
-                                selectionRequest: mapSelectionRequest)
+                                selectionRequest: mapSelectionRequest,
+                                listMode: selection == .resources,
+                                onShowOnMap: { address in
+                                    mapSelectionRequest = MapSelectionRequest(address: address)
+                                    navigationSelection.wrappedValue = .map
+                                })
                 Divider()
                 MapTimelineStrip(clips: localChangeClips, selectedID: selectedRun?.uuidString,
                                  hint: "Select a change to review its run",

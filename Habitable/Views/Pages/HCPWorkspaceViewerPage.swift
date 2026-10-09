@@ -20,7 +20,6 @@ struct HCPWorkspaceViewer: View {
     @State private var workspaceSearch = ""
     @State private var faceRequest: MapSideFaceRequest?
     @State private var mapSelectionRequest: MapSelectionRequest?
-    @State private var listSelection: Set<String> = []
     @State private var chosenFolder: URL?
     // Remembered per window so Variables, Runs and Map come back the way they were left.
     @SceneStorage("hcp.section") private var sectionStorage = HCPWorkspaceSection.map.rawValue
@@ -56,10 +55,8 @@ struct HCPWorkspaceViewer: View {
             if connectionOnly {
                 ConnectionsPane(model: model, onOpenWorkspaces: onOpenWorkspaces)
             } else if model.isConnected {
-                if section == .map {
+                if section == .map || section == .list {
                     cloudMap.frame(minWidth: 550, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                } else if section == .list {
-                    cloudList.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if section == .variables {
                     HCPMapVariablesPanel(model: model).id(model.mapRequestKey)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -117,7 +114,7 @@ struct HCPWorkspaceViewer: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Toggle(isOn: Binding(get: { section == .variables }, set: { section = $0 ? .variables : .map })) {
-                        Label("Variables", systemImage: "slider.horizontal.3")
+                        Label("Variables", systemImage: "slider.horizontal.3").labelStyle(.titleAndIcon)
                     }
                     .toggleStyle(.button)
                     .help("Show or hide workspace variables")
@@ -327,7 +324,9 @@ struct HCPWorkspaceViewer: View {
             previewReviewTitle: "Confirm Apply",
             previewCaption: previewCaption,
             faceRequest: faceRequest,
-            selectionRequest: mapSelectionRequest)
+            selectionRequest: mapSelectionRequest,
+            listMode: section == .list,
+            onShowOnMap: { address in mapSelectionRequest = MapSelectionRequest(address: address); section = .map })
         .task(id: model.mapRequestKey) { await model.refreshMap() }
         .onChange(of: model.requestedFace) { face in
             guard let face else { return }
@@ -357,30 +356,6 @@ struct HCPWorkspaceViewer: View {
     }
 
     /// Runs and Variables ride the cloud Map's inspector as faces (DESIGN.md §2).
-    /// The List for a cloud workspace: state resources, the Map's tiles for names,
-    /// and the previewed run's actions when one is on the Map.
-    @ViewBuilder private var cloudList: some View {
-        let shown = model.viewingStateVersion != nil ? model.historicalSnapshot : model.mapSnapshot
-        var actions: [String: String] = [:]
-        let _ = (model.proposalPreview?.resourceActions ?? [:]).forEach { address, action in if action != .none { actions[address] = "\(action)" } }
-        let rows = ResourceListBuilder.rows(resources: shown?.resources ?? [], tiles: model.proposalPreview?.map.tiles ?? shown?.map.tiles ?? [],
-                                            actions: actions, drifted: [])
-        ResourceTableView(rows: rows, selection: $listSelection,
-                          isLoading: model.isLoadingMap && shown == nil,
-                          emptyTitle: shown?.hasStateVersion == false ? "No state recorded yet" : "No resources",
-                          emptyDetail: shown?.hasStateVersion == false ? "No run has applied in this workspace, so there is no state to list."
-                              : "This workspace has no managed resources in its current state.",
-                          onShowOnMap: { address in
-                              mapSelectionRequest = MapSelectionRequest(address: address)
-                              section = .map
-                          },
-                          onOpenReference: { row in
-                              if let url = TerraformRegistryDocsModel.documentationURL(type: row.type, providerName: row.provider, mode: row.isDataSource ? "data" : "managed") {
-                                  NSWorkspace.shared.open(url)
-                              }
-                          })
-    }
-
     private var remoteSideFaces: [MapSideFace] {
         [
             // Runs live in the Changes strip; a second list in the inspector was duplicative.

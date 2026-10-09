@@ -64,7 +64,6 @@
 		8A926B7F2653742000FDBA5C /* VariablesModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A926B7E2653742000FDBA5C /* VariablesModels.swift */; };
 		8AA12B0C26425FB00048A4A9 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0B26425FB00048A4A9 /* WorkspaceModel.swift */; };
 		8AA12B0E264260570048A4A9 /* RunListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0D264260570048A4A9 /* RunListPage.swift */; };
-		8AA12B10264260820048A4A9 /* ResourceListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B0F264260820048A4A9 /* ResourceListPage.swift */; };
 		8AA12B12264260A90048A4A9 /* VariablesListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B11264260A90048A4A9 /* VariablesListPage.swift */; };
 		8AA12B14264260CB0048A4A9 /* SettingsListPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B13264260CB0048A4A9 /* SettingsListPage.swift */; };
 		8AA12B162642614F0048A4A9 /* WorkspacePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B152642614F0048A4A9 /* WorkspacePage.swift */; };
@@ -160,7 +159,6 @@
 		8A926B7E2653742000FDBA5C /* VariablesModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariablesModels.swift; sourceTree = "<group>"; };
 		8AA12B0B26425FB00048A4A9 /* WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModel.swift; sourceTree = "<group>"; };
 		8AA12B0D264260570048A4A9 /* RunListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunListPage.swift; sourceTree = "<group>"; };
-		8AA12B0F264260820048A4A9 /* ResourceListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceListPage.swift; sourceTree = "<group>"; };
 		8AA12B11264260A90048A4A9 /* VariablesListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VariablesListPage.swift; sourceTree = "<group>"; };
 		8AA12B13264260CB0048A4A9 /* SettingsListPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsListPage.swift; sourceTree = "<group>"; };
 		8AA12B152642614F0048A4A9 /* WorkspacePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePage.swift; sourceTree = "<group>"; };
@@ -313,7 +311,6 @@
 				AA60400000000000000000BB /* SettingsWindow.swift */,
 				AA60400000000000000000B5 /* HCPVariablesPanel.swift */,
 				AA60400000000000000000B1 /* MapTimelineStrip.swift */,
-				8AA12B0F264260820048A4A9 /* ResourceListPage.swift */,
 				8A926B74264FA12400FDBA5C /* ResourcePage.swift */,
 				8A926B76264FA29C00FDBA5C /* OutputsListPage.swift */,
 				8A926B78264FA36900FDBA5C /* OutputPage.swift */,
@@ -511,7 +508,6 @@
 				AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */,
 				AA60400000000000000000BA /* SettingsWindow.swift in Sources */,
 				AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */,
-				8AA12B10264260820048A4A9 /* ResourceListPage.swift in Sources */,
 				8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */,
 				8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */,
 				8A926B7B2650682600FDBA5C /* Search.swift in Sources */,
