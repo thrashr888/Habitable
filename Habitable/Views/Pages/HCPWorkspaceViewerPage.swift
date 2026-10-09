@@ -570,7 +570,8 @@ struct HCPWorkspaceViewer: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let vcs = workspace.vcs, let identifier = vcs.identifier {
                     fact("Repository") {
-                        if let url = vcs.repositoryHTTPURL {
+                        // Only a web URL becomes a link; anything else is shown as text.
+                        if let url = vcs.repositoryHTTPURL, url.scheme?.lowercased() == "https" {
                             Link(identifier + (vcs.branch.map { " · \($0)" } ?? ""), destination: url).lineLimit(1)
                         } else {
                             Text(identifier)
