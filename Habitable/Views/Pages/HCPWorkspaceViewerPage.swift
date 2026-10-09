@@ -41,7 +41,11 @@ struct HCPWorkspaceViewer: View {
         let source = model.linkedWorkspaceCandidates ?? model.workspaces
         let query = workspaceSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return source }
-        return source.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        return source.filter { workspace in
+            workspace.name.localizedCaseInsensitiveContains(query)
+                || workspace.tagNames.contains { $0.localizedCaseInsensitiveContains(query) }
+                || (workspace.projectName?.localizedCaseInsensitiveContains(query) ?? false)
+        }
     }
 
     var body: some View {
@@ -465,7 +469,12 @@ struct HCPWorkspaceViewer: View {
                         Button { workspaceSelection.wrappedValue = workspace.id } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(workspace.name).lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        Text(workspace.name).lineLimit(1)
+                                        if let project = workspace.projectName {
+                                            Text(project).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                    }
                                     workspaceStatusLine(workspace)
                                 }
                                 Spacer(minLength: 4)
@@ -523,6 +532,9 @@ struct HCPWorkspaceViewer: View {
                             }
                         }
                         .font(.system(size: 12))
+                        if let provenance = runProvenance(run) {
+                            Text(provenance).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
                     }
                     .padding(.vertical, 3)
                     .tag(Optional(run.id))
@@ -536,6 +548,8 @@ struct HCPWorkspaceViewer: View {
         }
         .padding(.horizontal, 8)
     }
+
+    private func runProvenance(_ run: HCPRun) -> String? { hcpRunProvenance(run) }
 
     /// The workspace's latest run as HCP recorded it: dot, word, when. Locked when it is.
     @ViewBuilder private func workspaceStatusLine(_ workspace: HCPWorkspace) -> some View {
@@ -606,7 +620,7 @@ struct HCPWorkspaceViewer: View {
 
     @ViewBuilder private var runDetail: some View {
         if let details = model.selectedRunDetails {
-            HCPRunDetailView(details: details)
+            HCPRunDetailView(details: details, listedRun: model.runs.first { $0.id == details.run.id })
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "list.bullet.rectangle").font(.system(size: 30)).foregroundStyle(.secondary)
@@ -649,6 +663,17 @@ private func hcpActionStyle(_ action: ChangeActions) -> (word: String, color: Co
     }
 }
 
+/// "VCS · master · 6b85f52 · thrashr888" or "API · pthrasher": how a run came to be.
+private func hcpRunProvenance(_ run: HCPRun) -> String? {
+    var parts: [String] = []
+    if let word = run.sourceWord { parts.append(word) }
+    if let number = run.pullRequestNumber { parts.append("PR #\(number)") }
+    if let branch = run.branch { parts.append(branch) }
+    if let sha = run.shortSHA { parts.append(sha) }
+    if let who = run.sender ?? run.createdBy { parts.append(who) }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+}
+
 private struct HCPRunStatusLabel: View {
     let status: String
     var body: some View {
@@ -668,6 +693,8 @@ private func hcpCopy(_ text: String) {
 
 private struct HCPRunDetailView: View {
     let details: HCPRunDetails
+    /// The same run as the list holds it, with provenance from the page's includes.
+    var listedRun: HCPRun? = nil
     @State private var plan: HCPRunLogPresentation?
     @State private var apply: HCPRunLogPresentation?
 
@@ -719,7 +746,19 @@ private struct HCPRunDetailView: View {
                 }
             }
             .accessibilityElement(children: .contain)
-            Text(details.run.id).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(details.run.id).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                MapCopyButton(value: details.run.id, label: "run ID")
+            }
+            // The run the detail shows may predate the provenance fields; the list's copy has them.
+            if let run = listedRun, let provenance = hcpRunProvenance(run) {
+                HStack(spacing: 6) {
+                    Text(provenance).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    if let url = run.commitURL {
+                        Link("Commit", destination: url).font(.system(size: 12))
+                    }
+                }
+            }
         }
     }
 

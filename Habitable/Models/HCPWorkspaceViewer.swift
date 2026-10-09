@@ -124,6 +124,31 @@ struct HCPRun: Identifiable, Equatable, Sendable {
     let planID: String?
     let applyID: String?
     let htmlURL: URL?
+    /// Provenance, when HCP recorded it: how the run was started, who started
+    /// it, and for repository-backed runs the branch, commit and sender.
+    var source: String? = nil
+    var createdBy: String? = nil
+    var branch: String? = nil
+    var commitSHA: String? = nil
+    var commitURL: URL? = nil
+    var sender: String? = nil
+    var pullRequestNumber: Int? = nil
+
+    /// "VCS", "API", "UI", "CLI", "Lifecycle", "Run trigger" from HCP's source string.
+    var sourceWord: String? {
+        switch source {
+        case "tfe-configuration-version", "tfe-vcs": return "VCS"
+        case "tfe-api": return "API"
+        case "tfe-ui": return "UI"
+        case "terraform+cloud", "terraform", "tfe-cli": return "CLI"
+        case "tfe-infrastructure-lifecycle": return "Lifecycle"
+        case "tfe-run-trigger": return "Run trigger"
+        case "tfe-module-deploy": return "No-code module"
+        case let other?: return other.replacingOccurrences(of: "tfe-", with: "").replacingOccurrences(of: "-", with: " ").capitalized
+        case nil: return nil
+        }
+    }
+    var shortSHA: String? { commitSHA.map { String($0.prefix(7)) } }
     var isActive: Bool {
         !["applied", "discarded", "errored", "canceled", "force_canceled", "planned_and_finished", "planned_and_saved"].contains(status)
     }
@@ -309,10 +334,13 @@ struct HCPAPIClient: Sendable {
     func runs(hostname: String, organization: String, workspace: HCPWorkspace, token: String, page: Int) async throws -> HCPPage<HCPRun> {
         let path = "/api/v2/workspaces/\(pathComponent(workspace.id))/runs"
         // The API omits plan_only runs unless an operation filter is supplied.
-        let query = pagination(page) + [URLQueryItem(name: "filter[operation]", value: "plan_only,plan_and_apply,save_plan,refresh_only,destroy,empty_apply,action_only")]
+        let query = pagination(page) + [URLQueryItem(name: "filter[operation]", value: "plan_only,plan_and_apply,save_plan,refresh_only,destroy,empty_apply,action_only"),
+                                        URLQueryItem(name: "include", value: "created_by,configuration_version.ingress_attributes")]
         let object = try await get(path: path, hostname: hostname, token: token, query: query)
-        let items = array(object["data"]).compactMap {
-            decodeRun($0, hostname: hostname, organization: organization, workspaceID: workspace.id, workspaceName: workspace.name)
+        let provenance = RunProvenanceIndex(included: array(object["included"]))
+        let items = array(object["data"]).compactMap { row in
+            decodeRun(row, hostname: hostname, organization: organization, workspaceID: workspace.id, workspaceName: workspace.name)
+                .map { provenance.apply(to: $0, row: row) }
         }
         return HCPPage(items: items, page: page, hasNextPage: nextPage(object) != nil, totalCount: paginationCount(object))
     }
@@ -824,11 +852,57 @@ struct HCPAPIClient: Sendable {
         let applyID = relationshipID(relationships["apply"])
         let date = (attributes["created-at"] as? String).flatMap(isoDate)
         let url = URL(string: "https://\(hostname)/app/\(pathComponent(organization))/workspaces/\(pathComponent(workspaceName))/runs/\(pathComponent(id))")
-        return HCPRun(id: id, workspaceID: workspaceID, workspaceName: workspaceName, status: status,
-                      message: attributes["message"] as? String, operation: attributes["operation"] as? String,
-                      createdAt: date, hasChanges: attributes["has-changes"] as? Bool,
-                      isDestroy: attributes["is-destroy"] as? Bool ?? false,
-                      planID: planID, applyID: applyID, htmlURL: url)
+        var run = HCPRun(id: id, workspaceID: workspaceID, workspaceName: workspaceName, status: status,
+                         message: attributes["message"] as? String, operation: attributes["operation"] as? String,
+                         createdAt: date, hasChanges: attributes["has-changes"] as? Bool,
+                         isDestroy: attributes["is-destroy"] as? Bool ?? false,
+                         planID: planID, applyID: applyID, htmlURL: url)
+        run.source = attributes["source"] as? String
+        return run
+    }
+
+    /// The `included` rows of a runs page: users, configuration versions and their
+    /// ingress attributes, joined back onto each run.
+    struct RunProvenanceIndex {
+        private var users: [String: String] = [:]
+        private var ingressByConfiguration: [String: String] = [:]
+        private var ingress: [String: [String: Any]] = [:]
+
+        init(included: [[String: Any]]) {
+            for row in included {
+                guard let id = row["id"] as? String else { continue }
+                let attributes = row["attributes"] as? [String: Any] ?? [:]
+                let relationships = row["relationships"] as? [String: Any] ?? [:]
+                switch row["type"] as? String {
+                case "users": if let name = attributes["username"] as? String { users[id] = name }
+                case "configuration-versions":
+                    if let data = relationships["ingress-attributes"] as? [String: Any],
+                       let ref = data["data"] as? [String: Any], let ingressID = ref["id"] as? String {
+                        ingressByConfiguration[id] = ingressID
+                    }
+                case "ingress-attributes": ingress[id] = attributes
+                default: break
+                }
+            }
+        }
+
+        func apply(to run: HCPRun, row: [String: Any]) -> HCPRun {
+            var run = run
+            let relationships = row["relationships"] as? [String: Any] ?? [:]
+            func relationshipID(_ value: Any?) -> String? {
+                ((value as? [String: Any])?["data"] as? [String: Any])?["id"] as? String
+            }
+            if let userID = relationshipID(relationships["created-by"]) { run.createdBy = users[userID] }
+            if let configurationID = relationshipID(relationships["configuration-version"]),
+               let ingressID = ingressByConfiguration[configurationID], let attributes = ingress[ingressID] {
+                run.branch = (attributes["branch"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                run.commitSHA = (attributes["commit-sha"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                run.sender = (attributes["sender-username"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                run.pullRequestNumber = (attributes["pull-request-number"] as? NSNumber)?.intValue
+                if let text = attributes["commit-url"] as? String, let url = URL(string: text), url.scheme == "https" { run.commitURL = url }
+            }
+            return run
+        }
     }
 
     private func responseError(_ data: Data, status: Int) -> HCPViewerError {
