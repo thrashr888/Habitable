@@ -873,7 +873,7 @@ struct ResourceMapContent: View {
                 Divider()
             }
             if sideFaceID == "inspector" || sideFaces.first(where: { $0.id == sideFaceID }) == nil {
-                inspector
+                if listMode, selectedTile != nil, let address = selectedMember { listInspector(address) } else { inspector }
             } else if let face = sideFaces.first(where: { $0.id == sideFaceID }) {
                 face.content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -1162,6 +1162,68 @@ struct ResourceMapContent: View {
                 }
             }
         }
+    }
+
+    /// The List's inspector is about one resource: its name and type, address,
+    /// status, what the plan changes, where it is defined, its reference, its
+    /// attributes, and history. The tile it belongs to is one fact among others.
+    private func listInspector(_ address: String) -> some View {
+        let row = listRows.first { $0.address == address }
+        let tile = selectedTile
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Text("Inspector").font(.system(size: 13)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button { listSelection = []; selectedTileID = nil; selectedMember = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).accessibilityLabel("Deselect resource").help("Deselect")
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    if let tile {
+                        Image(systemName: symbol(for: tile)).font(.title2).foregroundStyle(.white)
+                            .frame(width: 44, height: 44).background(tile.kind.color, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(row?.name ?? address).font(.title3.weight(.semibold))
+                        Text(row?.type ?? "").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    Text(address).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MapCopyButton(value: address, label: "resource address")
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    if let row {
+                        listFact("Status", row.status == "unchanged" ? "In state" : row.status.capitalized)
+                        listFact("Module", row.module)
+                        if !row.kind.isEmpty { listFact("Kind", row.kind) }
+                        if let tile, tile.resources.count > 1 { listFact("Tile", "\(tile.title) · \(tile.resources.count) resources") }
+                        listFact("Provider", row.provider)
+                    }
+                }
+                if let change = preview?.change(for: address) { whatChanges(change) }
+                Divider()
+                sourceSection
+                Divider()
+                referenceSection.id(selectedMember)
+                Divider()
+                Text("Attributes").font(.headline)
+                memberDetails(address)
+                Divider()
+                historySection(forResource: true)
+            }
+            .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func listFact(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label).foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
+            Text(value).textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 13))
     }
 
     /// Exploration C's "What changes": each attribute the plan changes, before → after,
