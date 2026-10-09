@@ -230,8 +230,14 @@ struct HCPProposalFace: View {
             if case .errored(let detail) = proposal.step {
                 Text(detail).font(.system(size: 13)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                 if let log = model.proposalLog {
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Run log").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                            Spacer()
+                            MapCopyButton(value: log, label: "run log")
+                        }
                         Text(log).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(8)

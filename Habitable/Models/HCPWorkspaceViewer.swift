@@ -815,11 +815,23 @@ struct HCPAPIClient: Sendable {
     /// The last meaningful lines of a log, for an error summary.
     static func logTail(_ log: String?, lines: Int = 30) -> String? {
         guard let log else { return nil }
-        let kept = log.split(separator: "\n", omittingEmptySubsequences: true)
+        let kept = stripANSI(log).split(separator: "\n", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         guard !kept.isEmpty else { return nil }
         return kept.suffix(lines).joined(separator: "\n")
+    }
+
+    /// Removes terminal color and style sequences, including ones whose escape
+    /// byte was already lost in transit (`[31m` on its own).
+    static func stripANSI(_ text: String) -> String {
+        let patterns = [#"\u{1B}\[[0-9;?]*[A-Za-z]"#, #"(?<![\w\]])\[[0-9;]*m"#]
+        var result = text
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
+        }
+        return result
     }
 
     static func redactLogs(_ raw: String?) -> String? {
