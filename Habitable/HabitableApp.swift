@@ -48,6 +48,7 @@ struct HabitableApp: App {
     @StateObject private var cloud = HCPWorkspaceViewerModel()
     @StateObject private var agentAccess = HabitableAgentAccess()
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
+    @StateObject private var quickHelp = QuickHelpModel()
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer", for: URL.self) { $directory in
             ContentView(initialDirectory: directory, cloud: cloud, agentAccess: agentAccess, onOpenRemoteWorkspace: { link in
@@ -58,12 +59,16 @@ struct HabitableApp: App {
                 .id(directory)
                 .frame(minWidth: 900, minHeight: 560)
                 .background(FolderOpenHandler())
+                .environment(\.quickHelpModel, quickHelp)
+                .overlay(alignment: .bottomTrailing) { if quickHelp.isEnabled { QuickHelpPanel(model: quickHelp).padding(16) } }
         }
         .windowToolbarStyle(.unifiedCompact)
         .commands { WorkspaceCommands(recentWorkspaces: recentWorkspaces) }
 
         Window("HCP Terraform", id: "HCP.browser") {
             CloudWorkspaceWindow(model: cloud)
+                .environment(\.quickHelpModel, quickHelp)
+                .overlay(alignment: .bottomTrailing) { if quickHelp.isEnabled { QuickHelpPanel(model: quickHelp).padding(16) } }
                 .frame(minWidth: 900, minHeight: 560)
                 .background(WindowMenuMembership())
         }.windowToolbarStyle(.unifiedCompact).defaultSize(width: 1400, height: 880)
@@ -176,6 +181,8 @@ private struct WorkspaceCommands: Commands {
 
 private struct CloudWorkspaceWindow: View {
     @ObservedObject var model: HCPWorkspaceViewerModel
+    @Environment(\.quickHelpModel) private var quickHelpEnvironment
+    private var quickHelp: QuickHelpModel { quickHelpEnvironment ?? QuickHelpModel() }
     @Environment(\.openWindow) private var openWindow
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
     @StateObject private var localLinks = LocalWorkspaceLinkIndex()
@@ -247,6 +254,7 @@ private struct CloudWorkspaceWindow: View {
                     }
                     Button { openWindow(id: "App.settings") } label: { Label("Connections", systemImage: "network").labelStyle(.titleAndIcon) }
                         .buttonStyle(.borderless)
+                    QuickHelpToggle(model: quickHelp)
                 }
     }
 }

@@ -55,7 +55,7 @@ struct MapTimelineStrip: View {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
                         .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                    Text("Changes").font(.headline)
+                    Text("Changes").font(.headline).quickHelp(glossary: "run")
                 }
             }
             .buttonStyle(.plain)

@@ -59,6 +59,9 @@ struct ResourceMapPage: View {
     var onOpenSource: ((String) -> Void)? = nil
     var onShowPlanOutput: (() -> Void)? = nil
     var autoApplyBadge: String? = nil
+    var welcome: MapWelcome? = nil
+    var onPreviewChanges: (() -> Void)? = nil
+    var onReadReadme: (() -> Void)? = nil
 
     var body: some View {
         ResourceMapContent(
@@ -86,6 +89,7 @@ struct ResourceMapPage: View {
             onShowPlanOutput: onShowPlanOutput, autoApplyBadge: autoApplyBadge,
             selectionRequest: selectionRequest,
             listMode: listMode, onShowOnMap: onShowOnMap, onOpenSource: onOpenSource,
+            welcome: welcome, onPreviewChanges: onPreviewChanges, onReadReadme: onReadReadme,
             terraformExecutableURL: workspace.runner.executableURL,
             workspaceInitialized: workspace.isInitialized)
     }
@@ -110,6 +114,19 @@ struct MapSideFace: Identifiable {
 struct MapSideFaceRequest: Equatable {
     let id = UUID()
     let faceID: String
+}
+
+/// Exploration D's empty-map welcome: a folder that describes things which do
+/// not exist yet. Says what is true in a sentence, then the one next action.
+struct MapWelcome: Equatable {
+    struct Declared: Equatable, Identifiable {
+        let address: String
+        let type: String
+        var id: String { address }
+    }
+    let declared: [Declared]
+    let hasReadme: Bool
+    let previewTitle: String
 }
 
 /// Asks the Map to select a resource (from the List or a palette); a new `id` repeats it.
@@ -185,6 +202,10 @@ struct ResourceMapContent: View {
     var listMode = false
     var onShowOnMap: ((String) -> Void)? = nil
     var onOpenSource: ((String) -> Void)? = nil
+    /// Shown instead of the empty state when the folder declares resources but none exist yet.
+    var welcome: MapWelcome? = nil
+    var onPreviewChanges: (() -> Void)? = nil
+    var onReadReadme: (() -> Void)? = nil
     @State private var listSelection: Set<String> = []
 
     private var listRows: [ResourceListRow] {
@@ -483,6 +504,8 @@ struct ResourceMapContent: View {
                     } else if isLoading && map == nil {
                         LoadingIndicator(size: 24, label: "Reading your infrastructure…")
                             .frame(width: viewport.size.width, height: 180)
+                    } else if tiles.isEmpty, let welcome, emptyTitle == nil {
+                        welcomeView(welcome).frame(width: viewport.size.width, alignment: .leading)
                     } else if tiles.isEmpty {
                         VStack(spacing: 14) {
                             empty(emptyTitle ?? "No managed resources yet", detail: emptyDetail, symbol: emptySymbol)
@@ -709,6 +732,11 @@ struct ResourceMapContent: View {
 
     private func tileButton(_ tile: MapTile) -> some View {
         let copies = stackCount(for: tile)
+        return tileButtonBody(tile, copies: copies)
+            .quickHelp(tile.title, "A tile is one thing on the Map: \(tile.resources.count == 1 ? "one resource" : "\(tile.resources.count) resources that belong together"), placed in the \(tile.kind.title) row because of what its resources do. Click it to inspect facts, connections and where it is defined.")
+    }
+
+    private func tileButtonBody(_ tile: MapTile, copies: Int) -> some View {
         return Button { select(tile) } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: symbol(for: tile)).font(.system(size: 18, weight: .medium))
@@ -844,6 +872,7 @@ struct ResourceMapContent: View {
             Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
+        .quickHelp(glossary: label == "to replace" ? "replace" : (label == "to remove" ? "remove" : (label == "to add" ? "plan" : "apply")))
     }
 
     /// The first replacement or removal, named by its tile: the thing to read before applying.
@@ -1040,6 +1069,7 @@ struct ResourceMapContent: View {
     private var sourceSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Defined in").font(.headline)
+                .quickHelp("Defined in", "The file and line in this folder's configuration that declares the resource. Edit it there; Habitable never becomes an editor.")
             if let resource = selectedResource {
                 HStack(alignment: .top) {
                     Text(resource.address).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
@@ -1090,7 +1120,7 @@ struct ResourceMapContent: View {
 
     private func historySection(forResource: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("History").font(.headline)
+            Text("History").font(.headline).quickHelp(glossary: "state")
             if let stateCreatedAt {
                 Text("State recorded \(stateCreatedAt.formatted(date: .abbreviated, time: .shortened))").font(.system(size: 13))
             }
@@ -1162,6 +1192,65 @@ struct ResourceMapContent: View {
                 }
             }
         }
+    }
+
+    /// "This folder describes 2 things. None of them exist yet." Then the action,
+    /// the three steps, and the declared resources as cards that will be created.
+    private func welcomeView(_ welcome: MapWelcome) -> some View {
+        let count = welcome.declared.count
+        return VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Welcome").font(.system(size: 13)).foregroundStyle(.secondary)
+                Text("This folder describes \(count) \(count == 1 ? "thing" : "things"). \(count == 1 ? "It doesn't" : "None of them") exist yet.")
+                    .font(.system(size: 20, weight: .semibold))
+                Text("Terraform reads the files in this folder and makes the real world match them. Press \(welcome.previewTitle) to see what it would create. Nothing happens until you apply.")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 560, alignment: .leading)
+            }
+            HStack(spacing: 10) {
+                if let onPreviewChanges {
+                    Button(welcome.previewTitle, action: onPreviewChanges).buttonStyle(.borderedProminent)
+                }
+                if welcome.hasReadme, let onReadReadme {
+                    Button("Read the README", action: onReadReadme)
+                }
+            }
+            HStack(spacing: 8) {
+                Text("Steps").font(.system(size: 12)).foregroundStyle(.secondary)
+                ForEach(Array(["Preview", "Review", "Apply"].enumerated()), id: \.offset) { index, step in
+                    HStack(spacing: 6) {
+                        Text("\(index + 1)").font(.system(size: 12, weight: .semibold)).foregroundStyle(index == 0 ? Color.white : Color.secondary)
+                            .frame(width: 18, height: 18)
+                            .background(index == 0 ? Color.accentColor : Color.secondary.opacity(0.18), in: Circle())
+                        Text(step).font(.system(size: 13, weight: index == 0 ? .medium : .regular))
+                    }
+                    if index < 2 { Text("→").foregroundStyle(.tertiary) }
+                }
+            }
+            if !welcome.declared.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("What it describes").font(.headline)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), alignment: .leading)], alignment: .leading, spacing: 10) {
+                        ForEach(welcome.declared.prefix(12)) { declared in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(declared.address.split(separator: ".").last.map(String.init) ?? declared.address)
+                                    .font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                Text(declared.type).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                                Text("Will be created").font(.system(size: 12)).foregroundStyle(.green)
+                            }
+                            .quickHelp("Declared, not created", "This resource is described in the folder's files. It does not exist anywhere yet; Preview Changes shows what creating it would do.")
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])).foregroundStyle(Color.green.opacity(0.6)))
+                        }
+                    }
+                    if welcome.declared.count > 12 {
+                        Text("and \(welcome.declared.count - 12) more").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(24)
     }
 
     /// The List's inspector is about one resource: its name and type, address,
@@ -1400,7 +1489,7 @@ private struct MapResourceReference: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Reference").font(.headline)
+            Text("Reference").font(.headline).quickHelp(glossary: "provider")
             HStack(spacing: 6) {
                 Text(resource.type).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
                 if let parts {

@@ -98,6 +98,9 @@ struct ContentView: View {
     @State private var previewRunID: UUID?
     @State private var previewTick = 0
     @State private var mapSelectionRequest: MapSelectionRequest?
+    @Environment(\.quickHelpModel) private var quickHelpEnvironment
+    /// Resources the folder declares, read from configuration for the welcome.
+    @State private var declaredResources: [MapWelcome.Declared] = []
     @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
     @State private var selectedOutput: String?
@@ -129,6 +132,7 @@ struct ContentView: View {
                 isOpenErrorPresented = true
             }
         }
+        .task(id: workspace.workingDirectory) { await loadDeclaredResources(workspace.workingDirectory) }
         .onChange(of: workspace.workingDirectory) { directory in
             offerToAgents()
             if let directory, isAvailableDirectory(directory) {
@@ -215,13 +219,17 @@ struct ContentView: View {
                     Button(windowActions.planTitle) { windowActions.plan() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!windowActions.canPlan)
+                        .quickHelp(glossary: "plan")
                         .help(workspace.autoApply
                               ? "Preview changes, then apply them automatically when the preview succeeds"
                               : "Preview what Terraform would change. Nothing changes until you apply.")
                     Button { navigationSelection.wrappedValue = .variables } label: { Label("Inputs", systemImage: "slider.horizontal.3").labelStyle(.titleAndIcon) }
+                        .quickHelp(glossary: "variable")
                         .help("Terraform input variables for this folder")
                     Button { navigationSelection.wrappedValue = .runs } label: { Label("Changes", systemImage: "clock.arrow.circlepath").labelStyle(.titleAndIcon) }
+                        .quickHelp(glossary: "run")
                         .help("Previewed and applied changes")
+                    if let quickHelp = quickHelpEnvironment { QuickHelpToggle(model: quickHelp) }
                     Menu {
                         Button("Overview") { navigationSelection.wrappedValue = .workspace }
                         Button("About (README)") { navigationSelection.wrappedValue = .readme }
@@ -286,6 +294,32 @@ struct ContentView: View {
         onOpenRemoteWorkspace(link)
         cloud.requestedFace = "proposal"
         openWindow(id: "HCP.browser")
+    }
+
+    /// The welcome applies to a local folder with configuration and no recorded
+    /// state: not initialized-with-consent-pending, not remote, not errored.
+    private var mapWelcome: MapWelcome? {
+        guard workspace.workingDirectory != nil, !workspace.hasState, workspace.resourceMap == nil,
+              workspace.errorMessage == nil, !workspace.awaitingInitializationConsent,
+              remoteWorkspaceLink == nil, !declaredResources.isEmpty else { return nil }
+        let hasReadme = workspace.workingDirectory.map { directory in
+            ["README.md", "readme.md", "README"].contains { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
+        } ?? false
+        return MapWelcome(declared: declaredResources, hasReadme: hasReadme, previewTitle: windowActions.planTitle)
+    }
+
+    private func loadDeclaredResources(_ directory: URL?) async {
+        declaredResources = []
+        guard let directory else { return }
+        let declared = await Task.detached(priority: .utility) { () -> [MapWelcome.Declared] in
+            TerraformConfigurationInspector.inspectMetadata(directory: directory).resources.map { declaration in
+                let parts = declaration.address.split(separator: ".").map(String.init)
+                let type = parts.count >= 2 ? parts[parts.count - 2] : declaration.address
+                return MapWelcome.Declared(address: declaration.address, type: type)
+            }
+        }.value
+        guard directory == workspace.workingDirectory else { return }
+        declaredResources = declared
     }
 
     private var newRunTitle: String {
@@ -561,7 +595,10 @@ struct ContentView: View {
                                 onShowPlanOutput: {
                                     if let run = previewRun { selectedRun = run.id; navigationSelection.wrappedValue = .runs }
                                 },
-                                autoApplyBadge: workspace.autoApply ? "Applies automatically" : nil)
+                                autoApplyBadge: workspace.autoApply ? "Applies automatically" : nil,
+                                welcome: mapWelcome,
+                                onPreviewChanges: previewChanges,
+                                onReadReadme: { navigationSelection.wrappedValue = .readme })
                 Divider()
                 MapTimelineStrip(clips: localChangeClips, selectedID: selectedRun?.uuidString,
                                  hint: "Select a change to review its run",
