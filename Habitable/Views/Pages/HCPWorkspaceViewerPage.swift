@@ -708,12 +708,15 @@ private struct HCPRunDetailView: View {
                     consequences(summary, replaces: plan?.replaceCount ?? apply?.replaceCount ?? 0)
                 }
                 phases
+                checksStrip
                 if let plan, !plan.plannedChanges.isEmpty { plannedChanges(plan.plannedChanges) }
                 if let apply, !apply.applyEvents.isEmpty { applyActivity(apply.applyEvents) }
+                if !details.outputs.isEmpty { outputsSection }
+                if !details.policyChecks.isEmpty { policySection }
+                if let estimate = details.costEstimate { costSection(estimate) }
+                if !details.taskStages.isEmpty { taskSection }
                 diagnosticsSection
                 otherOutput
-                if let logs = details.planLogs { rawSection("Raw plan output", text: logs) }
-                if let logs = details.applyLogs { rawSection("Raw apply output", text: logs) }
                 if details.planLogs == nil && details.applyLogs == nil {
                     Text("Run output is unavailable for this account or run phase. Open the run in HCP Terraform for the full event timeline.")
                         .font(.system(size: 13)).foregroundStyle(.secondary)
@@ -887,8 +890,9 @@ private struct HCPRunDetailView: View {
     @ViewBuilder private var diagnosticsSection: some View {
         let all = (plan?.diagnostics ?? []).map { ("plan", $0) } + (apply?.diagnostics ?? []).map { ("apply", $0) }
         if !all.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                sectionTitle("Diagnostics")
+            let errors = all.filter { $0.1.severity.lowercased() == "error" }.count
+            DisclosureGroup(isExpanded: $showDiagnostics) {
+              VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(all.enumerated()), id: \.offset) { _, entry in
                     let (phaseName, diagnostic) = entry
                     let isError = diagnostic.severity.lowercased() == "error"
@@ -913,6 +917,133 @@ private struct HCPRunDetailView: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("\(diagnostic.severity) in \(phaseName): \(diagnostic.summary)")
                 }
+              }
+              .padding(.top, 6)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: errors > 0 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(errors > 0 ? Color.red : Color.orange)
+                    Text("Diagnostics · \(all.count)").font(.system(size: 13, weight: .semibold))
+                }
+            }
+        }
+    }
+
+    @State private var showDiagnostics = false
+
+    /// HCP's run page strip: policy checks, cost, run tasks, outputs, in one glance.
+    @ViewBuilder private var checksStrip: some View {
+        let hasAny = !details.policyChecks.isEmpty || details.costEstimate != nil || !details.taskStages.isEmpty || !details.outputs.isEmpty
+        if hasAny {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
+                phase("Policy checks", policySummary)
+                phase("Cost estimate", costSummary)
+                phase("Run tasks", taskSummary)
+                phase("Outputs", details.outputs.isEmpty ? "None" : "\(details.outputs.count)")
+            }
+        }
+    }
+
+    private var policySummary: String {
+        guard !details.policyChecks.isEmpty else { return "None" }
+        let passed = details.policyChecks.reduce(0) { $0 + $1.passed }
+        let total = details.policyChecks.reduce(0) { $0 + $1.passed + $1.totalFailed }
+        return total == 0 ? details.policyChecks.first!.status.replacingOccurrences(of: "_", with: " ").capitalized : "\(passed) of \(total) passed"
+    }
+
+    private var costSummary: String {
+        guard let estimate = details.costEstimate else { return "None" }
+        if let delta = estimate.deltaMonthlyCost, let value = Double(delta) {
+            if value == 0 { return "No change" }
+            return (value > 0 ? "+" : "−") + "$" + String(format: "%.2f", abs(value)) + "/mo"
+        }
+        return estimate.status.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private var taskSummary: String {
+        let results = details.taskStages.flatMap(\.results)
+        guard !results.isEmpty else { return "None" }
+        let passed = results.filter { $0.status == "passed" }.count
+        return "\(passed) of \(results.count) passed"
+    }
+
+    private var policySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Policy checks")
+            ForEach(details.policyChecks) { check in
+                HStack(spacing: 8) {
+                    Circle().fill(check.hardFailed > 0 ? Color.red : (check.softFailed > 0 || check.advisoryFailed > 0 ? .orange : .green)).frame(width: 8, height: 8)
+                    Text((check.kind ?? check.scope ?? "Policy").capitalized).font(.system(size: 13, weight: .medium))
+                    Text("\(check.passed) passed" + (check.totalFailed > 0 ? " · \(check.totalFailed) failed" : ""))
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                    if check.hardFailed > 0 { Text("· \(check.hardFailed) hard").font(.system(size: 13)).foregroundStyle(.red) }
+                    if check.softFailed > 0 { Text("· \(check.softFailed) soft").font(.system(size: 13)).foregroundStyle(.orange) }
+                    if check.advisoryFailed > 0 { Text("· \(check.advisoryFailed) advisory").font(.system(size: 13)).foregroundStyle(.secondary) }
+                    Spacer()
+                    Text(check.status.replacingOccurrences(of: "_", with: " ").capitalized).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func costSection(_ estimate: HCPCostEstimate) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Cost estimate")
+            if let error = estimate.errorMessage {
+                Text(error).font(.system(size: 13)).foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
+                    phase("Before", estimate.priorMonthlyCost.map { "$\($0)/mo" } ?? "—")
+                    phase("After", estimate.proposedMonthlyCost.map { "$\($0)/mo" } ?? "—")
+                    phase("Change", costSummary)
+                    if let matched = estimate.matchedResourcesCount, let count = estimate.resourcesCount {
+                        phase("Priced", "\(matched) of \(count) resources")
+                    }
+                }
+            }
+        }
+    }
+
+    private var taskSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Run tasks")
+            ForEach(details.taskStages) { stage in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(stage.stage.replacingOccurrences(of: "_", with: "-").capitalized)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    ForEach(stage.results) { result in
+                        HStack(spacing: 8) {
+                            Circle().fill(result.status == "passed" ? Color.green : (result.status == "failed" ? .red : .orange)).frame(width: 8, height: 8)
+                            Text(result.taskName).font(.system(size: 13, weight: .medium))
+                            if let message = result.message, !message.isEmpty {
+                                Text(message).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            if let level = result.enforcementLevel { Text(level.capitalized).font(.system(size: 12)).foregroundStyle(.secondary) }
+                            if let url = result.url { Link("Details", destination: url).font(.system(size: 12)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Terraform outputs from the state this run produced; sensitive values stay hidden.
+    private var outputsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Outputs")
+            ForEach(details.outputs) { output in
+                HStack(alignment: .top, spacing: 10) {
+                    Text(output.name).font(.system(size: 13, weight: .medium)).frame(width: 160, alignment: .leading).lineLimit(1)
+                    if let value = output.value {
+                        Text(value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).lineLimit(6)
+                        MapCopyButton(value: value, label: "output \(output.name)")
+                    } else {
+                        Text("Sensitive value hidden").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                }
             }
         }
     }
@@ -930,18 +1061,6 @@ private struct HCPRunDetailView: View {
         }
     }
 
-    private func rawSection(_ title: String, text: String) -> some View {
-        DisclosureGroup(title) {
-            ScrollView {
-                Text(text).font(.system(size: 12, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-            }
-            .frame(maxHeight: 320)
-            .background(Color(nsColor: .textBackgroundColor))
-        }
-        .font(.system(size: 13, weight: .semibold))
-    }
 }
 
 private struct HCPMapInspectorRequest: Identifiable {
