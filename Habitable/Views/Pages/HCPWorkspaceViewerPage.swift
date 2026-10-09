@@ -57,9 +57,10 @@ struct HCPWorkspaceViewer: View {
                 } else {
                     GeometryReader { geometry in
                         if geometry.size.width >= 960 {
+                            // The toolbar's Workspaces chooser is the workspace list; the Runs
+                            // section is the workspace's runs beside the chosen run.
                             HSplitView {
-                                workspaceColumn.frame(minWidth: 210, idealWidth: 250, maxWidth: 330)
-                                runColumn.frame(minWidth: 260, idealWidth: 320, maxWidth: 390)
+                                runColumn.frame(minWidth: 300, idealWidth: 380, maxWidth: 460)
                                 runDetail.frame(minWidth: 360, maxWidth: .infinity)
                             }
                         } else {
@@ -200,10 +201,7 @@ struct HCPWorkspaceViewer: View {
                 .lineLimit(1).truncationMode(.middle)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 if let workspace = model.selectedWorkspace {
-                    if let version = workspace.terraformVersion {
-                        Text("Terraform \(version)").font(.system(size: 12)).foregroundStyle(.secondary)
-                    }
-                    if workspace.locked { Image(systemName: "lock").help("Workspace locked").accessibilityLabel("Workspace locked") }
+                    workspaceStatusLine(workspace)
                     if let url = workspace.htmlURL {
                         Link(destination: url) { Image(systemName: "arrow.up.right.square") }
                             .help("Open workspace in HCP Terraform")
@@ -468,10 +466,7 @@ struct HCPWorkspaceViewer: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(workspace.name).lineLimit(1)
-                                    HStack(spacing: 5) {
-                                        if let version = workspace.terraformVersion { Text("Terraform \(version)") }
-                                        if workspace.locked { Text("Locked") }
-                                    }.font(.system(size: 12)).foregroundStyle(.secondary)
+                                    workspaceStatusLine(workspace)
                                 }
                                 Spacer(minLength: 4)
                                 if model.selectedWorkspaceID == workspace.id {
@@ -500,16 +495,17 @@ struct HCPWorkspaceViewer: View {
 
     private var runColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let workspace = model.selectedWorkspace {
+                workspaceHeader(workspace)
+                Divider().padding(.vertical, 4)
+            }
             HStack {
-                Text("Remote runs").font(.headline)
+                Text("Runs").font(.headline)
                 Spacer()
                 Button { Task { await model.refreshRuns(force: false) } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).help("Refresh run history")
                     .accessibilityLabel("Refresh run history")
                     .disabled(model.isLoading || model.selectedWorkspaceID == nil)
-            }
-            if let workspace = model.selectedWorkspace {
-                Text(workspace.name).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
             }
             List(selection: runSelection) {
                 ForEach(model.runs) { run in
@@ -539,6 +535,72 @@ struct HCPWorkspaceViewer: View {
             }
         }
         .padding(.horizontal, 8)
+    }
+
+    /// The workspace's latest run as HCP recorded it: dot, word, when. Locked when it is.
+    @ViewBuilder private func workspaceStatusLine(_ workspace: HCPWorkspace) -> some View {
+        HStack(spacing: 6) {
+            if let status = workspace.currentRunStatus {
+                HCPRunStatusLabel(status: status)
+                if let date = workspace.currentRunCreatedAt { Text("· \(hcpRelativeDate(date))").foregroundStyle(.secondary) }
+            } else {
+                Text("No runs yet").foregroundStyle(.secondary)
+            }
+            if workspace.locked { Image(systemName: "lock").foregroundStyle(.secondary).help("Workspace locked") }
+        }
+        .font(.system(size: 12))
+    }
+
+    /// What HCP Terraform's workspace page says at the top, in one card: status,
+    /// repository, resources, project, Terraform, execution mode, auto-apply, links.
+    private func workspaceHeader(_ workspace: HCPWorkspace) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(workspace.name).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+                Spacer()
+                if let url = workspace.htmlURL {
+                    Link(destination: url) { Image(systemName: "arrow.up.right.square") }
+                        .help("Open workspace in HCP Terraform").accessibilityLabel("Open workspace in HCP Terraform")
+                }
+            }
+            workspaceStatusLine(workspace).font(.system(size: 13))
+            if let description = workspace.description {
+                Text(description).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if let vcs = workspace.vcs, let identifier = vcs.identifier {
+                    fact("Repository") {
+                        if let url = vcs.repositoryHTTPURL {
+                            Link(identifier + (vcs.branch.map { " · \($0)" } ?? ""), destination: url).lineLimit(1)
+                        } else {
+                            Text(identifier)
+                        }
+                    }
+                } else {
+                    fact("Repository") { Text("None · API and CLI runs") }
+                }
+                if let count = workspace.resourceCount { fact("Resources") { Text("\(count)") } }
+                if let project = workspace.projectName { fact("Project") { Text(project) } }
+                fact("Terraform") { Text(workspace.terraformVersion ?? "latest") }
+                fact("Runs") { Text((workspace.executionMode ?? "remote").capitalized + (workspace.autoApply ? " · applies without confirmation" : " · apply waits for confirmation")) }
+                if !workspace.tagNames.isEmpty { fact("Tags") { Text(workspace.tagNames.joined(separator: ", ")).lineLimit(1) } }
+            }
+            HStack(spacing: 14) {
+                Button("Map") { section = .map }.buttonStyle(.link)
+                Button("Variables") { section = .variables }.buttonStyle(.link)
+                Button("Settings") { section = .map; faceRequest = MapSideFaceRequest(faceID: "settings") }.buttonStyle(.link)
+                Button("Make a change") { section = .map; faceRequest = MapSideFaceRequest(faceID: "proposal") }.buttonStyle(.link)
+            }
+            .font(.system(size: 13))
+        }
+    }
+
+    private func fact<Content: View>(_ label: String, @ViewBuilder value: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 78, alignment: .leading)
+            value().font(.system(size: 13))
+            Spacer(minLength: 0)
+        }
     }
 
     @ViewBuilder private var runDetail: some View {
