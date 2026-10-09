@@ -265,6 +265,18 @@ enum GitProposal {
         try checkGH(run(gh, ["pr", "merge", String(number), "--squash", "--delete-branch"], in: folder))
     }
 
+    /// After a merge, the checkout goes back to the base branch at its new tip
+    /// and the merged `habitable/` branch is dropped locally.
+    static func returnToBase(in folder: URL, base: String) throws {
+        let git = try requireGit()
+        let current = try run(git, ["symbolic-ref", "--short", "-q", "HEAD"], in: folder).stdout.trimmed
+        try check(run(git, ["checkout", base], in: folder))
+        try check(run(git, ["pull", "--ff-only"], in: folder))
+        if current.hasPrefix(branchPrefix), current != base {
+            _ = try? run(git, ["branch", "-D", current], in: folder)
+        }
+    }
+
     static func closePullRequest(_ number: Int, in folder: URL) throws {
         let gh = try requireGH()
         try checkGH(run(gh, ["pr", "close", String(number), "--delete-branch"], in: folder))

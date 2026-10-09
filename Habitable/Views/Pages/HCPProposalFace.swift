@@ -36,6 +36,8 @@ struct HCPProposalFace: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let proposal = model.proposal {
                     proposalCard(proposal)
+                } else if let merge = model.recentMerge {
+                    mergeCard(merge)
                 } else if folder == nil {
                     noFolder
                 } else if isRepositoryBacked {
@@ -55,6 +57,16 @@ struct HCPProposalFace: View {
         }
         .task(id: folder?.path) { await refreshGit() }
         .onChange(of: model.runs.count) { _ in Task { await refreshGit() } }
+        // After a merge, follow the run HCP starts until it settles.
+        .task(id: model.recentMerge?.number) {
+            guard model.recentMerge != nil else { return }
+            for _ in 0..<30 {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard !Task.isCancelled, let merge = model.recentMerge else { return }
+                if let run = model.run(for: merge), !run.isActive { return }
+                await model.refreshRuns(force: true)
+            }
+        }
         // While a pull request is open, its checks and review state change on GitHub's side.
         .task(id: pullRequest?.number) {
             guard pullRequest != nil else { return }
@@ -221,6 +233,52 @@ struct HCPProposalFace: View {
     }
 
     @State private var showChecks = false
+
+    /// Exploration G, after Merge: the run on the base branch, and its apply.
+    private func mergeCard(_ merge: HCPMergedPullRequest) -> some View {
+        let run = model.run(for: merge)
+        let status = run?.status ?? ""
+        let waiting = ["planned", "cost_estimated", "policy_checked"].contains(status)
+        let applied = status == "applied"
+        let failed = ["errored", "canceled", "force_canceled", "discarded"].contains(status)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("#\(merge.number)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                Text(merge.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                timelineRow(done: true, color: .green, title: "Merged",
+                            detail: "Into \(merge.baseBranch) · " + merge.mergedAt.formatted(.relative(presentation: .named)), trailing: nil)
+                timelineRow(done: run != nil && (applied || waiting || status == "confirmed" || status == "applying" || status == "apply_queued"),
+                            color: run == nil ? .orange : (failed ? .red : (applied || waiting ? .green : .orange)),
+                            title: "Run on \(merge.baseBranch)",
+                            detail: run.map { statusWord($0.status) + ($0.createdAt.map { " · " + $0.formatted(.relative(presentation: .named)) } ?? "") }
+                                ?? "Waiting for HCP Terraform to start it",
+                            trailing: run.map { run in
+                                AnyView(Button(model.previewedRunID == run.id ? "On the Map" : "Show on Map") { onShowRun(run) }
+                                    .buttonStyle(.link).font(.system(size: 13)).disabled(model.previewedRunID == run.id || run.planID == nil && run.status == "pending"))
+                            })
+                timelineRow(done: applied, color: applied ? .green : (waiting ? .accentColor : (failed ? .red : .secondary)),
+                            title: applied ? "Applied" : "Confirm apply",
+                            detail: applied ? "The workspace's state now includes this change."
+                                : (waiting ? "The plan is ready. Confirm here to apply it in HCP Terraform."
+                                   : (failed ? "The run did not apply. Open it in HCP Terraform for the log." : "After the plan finishes")),
+                            trailing: nil, last: true)
+            }
+            HStack {
+                if let url = run?.htmlURL { Button("Open in HCP Terraform") { NSWorkspace.shared.open(url) } }
+                Spacer()
+                if waiting, let run {
+                    Button("Discard") { Task { await model.discard(run: run) } }
+                    Button("Confirm Apply") { Task { await model.confirmApply(run: run) } }.buttonStyle(.borderedProminent)
+                } else if applied || failed || run == nil {
+                    Button("Done") { model.clearMerge() }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    }
 
     /// One step: a dot on a rail, a title, a quiet detail line, an optional action.
     private func timelineRow(done: Bool, color: Color, title: String, detail: String, trailing: AnyView?, last: Bool = false) -> some View {
@@ -518,7 +576,16 @@ struct HCPProposalFace: View {
             do { try GitProposal.merge(pullRequest: pr.number, in: folder); return nil } catch { return error }
         }.value
         isWorking = false
-        if let result { gitError = result.localizedDescription } else { pullRequest = nil; await model.refreshRuns(force: true); await refreshGit() }
+        if let result { gitError = result.localizedDescription; return }
+        pullRequest = nil
+        model.noteMerge(HCPMergedPullRequest(number: pr.number, title: pr.title, baseBranch: pr.baseBranch, mergedAt: Date()))
+        // Back to the base branch at its new tip, so the next change starts from main.
+        let returned = await Task.detached(priority: .userInitiated) { () -> Error? in
+            do { try GitProposal.returnToBase(in: folder, base: pr.baseBranch); return nil } catch { return error }
+        }.value
+        if let returned { gitError = returned.localizedDescription }
+        await model.refreshRuns(force: true)
+        await refreshGit()
     }
 
     private func closePullRequest(_ pr: GitProposal.PullRequest, in folder: URL) async {
