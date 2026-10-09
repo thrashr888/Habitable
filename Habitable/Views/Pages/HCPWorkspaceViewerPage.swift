@@ -687,7 +687,10 @@ private struct HCPRunDetailView: View {
     private var phases: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
             phase("Plan", details.planStatus ?? (details.run.planID == nil ? "Not available" : "Available"))
-            phase("Apply", details.applyStatus ?? (details.run.applyID == nil ? "Not part of this run" : "Available"))
+            // A plan-only run has no apply stage; HCP reports it as "unreachable".
+            if details.applyStatus?.lowercased() != "unreachable", details.applyStatus != nil || details.run.applyID != nil {
+                phase("Apply", details.applyStatus ?? "Available")
+            }
             changeStateLabel
             if let review = details.planReviewURL {
                 Link("Review plan in HCP Terraform", destination: review).font(.system(size: 13))

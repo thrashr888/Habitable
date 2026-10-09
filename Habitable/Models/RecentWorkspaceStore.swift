@@ -59,6 +59,13 @@ final class RecentWorkspaceStore: ObservableObject {
         defaults.set(paths, forKey: Self.defaultsKey)
     }
 
+    /// Forgets one folder. The folder itself is untouched.
+    func forget(_ url: URL) {
+        let path = Self.canonicalPath(url)
+        paths.removeAll { Self.canonicalPath(URL(fileURLWithPath: $0, isDirectory: true)) == path }
+        defaults.set(paths, forKey: Self.defaultsKey)
+    }
+
     func clear() {
         paths = []
         defaults.removeObject(forKey: Self.defaultsKey)

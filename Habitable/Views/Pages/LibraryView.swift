@@ -8,6 +8,8 @@ struct LibraryView: View {
     @ObservedObject var cloud: HCPWorkspaceViewerModel
     let recentFolders: [URL]
     let onOpenFolder: (URL) -> Void
+    /// Removes a folder from the Library; the folder on disk is untouched.
+    var onForgetFolder: ((URL) -> Void)? = nil
     let onChooseFolder: () -> Void
     let onOpenCloud: (HCPWorkspace, String, String) -> Void
     let onOpenConnections: () -> Void
@@ -468,6 +470,11 @@ struct LibraryView: View {
         case .localFolder(let url, _):
             Button("Open") { onOpenFolder(url) }
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            if let onForgetFolder {
+                Divider()
+                Button("Remove from Library") { onForgetFolder(url) }
+                    .help("Removes the folder from this list. Nothing on disk changes.")
+            }
         case .cloud(let workspace, let organization, let hostname):
             Button("Open in HCP Terraform Window") { onOpenCloud(workspace, organization, hostname) }
             let folders = checkout.store.records(hostname: hostname, organization: organization, workspaceID: workspace.id)

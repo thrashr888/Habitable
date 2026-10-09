@@ -33,7 +33,7 @@ struct ConnectionsPane: View {
                     .disabled(localConnections.isRefreshing || localConnections.connectingID != nil)
             }) {
                 ForEach(localConnections.connections) { connection in
-                    LocalCloudConnectionRow(connection: connection, isRefreshing: localConnections.isRefreshing,
+                    LocalCloudConnectionRow(connection: connection, isRefreshing: localConnections.refreshing.contains(connection.id),
                                             isConnecting: localConnections.connectingID == connection.id,
                                             canConnect: localConnections.canConnect(connection.id),
                                             loginMessage: localConnections.loginMessages[connection.id]) {
