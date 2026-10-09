@@ -868,7 +868,8 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         try installMapResponses()
         let model = HCPWorkspaceViewerModel(tokenStore: HCPMemoryTokenStore(), selectionStore: HCPMemorySelectionStore(), client: makeClient())
         await model.connect()
-        for status in [403, 404, 500] {
+        // Access failures are errors, never an empty Map.
+        for status in [403, 500] {
             HCPURLProtocolStub.statusCode = status
             await model.refreshMap()
             XCTAssertNil(model.mapSnapshot)
@@ -876,6 +877,13 @@ final class HCPWorkspaceViewerTests: XCTestCase {
             XCTAssertFalse(model.isLoadingMap)
             XCTAssertFalse(model.mapError?.contains("signature") == true)
         }
+        // No current state version (404) is a workspace that has never applied: an
+        // empty Map with a truthful notice, not a read error.
+        HCPURLProtocolStub.statusCode = 404
+        await model.refreshMap()
+        XCTAssertNil(model.mapError)
+        XCTAssertEqual(model.mapSnapshot, HCPMapSnapshot.noStateRecorded)
+        XCTAssertFalse(model.mapSnapshot?.hasStateVersion ?? true)
     }
 
     func testWorkspaceListIncludesProjectAndCurrentRun() async throws {
@@ -893,6 +901,57 @@ final class HCPWorkspaceViewerTests: XCTestCase {
         XCTAssertNil(bare.projectName); XCTAssertNil(bare.currentRunStatus); XCTAssertNil(bare.updatedAt); XCTAssertNil(bare.resourceCount)
         let query = URLComponents(url: try XCTUnwrap(HCPURLProtocolStub.requests.first?.url), resolvingAgainstBaseURL: false)?.queryItems
         XCTAssertEqual(query?.first(where: { $0.name == "include" })?.value, "project,current_run")
+    }
+
+    func testRunDetailsDecoders() throws {
+        let included: [[String: Any]] = [
+            ["id": "pc-1", "type": "policy-checks", "attributes": ["status": "hard_failed", "scope": "organization",
+                "result": ["passed": 3, "total-failed": 2, "advisory-failed": 0, "soft-failed": 1, "hard-failed": 1, "sentinel": ["x": 1]]]],
+            ["id": "pc-2", "type": "policy-checks", "attributes": ["status": "passed", "kind": "opa", "result": ["passed": 4]]],
+            ["id": "ce-1", "type": "cost-estimates", "attributes": ["status": "finished", "prior-monthly-cost": "10.00",
+                "proposed-monthly-cost": "12.50", "delta-monthly-cost": "2.50", "resources-count": 5, "matched-resources-count": 4]],
+            ["id": "ts-1", "type": "task-stages", "attributes": ["stage": "post_plan", "status": "passed"],
+             "relationships": ["task-results": ["data": [["id": "tr-1", "type": "task-results"], ["id": "tr-2", "type": "task-results"]]]]],
+            ["id": "tr-1", "type": "task-results", "attributes": ["task-name": "scan", "status": "passed", "message": "ok",
+                "url": "https://example.com/r", "workspace-task-enforcement-level": "mandatory"]],
+            ["id": "tr-2", "type": "task-results", "attributes": ["task-name": "insecure", "status": "failed", "url": "http://example.com/r"]],
+        ]
+        let checks = HCPAPIClient.decodePolicyChecks(included)
+        XCTAssertEqual(checks.count, 2)
+        XCTAssertEqual(checks[0].hardFailed, 1); XCTAssertEqual(checks[0].softFailed, 1)
+        XCTAssertEqual(checks[0].totalFailed, 2); XCTAssertEqual(checks[0].passed, 3)
+        XCTAssertEqual(checks[0].kind, "sentinel"); XCTAssertEqual(checks[0].scope, "organization")
+        XCTAssertEqual(checks[1].kind, "opa"); XCTAssertEqual(checks[1].hardFailed, 0)
+
+        let cost = try XCTUnwrap(HCPAPIClient.decodeCostEstimate(included))
+        XCTAssertEqual(cost.proposedMonthlyCost, "12.50"); XCTAssertEqual(cost.deltaMonthlyCost, "2.50")
+        XCTAssertEqual(cost.resourcesCount, 5); XCTAssertEqual(cost.matchedResourcesCount, 4); XCTAssertNil(cost.errorMessage)
+        XCTAssertNil(HCPAPIClient.decodeCostEstimate([]))
+
+        let stages = HCPAPIClient.decodeTaskStages(included)
+        XCTAssertEqual(stages.count, 1)
+        XCTAssertEqual(stages[0].stage, "post_plan")
+        XCTAssertEqual(stages[0].results.count, 2)
+        XCTAssertEqual(stages[0].results[0].url?.absoluteString, "https://example.com/r")
+        XCTAssertEqual(stages[0].results[0].enforcementLevel, "mandatory")
+        XCTAssertNil(stages[0].results[1].url)
+    }
+
+    func testStateOutputsDecodeSensitiveAndBoundedValues() {
+        let long = String(repeating: "a", count: 3000)
+        let object: [String: Any] = ["data": [
+            ["id": "wsout-1", "type": "state-version-outputs", "attributes": ["name": "token", "sensitive": true, "type": "string", "value": "hunter2"]],
+            ["id": "wsout-2", "type": "state-version-outputs", "attributes": ["name": "ids", "sensitive": false, "type": ["list", "string"], "value": ["a", "b"]]],
+            ["id": "wsout-3", "type": "state-version-outputs", "attributes": ["name": "big", "sensitive": false, "type": "string", "value": long]],
+            ["id": "wsout-4", "type": "state-version-outputs", "attributes": ["name": "count", "sensitive": false, "type": "number", "value": 3]],
+        ]]
+        let outputs = HCPAPIClient.decodeStateOutputs(object)
+        XCTAssertEqual(outputs.count, 4)
+        XCTAssertTrue(outputs[0].sensitive); XCTAssertNil(outputs[0].value)
+        XCTAssertTrue(outputs[1].value?.contains("\"a\"") == true)
+        XCTAssertEqual(outputs[1].type, "[\"list\",\"string\"]")
+        XCTAssertEqual(outputs[2].value?.count, 2001); XCTAssertTrue(outputs[2].value?.hasSuffix("…") == true)
+        XCTAssertEqual(outputs[3].value, "3")
     }
 
     func testWorkspacePageWithoutIncludedLeavesNewFieldsNil() throws {

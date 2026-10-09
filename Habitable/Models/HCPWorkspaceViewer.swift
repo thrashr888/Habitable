@@ -181,6 +181,62 @@ struct HCPRunDetails: Equatable, Sendable {
     let applyLogs: String?
     let planReviewURL: URL?
     let runURL: URL?
+    var policyChecks: [HCPPolicyCheck] = []
+    var costEstimate: HCPCostEstimate? = nil
+    var taskStages: [HCPTaskStage] = []
+    var outputs: [HCPStateOutput] = []
+    var stateVersionID: String? = nil
+}
+
+struct HCPPolicyCheck: Identifiable, Equatable, Sendable {
+    let id: String
+    let scope: String?
+    let status: String
+    let passed: Int
+    let totalFailed: Int
+    let advisoryFailed: Int
+    let softFailed: Int
+    let hardFailed: Int
+    /// "sentinel" or "opa".
+    let kind: String?
+}
+
+struct HCPCostEstimate: Equatable, Sendable {
+    let id: String
+    let status: String
+    let priorMonthlyCost: String?
+    let proposedMonthlyCost: String?
+    let deltaMonthlyCost: String?
+    let resourcesCount: Int?
+    let matchedResourcesCount: Int?
+    let errorMessage: String?
+}
+
+struct HCPTaskResult: Identifiable, Equatable, Sendable {
+    let id: String
+    let taskName: String
+    let status: String
+    let message: String?
+    /// https only.
+    let url: URL?
+    let enforcementLevel: String?
+}
+
+struct HCPTaskStage: Identifiable, Equatable, Sendable {
+    let id: String
+    /// pre_plan, post_plan, pre_apply or post_apply.
+    let stage: String
+    let status: String
+    let results: [HCPTaskResult]
+}
+
+struct HCPStateOutput: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let sensitive: Bool
+    let type: String?
+    /// nil when sensitive; otherwise a bounded (at most 2000 characters) rendering.
+    let value: String?
 }
 
 /// One recorded state version of a workspace. The run is the one that produced it, when HCP names one.
@@ -523,8 +579,18 @@ struct HCPAPIClient: Sendable {
     }
 
     func runDetails(hostname: String, organization: String, run: HCPRun, token: String) async throws -> HCPRunDetails {
-        let object = try await get(path: "/api/v2/runs/\(pathComponent(run.id))", hostname: hostname, token: token,
-                                  query: [URLQueryItem(name: "include", value: "plan,apply")])
+        let runPath = "/api/v2/runs/\(pathComponent(run.id))"
+        var extendedInclude = true
+        let object: [String: Any]
+        do {
+            object = try await get(path: runPath, hostname: hostname, token: token,
+                                   query: [URLQueryItem(name: "include", value: Self.runDetailsInclude)])
+        } catch {
+            // The richer include may be rejected; retry with plan and apply only, then fall back per section.
+            extendedInclude = false
+            object = try await get(path: runPath, hostname: hostname, token: token,
+                                   query: [URLQueryItem(name: "include", value: "plan,apply")])
+        }
         guard let row = object["data"] as? [String: Any],
               var freshRun = decodeRun(row, hostname: hostname, organization: organization,
                                        workspaceID: run.workspaceID, workspaceName: run.workspaceName) else {
@@ -548,9 +614,154 @@ struct HCPAPIClient: Sendable {
         let planStatus = planAttributes?["status"] as? String
         let applyStatus = applyAttributes?["status"] as? String
         let planReview = freshRun.planID == nil ? nil : freshRun.htmlURL
-        return HCPRunDetails(run: freshRun, planStatus: planStatus, applyStatus: applyStatus,
-                             planLogs: Self.redactLogs(planLogs), applyLogs: Self.redactLogs(applyLogs),
-                             planReviewURL: planReview, runURL: freshRun.htmlURL)
+        var details = HCPRunDetails(run: freshRun, planStatus: planStatus, applyStatus: applyStatus,
+                                    planLogs: Self.redactLogs(planLogs), applyLogs: Self.redactLogs(applyLogs),
+                                    planReviewURL: planReview, runURL: freshRun.htmlURL)
+        details.policyChecks = Self.decodePolicyChecks(included)
+        details.costEstimate = Self.decodeCostEstimate(included)
+        details.taskStages = Self.decodeTaskStages(included)
+        let relationships = row["relationships"] as? [String: Any]
+        if !extendedInclude || details.taskStages.isEmpty {
+            // Only on error or when nesting produced nothing is the second request worth making.
+            if !extendedInclude || (relationships?["task-stages"] as? [String: Any]).map({ !array($0["data"]).isEmpty }) == true {
+                if let stages = try? await get(path: "\(runPath)/task-stages", hostname: hostname, token: token,
+                                               query: [URLQueryItem(name: "include", value: "task_results")]) {
+                    var rows = array(stages["data"])
+                    rows.append(contentsOf: array(stages["included"]))
+                    let decoded = Self.decodeTaskStages(rows)
+                    if !decoded.isEmpty { details.taskStages = decoded }
+                }
+            }
+        }
+        if !extendedInclude {
+            if details.policyChecks.isEmpty,
+               let checks = try? await get(path: "\(runPath)/policy-checks", hostname: hostname, token: token) {
+                details.policyChecks = Self.decodePolicyChecks(array(checks["data"]))
+            }
+            if details.costEstimate == nil, let costID = relationshipID(relationships?["cost-estimate"]),
+               let cost = try? await get(path: "/api/v2/cost-estimates/\(pathComponent(costID))", hostname: hostname, token: token),
+               let costRow = cost["data"] as? [String: Any] {
+                details.costEstimate = Self.decodeCostEstimate([costRow])
+            }
+        }
+        if let stateVersionID = Self.firstStateVersionID(applyRow) {
+            details.stateVersionID = stateVersionID
+            var outputs: [HCPStateOutput] = []
+            for page in 1...2 {
+                guard let result = try? await get(path: "/api/v2/state-versions/\(pathComponent(stateVersionID))/outputs",
+                                                  hostname: hostname, token: token,
+                                                  query: [URLQueryItem(name: "page[number]", value: String(page)),
+                                                          URLQueryItem(name: "page[size]", value: "100")]) else { break }
+                outputs.append(contentsOf: Self.decodeStateOutputs(result))
+                if nextPage(result) == nil { break }
+            }
+            details.outputs = outputs
+        }
+        return details
+    }
+
+    static let runDetailsInclude = "plan,apply,cost_estimate,policy_checks,task_stages.task_results"
+
+    private static func firstStateVersionID(_ applyRow: [String: Any]?) -> String? {
+        let relationship = (applyRow?["relationships"] as? [String: Any])?["state-versions"] as? [String: Any]
+        return ((relationship?["data"] as? [[String: Any]])?.first)?["id"] as? String
+    }
+
+    private static func int(_ value: Any?) -> Int? { (value as? NSNumber).flatMap { CFGetTypeID($0) == CFBooleanGetTypeID() ? nil : $0.intValue } }
+
+    static func decodePolicyChecks(_ included: [[String: Any]]) -> [HCPPolicyCheck] {
+        included.compactMap { row in
+            guard row["type"] as? String == "policy-checks", let id = row["id"] as? String else { return nil }
+            let attributes = row["attributes"] as? [String: Any] ?? [:]
+            let result = attributes["result"] as? [String: Any] ?? [:]
+            var kind = (attributes["kind"] as? String) ?? (result["kind"] as? String)
+            if kind == nil {
+                if attributes["opa"] != nil || result["opa"] != nil { kind = "opa" }
+                else if attributes["sentinel"] != nil || result["sentinel"] != nil { kind = "sentinel" }
+            }
+            if kind == nil, let scope = attributes["scope"] as? String, ["sentinel", "opa"].contains(scope) { kind = scope }
+            return HCPPolicyCheck(id: id, scope: attributes["scope"] as? String,
+                                  status: attributes["status"] as? String ?? "unknown",
+                                  passed: int(result["passed"]) ?? 0, totalFailed: int(result["total-failed"]) ?? 0,
+                                  advisoryFailed: int(result["advisory-failed"]) ?? 0, softFailed: int(result["soft-failed"]) ?? 0,
+                                  hardFailed: int(result["hard-failed"]) ?? 0, kind: kind)
+        }
+    }
+
+    static func decodeCostEstimate(_ included: [[String: Any]]) -> HCPCostEstimate? {
+        for row in included where row["type"] as? String == "cost-estimates" {
+            guard let id = row["id"] as? String else { continue }
+            let a = row["attributes"] as? [String: Any] ?? [:]
+            return HCPCostEstimate(id: id, status: a["status"] as? String ?? "unknown",
+                                   priorMonthlyCost: a["prior-monthly-cost"] as? String,
+                                   proposedMonthlyCost: a["proposed-monthly-cost"] as? String,
+                                   deltaMonthlyCost: a["delta-monthly-cost"] as? String,
+                                   resourcesCount: int(a["resources-count"]),
+                                   matchedResourcesCount: int(a["matched-resources-count"]),
+                                   errorMessage: a["error-message"] as? String)
+        }
+        return nil
+    }
+
+    static func decodeTaskStages(_ included: [[String: Any]]) -> [HCPTaskStage] {
+        var resultRows: [String: [String: Any]] = [:]
+        for row in included where row["type"] as? String == "task-results" {
+            if let id = row["id"] as? String { resultRows[id] = row }
+        }
+        return included.compactMap { row in
+            guard row["type"] as? String == "task-stages", let id = row["id"] as? String else { return nil }
+            let a = row["attributes"] as? [String: Any] ?? [:]
+            let refs = (((row["relationships"] as? [String: Any])?["task-results"] as? [String: Any])?["data"] as? [[String: Any]]) ?? []
+            let results: [HCPTaskResult] = refs.compactMap { ref in
+                guard let rid = ref["id"] as? String, let resultRow = resultRows[rid] else { return nil }
+                let r = resultRow["attributes"] as? [String: Any] ?? [:]
+                var url: URL?
+                if let raw = r["url"] as? String, raw.utf8.count <= 4096, let parsed = URL(string: raw),
+                   parsed.scheme == "https", parsed.host != nil, parsed.user == nil, parsed.password == nil { url = parsed }
+                return HCPTaskResult(id: rid, taskName: r["task-name"] as? String ?? "Task",
+                                     status: r["status"] as? String ?? "unknown", message: r["message"] as? String,
+                                     url: url, enforcementLevel: r["workspace-task-enforcement-level"] as? String)
+            }
+            return HCPTaskStage(id: id, stage: a["stage"] as? String ?? "unknown",
+                                status: a["status"] as? String ?? "unknown", results: results)
+        }
+    }
+
+    static func decodeStateOutputs(_ object: [String: Any]) -> [HCPStateOutput] {
+        (object["data"] as? [[String: Any]] ?? []).compactMap { row in
+            guard row["type"] as? String == "state-version-outputs", let id = row["id"] as? String else { return nil }
+            let a = row["attributes"] as? [String: Any] ?? [:]
+            guard let name = a["name"] as? String else { return nil }
+            let sensitive = (a["sensitive"] as? Bool) ?? false
+            return HCPStateOutput(id: id, name: name, sensitive: sensitive, type: outputTypeDescription(a["type"]),
+                                  value: sensitive ? nil : renderOutputValue(a["value"]))
+        }
+    }
+
+    private static func outputTypeDescription(_ value: Any?) -> String? {
+        if let string = value as? String { return string }
+        guard let value, !(value is NSNull), JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
+        return String(data: data, encoding: .utf8).map { bounded($0, limit: 200) }
+    }
+
+    private static func renderOutputValue(_ value: Any?) -> String? {
+        guard let value, !(value is NSNull) else { return nil }
+        let text: String
+        if value is [String: Any] || value is [Any] {
+            guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
+                  let string = String(data: data, encoding: .utf8) else { return nil }
+            text = string
+        } else if let string = value as? String {
+            text = string
+        } else {
+            text = String(describing: value)
+        }
+        return bounded(text, limit: 2000)
+    }
+
+    private static func bounded(_ text: String, limit: Int) -> String {
+        text.count > limit ? String(text.prefix(limit)) + "…" : text
     }
 
     /// Both artifacts belong to the same immutable state version. Signed storage
