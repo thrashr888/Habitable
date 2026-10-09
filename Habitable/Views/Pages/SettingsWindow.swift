@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 enum SettingsPaneID: String, CaseIterable, Identifiable {
-    case general, connections, agents, terraform
+    case general, connections, agents, terraform, about
     var id: String { rawValue }
 
     var title: String {
@@ -11,6 +11,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         case .connections: "Connections"
         case .agents: "Agents"
         case .terraform: "Terraform"
+        case .about: "About"
         }
     }
     var symbol: String {
@@ -19,6 +20,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         case .connections: "network"
         case .agents: "cpu"
         case .terraform: "shippingbox"
+        case .about: "info.circle"
         }
     }
     var tint: Color {
@@ -27,6 +29,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         case .connections: .blue
         case .agents: .green
         case .terraform: .accentColor
+        case .about: .secondary
         }
     }
     var blurb: String {
@@ -35,6 +38,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         case .connections: "Sign in to HCP Terraform and your clouds."
         case .agents: "Let AI agents read this Mac’s open workspace."
         case .terraform: "Which Terraform runs your local previews."
+        case .about: "Open source, on GitHub."
         }
     }
 }
@@ -151,6 +155,41 @@ struct SettingsWindow: View {
         case .connections: ConnectionsPane(model: model, onOpenWorkspaces: onOpenWorkspaces)
         case .agents: AgentsSettingsPage(access: agentAccess)
         case .terraform: TerraformPane(onOpenLocalWorkspace: onOpenLocalWorkspace)
+        case .about: AboutPane()
+        }
+    }
+}
+
+// MARK: - About
+
+private struct AboutPane: View {
+    static let repository = URL(string: "https://github.com/thrashr888/Habitable")!
+    static let releases = URL(string: "https://github.com/thrashr888/Habitable/releases")!
+    static let issues = URL(string: "https://github.com/thrashr888/Habitable/issues")!
+
+    private var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "\(short) (\(build))"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsGroup("Habitable") {
+                SettingsRow("Version") { Text(version).foregroundStyle(.secondary).textSelection(.enabled) }
+                SettingsRow("Updates") {
+                    Text("Check the Releases page for now; in-app updates come later.").foregroundStyle(.secondary)
+                }
+                SettingsRow("Copyright") { Text("© 2026 Paul Thrasher").foregroundStyle(.secondary) }
+            }
+            SettingsGroup("Source") {
+                SettingsRow("Repository") { Link("github.com/thrashr888/Habitable", destination: Self.repository) }
+                SettingsRow("Releases") { Link("Releases", destination: Self.releases) }
+                SettingsRow("Problems and ideas") { Link("Open an issue", destination: Self.issues) }
+            }
+            Text("Habitable never applies from your Mac. Runs happen in HCP Terraform; you confirm them here.")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
         }
     }
 }

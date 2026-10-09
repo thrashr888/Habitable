@@ -60,7 +60,8 @@ struct HabitableApp: App {
                 .background(FolderOpenHandler())
                 .modifier(QuickHelpWindowModifier())
         }
-        .windowToolbarStyle(.unifiedCompact)
+        // The taller unified style: the title and its "Local state · This Mac" line need the room.
+        .windowToolbarStyle(.unified)
         .commands { WorkspaceCommands(recentWorkspaces: recentWorkspaces) }
 
         Window("HCP Terraform", id: "HCP.browser") {
@@ -68,7 +69,7 @@ struct HabitableApp: App {
                 .modifier(QuickHelpWindowModifier())
                 .frame(minWidth: 900, minHeight: 560)
                 .background(WindowMenuMembership())
-        }.windowToolbarStyle(.unifiedCompact).defaultSize(width: 1400, height: 880)
+        }.windowToolbarStyle(.unified).defaultSize(width: 1400, height: 880)
 
         Window("Settings", id: "App.settings") {
             ConnectionsSettingsWindow(model: cloud, agentAccess: agentAccess)
