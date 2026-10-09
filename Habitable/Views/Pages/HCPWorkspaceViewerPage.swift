@@ -540,13 +540,13 @@ struct HCPWorkspaceViewer: View {
                     .tag(Optional(run.id))
                 }
             }
-            .listStyle(.inset)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             if model.runHasNextPage {
                 Button("Load More Runs") { Task { await model.loadNextRunPage() } }
                     .buttonStyle(.borderless).disabled(model.isLoading)
             }
         }
-        .padding(.horizontal, 8)
     }
 
     private func runProvenance(_ run: HCPRun) -> String? { hcpRunProvenance(run) }
