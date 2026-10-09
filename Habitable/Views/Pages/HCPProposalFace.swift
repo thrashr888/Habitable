@@ -107,7 +107,7 @@ struct HCPProposalFace: View {
         if let folder {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Pull request").font(.headline)
-                folderRow(folder)
+                if pullRequest == nil { folderRow(folder) }
                 if let pullRequest {
                     pullRequestCard(pullRequest, folder: folder)
                 } else if let status = gitStatus {
@@ -163,60 +163,119 @@ struct HCPProposalFace: View {
         }
     }
 
+    /// Exploration G: the pull request as a short timeline, opened → plan → checks
+    /// → review → merge → apply, with the actions at the end.
     private func pullRequestCard(_ pr: GitProposal.PullRequest, folder: URL) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+        let planCheck = pr.checks.first { isThisWorkspace($0) && GitProposal.PullRequest.runID(in: $0) != nil }
+        let planRunID = planCheck.flatMap { GitProposal.PullRequest.runID(in: $0) }
+        let specRun = specultativeRun(for: pr)
+        let passed = pr.checks.filter { $0.state == .success }.count
+        let failed = pr.checks.filter { $0.state == .failure }.count
+        let pending = pr.checks.filter { $0.state == .pending }.count
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("#\(pr.number)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
                 Text(pr.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
             }
-            Text("\(pr.headBranch) → \(pr.baseBranch)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                statusDot(pr.state == "OPEN" ? .green : .secondary, pr.state.capitalized)
-                if let decision = pr.reviewDecision, !decision.isEmpty {
-                    statusDot(decision == "APPROVED" ? .green : .orange, decision.replacingOccurrences(of: "_", with: " ").capitalized)
+            VStack(alignment: .leading, spacing: 0) {
+                timelineRow(done: true, color: .green, title: "Pull request opened",
+                            detail: "\(pr.headBranch) → \(pr.baseBranch)" + ((pr.additions != nil && pr.deletions != nil) ? " · +\(pr.additions!) −\(pr.deletions!)" : ""),
+                            trailing: AnyView(Button("GitHub") { NSWorkspace.shared.open(pr.url) }.buttonStyle(.link).font(.system(size: 13))))
+                // The run HCP actually recorded outranks GitHub's status context for it.
+                timelineRow(done: specRun.map { $0.status == "planned_and_finished" } ?? (planCheck?.state == .success),
+                            color: specRun.map { run in run.status == "errored" ? Color.red : (run.status == "planned_and_finished" ? .green : .orange) }
+                                ?? (planCheck?.state == .failure ? .red : (planCheck?.state == .success ? .green : .orange)),
+                            title: "Plan in HCP Terraform",
+                            detail: specRun.map { run in "\(statusWord(run.status))" + (run.createdAt.map { " · " + $0.formatted(.relative(presentation: .named)) } ?? "") }
+                                ?? (planCheck == nil ? "Waiting for HCP Terraform to pick up the pull request" : "Running"),
+                            trailing: (specRun ?? planRunID.map { id in placeholderRun(id: id, title: pr.title) }).map { run in
+                                AnyView(Button(model.previewedRunID == run.id ? "On the Map" : "Show on Map") { onShowRun(run) }
+                                    .buttonStyle(.link).font(.system(size: 13)).disabled(model.previewedRunID == run.id))
+                            })
+                if !pr.checks.isEmpty {
+                    timelineRow(done: failed == 0 && pending == 0, color: failed > 0 ? .red : (pending > 0 ? .orange : .green),
+                                title: "Checks",
+                                detail: [passed > 0 ? "\(passed) passed" : nil, failed > 0 ? "\(failed) failed" : nil, pending > 0 ? "\(pending) running" : nil]
+                                    .compactMap { $0 }.joined(separator: " · "),
+                                trailing: AnyView(Button(showChecks ? "Hide" : "Details") { withAnimation { showChecks.toggle() } }.buttonStyle(.link).font(.system(size: 13))))
+                    if showChecks { checksList(pr.checks).padding(.leading, 19).padding(.bottom, 8) }
                 }
-                if let add = pr.additions, let del = pr.deletions {
-                    Text("+\(add) −\(del)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
-                }
-            }
-            if !pr.checks.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Checks").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-                    ForEach(pr.checks, id: \.name) { check in
-                        HStack(spacing: 8) {
-                            Circle().fill(checkColor(check.state)).frame(width: 7, height: 7)
-                            Text(check.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            if let runID = GitProposal.PullRequest.runID(in: check), isThisWorkspace(check) {
-                                Button(model.previewedRunID == runID ? "On the Map" : "Show plan on Map") {
-                                    guard let workspace else { return }
-                                    let run = HCPRun(id: runID, workspaceID: workspace.id, workspaceName: workspace.name,
-                                                     status: check.state == .pending ? "planning" : "planned_and_finished",
-                                                     message: pr.title, operation: "plan", createdAt: nil, hasChanges: nil,
-                                                     isDestroy: false, planID: nil, applyID: nil, htmlURL: check.url)
-                                    onShowRun(run)
-                                }
-                                .buttonStyle(.link).font(.system(size: 13))
-                                .disabled(model.previewedRunID == runID || check.state == .pending)
-                            } else if let url = check.url {
-                                Button("Open") { NSWorkspace.shared.open(url) }.buttonStyle(.link).font(.system(size: 13))
-                            }
-                        }
-                    }
-                }
+                timelineRow(done: pr.reviewDecision == "APPROVED",
+                            color: pr.reviewDecision == "APPROVED" ? .green : (pr.reviewDecision == "CHANGES_REQUESTED" ? .red : .secondary),
+                            title: "Review",
+                            detail: pr.reviewDecision.map { $0.replacingOccurrences(of: "_", with: " ").capitalized } ?? "No review yet",
+                            trailing: nil)
+                timelineRow(done: false, color: .secondary, title: "Merge",
+                            detail: "Starts a run on \(pr.baseBranch) in HCP Terraform", trailing: nil)
+                timelineRow(done: false, color: .secondary, title: "Confirm apply",
+                            detail: "Here, once that run's plan matches this preview", trailing: nil, last: true)
             }
             HStack {
-                Button("View on GitHub") { NSWorkspace.shared.open(pr.url) }
-                Spacer()
                 Button("Close Proposal") { Task { await closePullRequest(pr, in: folder) } }.disabled(isWorking)
+                Spacer()
                 Button("Merge…") { Task { await merge(pr, in: folder) } }.buttonStyle(.borderedProminent).disabled(isWorking)
             }
-            Text("Merging starts a run on \(pr.baseBranch) in HCP Terraform; confirm its apply here once its plan matches the preview.")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @State private var showChecks = false
+
+    /// One step: a dot on a rail, a title, a quiet detail line, an optional action.
+    private func timelineRow(done: Bool, color: Color, title: String, detail: String, trailing: AnyView?, last: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(spacing: 0) {
+                Circle().fill(done || color != .secondary ? color : Color.secondary.opacity(0.35)).frame(width: 9, height: 9).padding(.top, 4)
+                if !last { Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1).frame(maxHeight: .infinity) }
+            }
+            .frame(width: 9)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(done || color != .secondary ? .primary : .secondary)
+                    Spacer(minLength: 8)
+                    if let trailing { trailing }
+                }
+                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+            }
+            .padding(.bottom, last ? 0 : 10)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func checksList(_ checks: [GitProposal.Check]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(checks, id: \.name) { check in
+                HStack(spacing: 8) {
+                    Circle().fill(checkColor(check.state)).frame(width: 7, height: 7)
+                    Text(shortCheckName(check.name)).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    if let url = check.url {
+                        Button("Open") { NSWorkspace.shared.open(url) }.buttonStyle(.link).font(.system(size: 12))
+                    }
+                }
+            }
+        }
+    }
+
+    /// "Terraform Cloud/org/ws" reads as "org/ws"; "sentinel/org/ws" keeps its prefix.
+    private func shortCheckName(_ name: String) -> String {
+        name.hasPrefix("Terraform Cloud/") ? String(name.dropFirst("Terraform Cloud/".count)) : name
+    }
+
+    /// HCP's speculative run for the pull request: the newest plan-only run whose
+    /// message is the pull request's title or commit.
+    private func specultativeRun(for pr: GitProposal.PullRequest) -> HCPRun? {
+        model.runs.filter { run in
+            ["planned_and_finished", "planning", "plan_queued", "pending", "errored"].contains(run.status)
+                && (run.message ?? "").localizedCaseInsensitiveContains(pr.title)
+        }
+        .max { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+    }
+
+    private func placeholderRun(id: String, title: String) -> HCPRun {
+        HCPRun(id: id, workspaceID: workspace?.id ?? "", workspaceName: workspace?.name ?? "", status: "planned_and_finished",
+               message: title, operation: "plan", createdAt: nil, hasChanges: nil, isDestroy: false, planID: nil, applyID: nil, htmlURL: nil)
     }
 
     private var otherProposals: some View {
@@ -340,26 +399,27 @@ struct HCPProposalFace: View {
 
     /// The latest remote runs, each with a way to put its plan on the Map; a
     /// planned run waiting for confirmation can be applied or discarded here.
+    /// Runs waiting for a confirmation here. The Changes strip is the full list.
     @ViewBuilder private var recentRuns: some View {
-        let runs = model.runs.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }.prefix(4)
-        if !runs.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Latest runs").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-                ForEach(Array(runs)) { run in
-                    HStack(spacing: 8) {
-                        statusDot(runColor(run.status), statusWord(run.status))
-                        Text(run.message?.isEmpty == false ? run.message! : "Run").font(.system(size: 13)).lineLimit(1)
-                        Spacer()
-                        if run.planID != nil || run.status != "pending" {
+        let waiting = model.runs.filter { ["planned", "cost_estimated", "policy_checked"].contains($0.status) }
+            .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+        if !waiting.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Waiting for confirmation").font(.headline)
+                ForEach(waiting) { run in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(run.message?.isEmpty == false ? run.message! : "Run").font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        HStack(spacing: 8) {
+                            statusDot(.accentColor, statusWord(run.status))
+                            Spacer()
                             Button(model.previewedRunID == run.id ? "On the Map" : "Show on Map") { onShowRun(run) }
-                                .buttonStyle(.link).font(.system(size: 13))
-                                .disabled(model.previewedRunID == run.id)
-                        }
-                        if ["planned", "cost_estimated", "policy_checked"].contains(run.status) {
-                            Button("Discard") { Task { await model.discard(run: run) } }
+                                .buttonStyle(.link).font(.system(size: 13)).disabled(model.previewedRunID == run.id)
+                            Button("Discard") { Task { await model.discard(run: run) } }.controlSize(.small)
                             Button("Confirm Apply") { Task { await model.confirmApply(run: run) } }.buttonStyle(.borderedProminent).controlSize(.small)
                         }
                     }
+                    .padding(10)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
         }

@@ -24,21 +24,28 @@ struct MapTimelineStrip: View {
         // animating separately.
         // The strip takes its content's height, up to a maximum, so there is no
         // empty space below a single row of cards.
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             header
-            if clips.isEmpty && onNewRun == nil {
-                Text("No changes recorded yet. Preview Changes starts the first one.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                strip
+            Group {
+                if clips.isEmpty && onNewRun == nil {
+                    Text("No changes recorded yet. Preview Changes starts the first one.")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    strip
+                }
             }
+            .padding(.top, 8)
+            // Collapsing shrinks the content to nothing; the header stays put and
+            // the whole strip animates as one piece.
+            .frame(maxHeight: expanded ? Self.maxHeight - Self.collapsedHeight : 0, alignment: .top)
+            .clipped()
+            .opacity(expanded ? 1 : 0)
+            .accessibilityHidden(!expanded)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: Self.maxHeight, alignment: .top)
-        .frame(maxHeight: expanded ? Self.maxHeight : Self.collapsedHeight, alignment: .top)
-        .clipped()
+        .frame(maxWidth: .infinity, alignment: .top)
         .animation(.easeInOut(duration: 0.18), value: expanded)
     }
 
