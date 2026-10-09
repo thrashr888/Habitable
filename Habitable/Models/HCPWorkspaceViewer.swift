@@ -76,6 +76,13 @@ struct HCPWorkspaceSettingsChange: Equatable, Sendable {
     }
 }
 
+struct HCPMergedPullRequest: Equatable, Sendable {
+    let number: Int
+    let title: String
+    let baseBranch: String
+    let mergedAt: Date
+}
+
 struct HCPVariableSet: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
@@ -1146,6 +1153,20 @@ final class HCPWorkspaceViewerModel: ObservableObject {
 
     @Published private(set) var proposal: HCPProposal?
     @Published private(set) var proposalError: String?
+    /// A pull request merged from Habitable; the face follows the run it starts.
+    @Published private(set) var recentMerge: HCPMergedPullRequest?
+
+    func noteMerge(_ merge: HCPMergedPullRequest) { recentMerge = merge }
+    func clearMerge() { recentMerge = nil }
+
+    /// The run HCP started for a merge: the newest run since the merge whose
+    /// message names the pull request, or any non-speculative run since then.
+    func run(for merge: HCPMergedPullRequest) -> HCPRun? {
+        let since = merge.mergedAt.addingTimeInterval(-90)
+        let candidates = runs.filter { ($0.createdAt ?? .distantPast) >= since }
+        return candidates.first { ($0.message ?? "").contains("(#\(merge.number))") }
+            ?? candidates.first { ($0.message ?? "").localizedCaseInsensitiveContains(merge.title) && $0.status != "planned_and_finished" }
+    }
     /// The tail of the failed run's plan log, redacted, so the reason is readable here.
     @Published private(set) var proposalLog: String?
     @Published private(set) var proposalPreview: MapChangePreview?
@@ -1156,6 +1177,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     private var proposalPlanAttempted = false
 
     private func invalidateProposal() {
+        recentMerge = nil
         proposalLog = nil
         proposalOperation = UUID()
         proposalTask?.cancel()
