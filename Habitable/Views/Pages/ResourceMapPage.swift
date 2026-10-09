@@ -53,6 +53,7 @@ struct ResourceMapPage: View {
     var preview: MapChangePreview? = nil
     var onDiscardPreview: (() -> Void)? = nil
     var onReviewPreview: (() -> Void)? = nil
+    var selectionRequest: MapSelectionRequest? = nil
 
     var body: some View {
         ResourceMapContent(
@@ -77,6 +78,7 @@ struct ResourceMapPage: View {
             onShowVariables: onShowVariables,
             sideFaces: sideFaces,
             preview: preview, onDiscardPreview: onDiscardPreview, onReviewPreview: onReviewPreview,
+            selectionRequest: selectionRequest,
             terraformExecutableURL: workspace.runner.executableURL,
             workspaceInitialized: workspace.isInitialized)
     }
@@ -101,6 +103,12 @@ struct MapSideFace: Identifiable {
 struct MapSideFaceRequest: Equatable {
     let id = UUID()
     let faceID: String
+}
+
+/// Asks the Map to select a resource (from the List or a palette); a new `id` repeats it.
+struct MapSelectionRequest: Equatable {
+    let id = UUID()
+    let address: String
 }
 
 /// One prominent action offered by the Map's empty state (e.g. opening the
@@ -155,6 +163,8 @@ struct ResourceMapContent: View {
     var previewCaption: String? = nil
     /// Another part of the window asking the right pane to show a face.
     var faceRequest: MapSideFaceRequest? = nil
+    /// Another part of the window asking the Map to select a resource.
+    var selectionRequest: MapSelectionRequest? = nil
     @State private var changesOnly = false
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
@@ -276,6 +286,7 @@ struct ResourceMapContent: View {
         }
         .onChange(of: selectedTileID) { id in if id != nil { sideFaceID = "inspector" } }
         .onChange(of: faceRequest?.id) { _ in if let faceRequest { sideFaceID = faceRequest.faceID } }
+        .onChange(of: selectionRequest?.id) { _ in if let selectionRequest { select(address: selectionRequest.address) } }
         // A request made before this content existed (the window was still connecting).
         .onAppear { if let faceRequest { sideFaceID = faceRequest.faceID } }
         .onChange(of: map) { _ in renderCache.reset() }
@@ -1082,6 +1093,15 @@ struct ResourceMapContent: View {
                 }
             }
         }
+    }
+
+    /// Selects the tile holding an address and opens that resource in the Inspector.
+    private func select(address: String) {
+        guard let tile = tiles.first(where: { $0.resources.contains(address) || $0.anchors.contains(address) || $0.id == address }) else { return }
+        search = ""
+        selectedTileID = tile.id
+        selectedMember = address
+        sideFaceID = "inspector"
     }
 
     private func select(_ tile: MapTile) {

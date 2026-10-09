@@ -146,6 +146,15 @@ final class TerraformRegistryDocsModel: ObservableObject {
     }
 
     /// Resource type with the provider's `name_` prefix removed (`aws_db_instance` -> `db_instance`).
+    /// The Registry page for a resource type, from its provider identity
+    /// ("registry.terraform.io/hashicorp/aws", "hashicorp/aws" or "aws") and mode.
+    static func documentationURL(type: String, providerName: String?, mode: String) -> URL? {
+        let identity = providerName ?? type.split(separator: "_").first.map(String.init) ?? ""
+        let parts = registryParts(identity) ?? registryParts("hashicorp/\(identity)")
+        guard let parts, let slug = slug(resourceType: type, providerName: parts.name) else { return nil }
+        return URL(string: "https://registry.terraform.io/providers/\(parts.namespace)/\(parts.name)/latest/docs/\(mode == "data" ? "data-sources" : "resources")/\(slug)")
+    }
+
     static func slug(resourceType: String, providerName: String) -> String? {
         guard resourceType.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { return nil }
         let prefix = providerName + "_"

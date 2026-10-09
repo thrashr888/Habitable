@@ -219,6 +219,18 @@ Not in this round: policy and cost checks on the Map, approvals and conversation
 
 **Follow-up, October 8:** the first live run on `blank` reached HCP and failed at remote init because the workspace was pinned to Terraform 0.13.1 (no `cloud` block before 1.1). The Proposal card now shows the failed run's log tail (ANSI stripped, wrapped, with Copy) and, for that cause, a hint with **Change Terraform Version…**. A **Settings** face joins the cloud inspector: Terraform version (Latest, the current value, released versions), execution mode, working directory, and "Apply without confirmation"; nothing is sent until Save, HCP's answer replaces the local record, and a link opens the rest in HCP Terraform. Verified built and launched; the save awaits Paul's click.
 
+## List view (Exploration E), October 9, 2026
+
+| Figure | Change | Verified |
+| --- | --- | --- |
+| Dense sortable table | One `ResourceTableView` serves the local window (List segment) and the cloud window (new List segment beside Map and Runs; the Map's List button switches to it instead of opening a sheet). Columns: Name (the tile's title; other members of a tile read "Static Site · acl"), Address, Module, Type, Status (New, Change, Replace, Remove, Read, Drifted, In state, in the Map's change colors). Sortable by any column; multi-select. | Live on cool-website: 12 rows. |
+| Filter tokens, not forms | `type:aws_s3_bucket* module:s3_bucket ssh` parses into chips with × to remove; a Filter menu offers values present for type, module, provider, kind and status plus "Changed only"; the count reads "5 of 12". Globs and `status:changed` are unit-tested (11 tests). | Live. |
+| Select rows, then act | Select All / Deselect All, Copy Addresses (selected, or everything listed), row context menu with Show on Map, Copy Address, Open in Registry, Open Source… (local). Double-click shows the row on the Map, which selects its tile and opens the Inspector on that resource. | Built; Show on Map wired through a selection request to the Map. |
+
+Not in this round from E: targeted Preview Changes for selected rows (needs `-target` plumbing through the local run model), saved filters in the sidebar, and the ⌘K palette.
+
+Checked against the mocks while here: **C (Preview Changes)** has the overlay, review bar, replacement warning and Discard; still missing are the "Changes only / Everything" switch as segments, Show Plan Output on the bar, the Inputs used and Checks side panel, the per-tile "What changes" before→after diff with "Who's affected" and "Exclude from this apply", Hold to Apply for replace/remove, and the auto-apply badge. **G (Changing cloud infrastructure)** has the PR timeline, checks, merge and confirm; still missing are "Files changed" on the open PR card, Open in VS Code / View on GitHub as header buttons, approvals by name and the conversation, and policy/cost inline on the Map.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

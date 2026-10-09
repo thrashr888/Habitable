@@ -25,6 +25,7 @@
 		AA60400000000000000000C4 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000C5 /* LoadingIndicator.swift */; };
 		AA60400000000000000000C0 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000C1 /* LibraryView.swift */; };
 		AA60400000000000000000E0 /* HCPProposalFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000E1 /* HCPProposalFace.swift */; };
+		AA60400000000000000000F2 /* ResourceTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F3 /* ResourceTableView.swift */; };
 		AA60400000000000000000E2 /* HCPWorkspaceSettingsFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */; };
 		AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B9 /* ConnectionsPane.swift */; };
 		AA60400000000000000000BA /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000BB /* SettingsWindow.swift */; };
@@ -32,6 +33,7 @@
 		AA6040000000000000000010 /* ResourceMapCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000011 /* ResourceMapCategories.swift */; };
 		AA6040000000000000000000 /* ResourceMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6040000000000000000001 /* ResourceMap.swift */; };
 		AA6030000000000000000010 /* ResourceBrowserIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000011 /* ResourceBrowserIndex.swift */; };
+		AA60400000000000000000F0 /* ResourceListQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F1 /* ResourceListQuery.swift */; };
 		AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000013 /* TerraformDiagnosticSource.swift */; };
 		AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5310000000000000000002 /* WorkspaceReadme.swift */; };
 		AA5510000000000000000001 /* ExternalEditorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5510000000000000000002 /* ExternalEditorStore.swift */; };
@@ -120,6 +122,7 @@
 		AA60400000000000000000C5 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
 		AA60400000000000000000C1 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		AA60400000000000000000E1 /* HCPProposalFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPProposalFace.swift; sourceTree = "<group>"; };
+		AA60400000000000000000F3 /* ResourceTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceTableView.swift; sourceTree = "<group>"; };
 		AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPWorkspaceSettingsFace.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B9 /* ConnectionsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsPane.swift; sourceTree = "<group>"; };
 		AA60400000000000000000BB /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
@@ -127,6 +130,7 @@
 		AA6040000000000000000011 /* ResourceMapCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMapCategories.swift; sourceTree = "<group>"; };
 		AA6040000000000000000001 /* ResourceMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceMap.swift; sourceTree = "<group>"; };
 		AA6030000000000000000011 /* ResourceBrowserIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceBrowserIndex.swift; sourceTree = "<group>"; };
+		AA60400000000000000000F1 /* ResourceListQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceListQuery.swift; sourceTree = "<group>"; };
 		AA6030000000000000000013 /* TerraformDiagnosticSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformDiagnosticSource.swift; sourceTree = "<group>"; };
 		AA5310000000000000000002 /* WorkspaceReadme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceReadme.swift; sourceTree = "<group>"; };
 		AA5510000000000000000002 /* ExternalEditorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalEditorStore.swift; sourceTree = "<group>"; };
@@ -252,6 +256,7 @@
 				AA6040000000000000000001 /* ResourceMap.swift */,
 				AA6040000000000000000011 /* ResourceMapCategories.swift */,
 				AA6030000000000000000011 /* ResourceBrowserIndex.swift */,
+				AA60400000000000000000F1 /* ResourceListQuery.swift */,
 				AA6030000000000000000013 /* TerraformDiagnosticSource.swift */,
 				AA5310000000000000000002 /* WorkspaceReadme.swift */,
 				AA5510000000000000000002 /* ExternalEditorStore.swift */,
@@ -302,6 +307,7 @@
 				AA60400000000000000000C5 /* LoadingIndicator.swift */,
 				AA60400000000000000000C1 /* LibraryView.swift */,
 				AA60400000000000000000E1 /* HCPProposalFace.swift */,
+				AA60400000000000000000F3 /* ResourceTableView.swift */,
 				AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */,
 				AA60400000000000000000B9 /* ConnectionsPane.swift */,
 				AA60400000000000000000BB /* SettingsWindow.swift */,
@@ -487,6 +493,7 @@
 				AA6040000000000000000000 /* ResourceMap.swift in Sources */,
 				AA6040000000000000000010 /* ResourceMapCategories.swift in Sources */,
 				AA6030000000000000000010 /* ResourceBrowserIndex.swift in Sources */,
+				AA60400000000000000000F0 /* ResourceListQuery.swift in Sources */,
 				AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */,
 				AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */,
 				AA5510000000000000000001 /* ExternalEditorStore.swift in Sources */,
@@ -499,6 +506,7 @@
 				AA60400000000000000000C4 /* LoadingIndicator.swift in Sources */,
 				AA60400000000000000000C0 /* LibraryView.swift in Sources */,
 				AA60400000000000000000E0 /* HCPProposalFace.swift in Sources */,
+				AA60400000000000000000F2 /* ResourceTableView.swift in Sources */,
 				AA60400000000000000000E2 /* HCPWorkspaceSettingsFace.swift in Sources */,
 				AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */,
 				AA60400000000000000000BA /* SettingsWindow.swift in Sources */,
