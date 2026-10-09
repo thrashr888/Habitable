@@ -578,7 +578,8 @@ struct HCPProposalFace: View {
         isWorking = false
         if let result { gitError = result.localizedDescription; return }
         pullRequest = nil
-        model.noteMerge(HCPMergedPullRequest(number: pr.number, title: pr.title, baseBranch: pr.baseBranch, mergedAt: Date()))
+        guard let workspace else { return }
+        model.noteMerge(HCPMergedPullRequest(number: pr.number, title: pr.title, baseBranch: pr.baseBranch, mergedAt: Date(), workspaceID: workspace.id))
         // Back to the base branch at its new tip, so the next change starts from main.
         let returned = await Task.detached(priority: .userInitiated) { () -> Error? in
             do { try GitProposal.returnToBase(in: folder, base: pr.baseBranch); return nil } catch { return error }

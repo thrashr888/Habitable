@@ -81,6 +81,7 @@ struct HCPMergedPullRequest: Equatable, Sendable {
     let title: String
     let baseBranch: String
     let mergedAt: Date
+    let workspaceID: String
 }
 
 struct HCPVariableSet: Identifiable, Equatable, Sendable {
@@ -1159,13 +1160,22 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     func noteMerge(_ merge: HCPMergedPullRequest) { recentMerge = merge }
     func clearMerge() { recentMerge = nil }
 
-    /// The run HCP started for a merge: the newest run since the merge whose
-    /// message names the pull request, or any non-speculative run since then.
+    /// The run HCP started for a merge: a run in the same workspace, created
+    /// since the merge, whose message names the pull request by number
+    /// ("Title (#12)" for a squash, "Merge pull request #12 …" otherwise). A
+    /// title match alone is not enough to offer Confirm Apply on a run.
     func run(for merge: HCPMergedPullRequest) -> HCPRun? {
+        guard merge.workspaceID == selectedWorkspaceID else { return nil }
         let since = merge.mergedAt.addingTimeInterval(-90)
-        let candidates = runs.filter { ($0.createdAt ?? .distantPast) >= since }
-        return candidates.first { ($0.message ?? "").contains("(#\(merge.number))") }
-            ?? candidates.first { ($0.message ?? "").localizedCaseInsensitiveContains(merge.title) && $0.status != "planned_and_finished" }
+        return runs
+            .filter { $0.workspaceID == merge.workspaceID && ($0.createdAt ?? .distantPast) >= since }
+            .first { Self.message($0.message, namesPullRequest: merge.number) }
+    }
+
+    static func message(_ message: String?, namesPullRequest number: Int) -> Bool {
+        guard let message else { return false }
+        let pattern = "(^|[^0-9])#\(number)([^0-9]|$)"
+        return message.range(of: pattern, options: .regularExpression) != nil
     }
     /// The tail of the failed run's plan log, redacted, so the reason is readable here.
     @Published private(set) var proposalLog: String?
