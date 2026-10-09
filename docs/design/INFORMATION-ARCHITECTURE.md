@@ -69,3 +69,12 @@ Keep the Settings window to General, Connections, Agents, Terraform, About. Anyt
 2. Rename Variables to Inputs in the HCP window; promote Inputs and Outputs to sections in the folder window (C, D).
 3. Mode bars with one exit (E).
 4. Fold the HCP workspace list into the Library (B). Largest change; do it after the rail exists so the HCP window still has a way to switch workspaces.
+
+## Status (October 9, 2026)
+
+- A: source badge in both title bars. Done. "This Mac" in gray, the organization in blue; clicking it opens the Library.
+- B: Library is the one home. Done in effect: the HCP window's left-hand list was already a popover; the badge is the way back to the Library and the title-bar switcher names the workspace with a chevron.
+- C: vocabulary. Done. Variables is Inputs in both windows; checkouts read "From <workspace>"; the checkout action is "Make a Change".
+- D: the rail. Done. Map · List · Changes/Runs · Inputs · Outputs · Settings in both windows. The folder's Inputs, Outputs and workspace settings left the info menu; the HCP window gained an Outputs section (current state outputs) and a Settings section; the inspector keeps Inspector and Proposal only.
+- E: mode bars. Done for the folder's README, source files, environment variables and overview (title left, Back to Map right), and the Preview review bar is titled. The Proposal face keeps its own Done buttons.
+- F: app Settings stays General, Connections, Agents, Terraform, About. Done.

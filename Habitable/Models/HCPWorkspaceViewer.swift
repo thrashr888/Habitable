@@ -689,15 +689,7 @@ struct HCPAPIClient: Sendable {
         }
         if let stateVersionID = Self.firstStateVersionID(applyRow) {
             details.stateVersionID = stateVersionID
-            var outputs: [HCPStateOutput] = []
-            for page in 1...2 {
-                guard let result = try? await get(path: "/api/v2/state-versions/\(pathComponent(stateVersionID))/outputs",
-                                                  hostname: hostname, token: token,
-                                                  query: [URLQueryItem(name: "page[number]", value: String(page)),
-                                                          URLQueryItem(name: "page[size]", value: "100")]) else { break }
-                outputs.append(contentsOf: Self.decodeStateOutputs(result))
-                if nextPage(result) == nil { break }
-            }
+            let outputs = await stateVersionOutputs(hostname: hostname, stateVersionID: stateVersionID, token: token)
             details.outputs = outputs
         }
         return details
@@ -873,6 +865,20 @@ struct HCPAPIClient: Sendable {
 
     /// The current state version id without downloading the state; nil when the
     /// workspace has no current state version (404).
+    /// Outputs recorded in one state version; sensitive values arrive masked. Two pages at most.
+    func stateVersionOutputs(hostname: String, stateVersionID: String, token: String) async -> [HCPStateOutput] {
+        var outputs: [HCPStateOutput] = []
+        for page in 1...2 {
+            guard let result = try? await get(path: "/api/v2/state-versions/\(pathComponent(stateVersionID))/outputs",
+                                              hostname: hostname, token: token,
+                                              query: [URLQueryItem(name: "page[number]", value: String(page)),
+                                                      URLQueryItem(name: "page[size]", value: "100")]) else { break }
+            outputs.append(contentsOf: Self.decodeStateOutputs(result))
+            if nextPage(result) == nil { break }
+        }
+        return outputs
+    }
+
     func currentStateVersionID(hostname: String, workspaceID: String, token: String) async throws -> String? {
         let object: [String: Any]
         do {
@@ -1406,6 +1412,10 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     @Published private(set) var historyError: String?
     private var historyOperation = UUID()
     @Published private(set) var workspaceVariables: [HCPWorkspaceVariable] = []
+    /// Outputs of the selected workspace's current state (the Outputs section).
+    @Published private(set) var workspaceOutputs: [HCPStateOutput] = []
+    @Published private(set) var workspaceOutputsLoading = false
+    @Published private(set) var workspaceOutputsMessage: String?
     @Published private(set) var isLoadingVariables = false
     @Published private(set) var variablesError: String?
     @Published private(set) var savingVariableID: String?
@@ -1762,6 +1772,30 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         variableSetsError = nil
         isLoadingVariables = false
         savingVariableID = nil
+    }
+
+    /// Loads the selected workspace's current outputs, without downloading state.
+    func refreshWorkspaceOutputs() async {
+        guard let workspace = selectedWorkspace else { workspaceOutputs = []; return }
+        workspaceOutputsLoading = true
+        workspaceOutputsMessage = nil
+        defer { workspaceOutputsLoading = false }
+        do {
+            guard let versionID = try await librarySnapshotVersionID(for: workspace) else {
+                workspaceOutputs = []
+                workspaceOutputsMessage = "No state yet. Outputs appear here after the first apply."
+                return
+            }
+            let host = hostname
+            guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else { throw HCPViewerError.noCredential }
+            let outputs = await client.stateVersionOutputs(hostname: host, stateVersionID: versionID, token: token)
+            guard selectedWorkspace?.id == workspace.id else { return }
+            workspaceOutputs = outputs
+            if outputs.isEmpty { workspaceOutputsMessage = "This workspace declares no outputs." }
+        } catch {
+            workspaceOutputs = []
+            workspaceOutputsMessage = "Outputs could not be loaded."
+        }
     }
 
     func refreshVariables() async {

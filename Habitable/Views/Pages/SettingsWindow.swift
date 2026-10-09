@@ -38,7 +38,7 @@ enum SettingsPaneID: String, CaseIterable, Identifiable {
         case .connections: "Sign in to HCP Terraform and your clouds."
         case .agents: "Let AI agents read this Mac’s open workspace."
         case .terraform: "Which Terraform runs your local previews."
-        case .about: "Open source, on GitHub."
+        case .about: "Version, updates and where to report a problem."
         }
     }
 }
@@ -163,9 +163,9 @@ struct SettingsWindow: View {
 // MARK: - About
 
 private struct AboutPane: View {
-    static let repository = URL(string: "https://github.com/thrashr888/Habitable")!
-    static let releases = URL(string: "https://github.com/thrashr888/Habitable/releases")!
-    static let issues = URL(string: "https://github.com/thrashr888/Habitable/issues")!
+    static let releases = URL(string: "https://github.com/thrashr888/homebrew-tap/releases?q=habitable")!
+    static let issues = URL(string: "https://github.com/thrashr888/homebrew-tap/issues")!
+    static let upgradeCommand = "brew upgrade --cask thrashr888/tap/habitable"
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -178,14 +178,18 @@ private struct AboutPane: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsGroup("Habitable") {
                 SettingsRow("Version") { Text(version).foregroundStyle(.secondary).textSelection(.enabled) }
-                SettingsRow("Updates") {
-                    Text("Check the Releases page for now; in-app updates come later.").foregroundStyle(.secondary)
-                }
                 SettingsRow("Copyright") { Text("© 2026 Paul Thrasher").foregroundStyle(.secondary) }
             }
-            SettingsGroup("Source") {
-                SettingsRow("Repository") { Link("github.com/thrashr888/Habitable", destination: Self.repository) }
-                SettingsRow("Releases") { Link("Releases", destination: Self.releases) }
+            SettingsGroup("Updates", footer: "New versions are published on GitHub. Homebrew installs update with the command above.") {
+                SettingsRow("Releases") { Link("Release notes and downloads", destination: Self.releases) }
+                SettingsRow("Homebrew") {
+                    HStack(spacing: 8) {
+                        Text(Self.upgradeCommand).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                        MapCopyButton(value: Self.upgradeCommand, label: "upgrade command")
+                    }
+                }
+            }
+            SettingsGroup("Help") {
                 SettingsRow("Problems and ideas") { Link("Open an issue", destination: Self.issues) }
             }
             Text("Habitable never applies from your Mac. Runs happen in HCP Terraform; you confirm them here.")

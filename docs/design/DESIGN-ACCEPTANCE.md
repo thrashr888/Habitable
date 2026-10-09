@@ -272,3 +272,10 @@ Still from D: Quick Help on individual Inspector facts and on run stages; the "W
 - Create Folder writes `main.tf` with one `module` block pinned to the chosen version, `variables.tf` for the required inputs (blank values become `""`, `[]`, `{}` by type so validate still passes), and a README that links back to the Registry page and the source and lists the outputs. The module's code stays at its source; Terraform fetches it on the first Preview.
 - The welcome ("Declared, not built.") now counts module calls: "main.tf calls 1 module", with a card per module showing source, version and a Registry link. Verified live with terraform-google-modules/project-factory.
 - File menu: **New Infrastructure…** (⌘⇧N) opens the chooser in the front window, or a Library window with the chooser up. Library footer rows take the click across the full row.
+
+## Information architecture (docs/design/INFORMATION-ARCHITECTURE.md)
+
+- Source badge at the start of every workspace window's title bar: "This Mac" or the HCP organization. Opens the Library.
+- The same rail in both windows: Map · List · Changes (Runs in the cloud) · Inputs · Outputs · Settings. The folder's info menu keeps only Overview, README, Source files and Environment variables. The HCP window gained Outputs (current state) and Settings sections; its inspector is Inspector and Proposal.
+- Variables is Inputs everywhere. Checkout action is "Make a Change". Mode bars (title left, one exit right) on the folder's non-rail pages; the Preview bar is titled.
+- Toolbars use the taller unified style. About pane: version, copyright, Releases link, and the Homebrew upgrade command with a copy button.
