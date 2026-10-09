@@ -11,6 +11,8 @@ struct LibraryView: View {
     /// Removes a folder from the Library; the folder on disk is untouched.
     var onForgetFolder: ((URL) -> Void)? = nil
     let onChooseFolder: () -> Void
+    /// Opens the New Infrastructure chooser (Exploration F).
+    var onNewInfrastructure: (() -> Void)? = nil
     let onOpenCloud: (HCPWorkspace, String, String) -> Void
     let onOpenConnections: () -> Void
 
@@ -235,6 +237,15 @@ struct LibraryView: View {
             }
             Spacer()
             Divider()
+            if let onNewInfrastructure {
+                Button(action: onNewInfrastructure) {
+                    Label("New…", systemImage: "plus.square").font(.system(size: 13))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain).padding(.horizontal, 18).padding(.top, 12)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .help("Start from a folder, a workspace, or a template")
+            }
             Button(action: onChooseFolder) {
                 Label("Open Folder…", systemImage: "folder.badge.plus").font(.system(size: 13))
                     .frame(maxWidth: .infinity, alignment: .leading)

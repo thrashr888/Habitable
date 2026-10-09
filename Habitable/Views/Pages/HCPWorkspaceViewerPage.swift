@@ -909,6 +909,7 @@ private struct HCPRunDetailView: View {
             .buttonStyle(.plain)
             .accessibilityAddTraits(.isHeader)
             .accessibilityValue(isStageOpen(key).wrappedValue ? "Expanded" : "Collapsed")
+            .quickHelp(glossary: ["plan": "plan", "apply": "apply", "policy": "run", "cost": "run", "tasks": "run", "details": "run"][key] ?? "run")
             if isStageOpen(key).wrappedValue {
                 content().padding(.top, 12)
             }
