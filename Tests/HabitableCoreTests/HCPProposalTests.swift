@@ -70,3 +70,13 @@ final class HCPProposalTests: XCTestCase {
         XCTAssertFalse(listing.contains("tfstate"), listing)
     }
 }
+
+extension HCPProposalTests {
+    func testLogTailStripsANSIAndKeepsLastLines() {
+        let raw = "\u{1B}[31mError:\u{1B}[0m bad\n[1m[31mUnsupported block type[0m\n\n  on main.tf line 2\n"
+        let tail = HCPAPIClient.logTail(raw, lines: 2)
+        XCTAssertEqual(tail, "Unsupported block type\non main.tf line 2")
+        XCTAssertEqual(HCPAPIClient.stripANSI("a [31mred[0m b"), "a red b")
+        XCTAssertEqual(HCPAPIClient.stripANSI("list[0] = x"), "list[0] = x")
+    }
+}
