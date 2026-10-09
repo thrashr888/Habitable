@@ -1287,7 +1287,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             while !Task.isCancelled {
                 guard let self, self.proposalOperation == operation else { return }
                 if await self.pollProposalOnce(operation: operation) { return }
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
             }
         }
     }
@@ -1908,8 +1908,17 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         guard !isSample else { return }
         guard isConnected, let workspace = selectedWorkspace,
               let token = try? tokenStore.read(hostname: hostname) else { return }
-        _ = force
-        guard Date().timeIntervalSince(runRefreshTime) >= 3 else { errorMessage = HCPViewerError.rateLimited.localizedDescription; return }
+        // One run-list fetch per 3 s. A person pressing Refresh twice sees the
+        // cooldown; the app's own refreshes (after an apply, from a poll) wait it
+        // out instead of surfacing it as an error.
+        let remaining = 3 - Date().timeIntervalSince(runRefreshTime)
+        if remaining > 0 {
+            guard force else { errorMessage = HCPViewerError.rateLimited.localizedDescription; return }
+            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            guard isConnected, selectedWorkspaceID == workspace.id else { return }
+            // Another refresh may have run meanwhile; it already has the latest list.
+            if Date().timeIntervalSince(runRefreshTime) < 3 { return }
+        }
         runRefreshTime = Date()
         let op = UUID(); currentOperation = op
         isLoading = true
@@ -1997,7 +2006,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         let generation = pollingGeneration
         pollTask = Task { [weak self] in
             for _ in 0..<20 {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
                 guard !Task.isCancelled, let self, self.isConnected,
                       self.runs.contains(where: \.isActive) else { break }
                 await self.refreshRuns(force: true)
