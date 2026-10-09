@@ -1635,6 +1635,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     private let selectionStore: HCPSelectionStore
     private let client: HCPAPIClient
     private var runRefreshTime = Date.distantPast
+    static let runRefreshInterval: TimeInterval = 8
     private var workspaceRefreshTime = Date.distantPast
     private var currentOperation = UUID()
     private var pollTask: Task<Void, Never>?
@@ -1908,16 +1909,16 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         guard !isSample else { return }
         guard isConnected, let workspace = selectedWorkspace,
               let token = try? tokenStore.read(hostname: hostname) else { return }
-        // One run-list fetch per 3 s. A person pressing Refresh twice sees the
+        // One run-list fetch per 8 s. A person pressing Refresh twice sees the
         // cooldown; the app's own refreshes (after an apply, from a poll) wait it
         // out instead of surfacing it as an error.
-        let remaining = 3 - Date().timeIntervalSince(runRefreshTime)
+        let remaining = Self.runRefreshInterval - Date().timeIntervalSince(runRefreshTime)
         if remaining > 0 {
             guard force else { errorMessage = HCPViewerError.rateLimited.localizedDescription; return }
             try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             guard isConnected, selectedWorkspaceID == workspace.id else { return }
             // Another refresh may have run meanwhile; it already has the latest list.
-            if Date().timeIntervalSince(runRefreshTime) < 3 { return }
+            if Date().timeIntervalSince(runRefreshTime) < Self.runRefreshInterval { return }
         }
         runRefreshTime = Date()
         let op = UUID(); currentOperation = op

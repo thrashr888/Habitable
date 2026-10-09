@@ -102,3 +102,22 @@ final class GitProposalTests: XCTestCase {
         return String(decoding: data, as: UTF8.self)
     }
 }
+
+extension GitProposalTests {
+    func testParsePullRequestReadsChecksAndRunID() throws {
+        let json = """
+        {"number": 2, "title": "Format", "url": "https://github.com/o/r/pull/2", "headRefName": "habitable/x", "baseRefName": "master",
+         "state": "OPEN", "isDraft": false, "mergeable": "MERGEABLE", "reviewDecision": "", "additions": 2, "deletions": 1,
+         "statusCheckRollup": [
+           {"__typename": "StatusContext", "context": "Terraform Cloud/org/ws", "state": "PENDING", "targetUrl": "https://app.terraform.io/app/org/ws/runs/run-abc123"},
+           {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/o/r/actions/runs/1"},
+           {"__typename": "StatusContext", "context": "sentinel/org/ws", "state": "FAILURE", "targetUrl": "http://insecure.example/x"}
+         ]}
+        """
+        let pr = try GitProposal.parsePullRequest(json: Data(json.utf8))
+        XCTAssertEqual(pr.checks.map(\.state), [.pending, .success, .failure])
+        XCTAssertEqual(GitProposal.PullRequest.runID(in: pr.checks[0]), "run-abc123")
+        XCTAssertNil(GitProposal.PullRequest.runID(in: pr.checks[1]))
+        XCTAssertNil(pr.checks[2].url, "non-https check links are dropped")
+    }
+}
