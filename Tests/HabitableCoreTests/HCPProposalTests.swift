@@ -80,3 +80,17 @@ extension HCPProposalTests {
         XCTAssertEqual(HCPAPIClient.stripANSI("list[0] = x"), "list[0] = x")
     }
 }
+
+extension HCPProposalTests {
+    func testWorkspaceSettingsChangeSendsOnlyChangedKeys() {
+        var change = HCPWorkspaceSettingsChange()
+        XCTAssertTrue(change.isEmpty)
+        change.terraformVersion = "latest"
+        change.autoApply = false
+        let attributes = change.attributes
+        XCTAssertEqual(attributes["terraform-version"] as? String, "latest")
+        XCTAssertEqual(attributes["auto-apply"] as? Bool, false)
+        XCTAssertNil(attributes["execution-mode"])
+        XCTAssertNil(attributes["working-directory"])
+    }
+}

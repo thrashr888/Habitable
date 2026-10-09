@@ -16,6 +16,8 @@ struct HCPProposalFace: View {
     let onChooseFolder: () -> Void
     /// Shows a run's plan on the Map.
     let onShowRun: (HCPRun) -> Void
+    /// Opens the Settings face (for the Terraform version hint).
+    var onOpenSettings: (() -> Void)? = nil
 
     @State private var message = ""
     @State private var gitStatus: GitProposal.Status?
@@ -244,6 +246,9 @@ struct HCPProposalFace: View {
                     .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                     if let hint = terraformVersionHint(log: log) {
                         Text(hint).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if let onOpenSettings {
+                            Button("Change Terraform Version…", action: onOpenSettings).controlSize(.small)
+                        }
                     }
                 }
             }
@@ -348,7 +353,7 @@ struct HCPProposalFace: View {
     private func terraformVersionHint(log: String) -> String? {
         guard log.contains("Blocks of type \"cloud\" are not expected") || log.contains("Unsupported block type"),
               let version = workspace?.terraformVersion else { return nil }
-        return "This workspace runs Terraform \(version). The folder's cloud block needs 1.1 or later; change the workspace's Terraform version in HCP Terraform, or use a remote backend block instead."
+        return "This workspace runs Terraform \(version). The folder's cloud block needs 1.1 or later; change the workspace's Terraform version in Settings, or use a remote backend block instead."
     }
 
     private var footnote: some View {

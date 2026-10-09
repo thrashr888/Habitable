@@ -203,6 +203,8 @@ Still open from the design: Exploration D's empty-map welcome, ⌘K, and preview
 
 Not in this round: policy and cost checks on the Map, approvals and conversation from GitHub, hold-to-apply for replace and destroy, and `terraform_data`-style previews for templates.
 
+**Follow-up, October 8:** the first live run on `blank` reached HCP and failed at remote init because the workspace was pinned to Terraform 0.13.1 (no `cloud` block before 1.1). The Proposal card now shows the failed run's log tail (ANSI stripped, wrapped, with Copy) and, for that cause, a hint with **Change Terraform Version…**. A **Settings** face joins the cloud inspector: Terraform version (Latest, the current value, released versions), execution mode, working directory, and "Apply without confirmation"; nothing is sent until Save, HCP's answer replaces the local record, and a link opens the rest in HCP Terraform. Verified built and launched; the save awaits Paul's click.
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

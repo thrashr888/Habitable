@@ -35,18 +35,44 @@ struct HCPWorkspace: Identifiable, Equatable, Sendable {
     let updatedAt: Date?
     let resourceCount: Int?
     let description: String?
+    /// Settings Habitable can change: apply without confirmation, and the
+    /// subfolder Terraform runs in.
+    let autoApply: Bool
+    let workingDirectory: String?
     init(id: String, name: String, terraformVersion: String?, executionMode: String?,
          locked: Bool, htmlURL: URL?, tagNames: [String] = [], vcs: HCPVCSRepository? = nil,
          projectID: String? = nil, projectName: String? = nil, currentRunStatus: String? = nil,
          currentRunCreatedAt: Date? = nil, updatedAt: Date? = nil, resourceCount: Int? = nil,
-         description: String? = nil) {
+         description: String? = nil, autoApply: Bool = false, workingDirectory: String? = nil) {
         self.description = description
+        self.autoApply = autoApply; self.workingDirectory = workingDirectory
         self.id = id; self.name = name; self.terraformVersion = terraformVersion
         self.executionMode = executionMode; self.locked = locked; self.htmlURL = htmlURL
         self.tagNames = tagNames; self.vcs = vcs
         self.projectID = projectID; self.projectName = projectName
         self.currentRunStatus = currentRunStatus; self.currentRunCreatedAt = currentRunCreatedAt
         self.updatedAt = updatedAt; self.resourceCount = resourceCount
+    }
+}
+
+/// The workspace settings a save may change; nil means "leave as is".
+struct HCPWorkspaceSettingsChange: Equatable, Sendable {
+    var terraformVersion: String?
+    var autoApply: Bool?
+    var executionMode: String?
+    var workingDirectory: String?
+    var description: String?
+
+    var isEmpty: Bool { attributes.isEmpty }
+
+    var attributes: [String: Any] {
+        var attributes: [String: Any] = [:]
+        if let terraformVersion { attributes["terraform-version"] = terraformVersion }
+        if let autoApply { attributes["auto-apply"] = autoApply }
+        if let executionMode { attributes["execution-mode"] = executionMode }
+        if let workingDirectory { attributes["working-directory"] = workingDirectory }
+        if let description { attributes["description"] = description }
+        return attributes
     }
 }
 
@@ -681,7 +707,8 @@ struct HCPAPIClient: Sendable {
                                 currentRunCreatedAt: (run?["created-at"] as? String).flatMap(isoDate),
                                 updatedAt: (attributes["updated-at"] as? String).flatMap(isoDate),
                                 resourceCount: attributes["resource-count"] as? Int,
-                                description: base.description)
+                                description: base.description,
+                                autoApply: base.autoApply, workingDirectory: base.workingDirectory)
         }
     }
 
@@ -735,7 +762,39 @@ struct HCPAPIClient: Sendable {
                             locked: attributes["locked"] as? Bool ?? false, htmlURL: url,
                             tagNames: attributes["tag-names"] as? [String] ?? [],
                             vcs: HCPVCSRepository.decode(attributes: attributes),
-                            description: (attributes["description"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+                            description: (attributes["description"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                            autoApply: attributes["auto-apply"] as? Bool ?? false,
+                            workingDirectory: (attributes["working-directory"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+    }
+
+    /// Changes workspace settings (`terraform-version`, `auto-apply`, `execution-mode`,
+    /// `working-directory`, `description`) and returns the workspace as HCP now has it.
+    func updateWorkspace(hostname: String, organization: String, workspaceID: String,
+                         settings: HCPWorkspaceSettingsChange, token: String) async throws -> HCPWorkspace {
+        let attributes = settings.attributes
+        guard let host = Self.normalizedHostname(hostname), let base = URL(string: "https://\(host)"),
+              let url = URL(string: "/api/v2/workspaces/\(pathComponent(workspaceID))", relativeTo: base)?.absoluteURL else {
+            throw HCPViewerError.invalidHost
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Accept")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 25
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["data": ["type": "workspaces", "id": workspaceID, "attributes": attributes]])
+        do {
+            let (data, response) = try await boundedData(for: request, limit: Self.apiResponseLimit)
+            guard let http = response as? HTTPURLResponse else { throw HCPViewerError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                throw HCPViewerError.response(status: http.statusCode, message: "HCP Terraform did not accept the change.")
+            }
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let row = object["data"] as? [String: Any], row["id"] as? String == workspaceID,
+                  let workspace = decodeWorkspace(row, hostname: hostname, organization: organization) else { throw HCPViewerError.invalidResponse }
+            return workspace
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
     }
 
     private func decodeWorkspaceVariable(_ row: [String: Any]) -> HCPWorkspaceVariable? {
@@ -1379,6 +1438,44 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             explorerRows = [:]
             explorerUnavailable = true
         } catch {}
+    }
+
+    @Published private(set) var workspaceSettingsError: String?
+    @Published private(set) var isSavingWorkspaceSettings = false
+
+    /// Saves changed workspace settings. Only the keys passed are sent; the
+    /// local workspace record takes HCP's answer for those fields.
+    func updateWorkspaceSettings(_ settings: HCPWorkspaceSettingsChange) async -> Bool {
+        guard !isSample, isConnected, let workspace = selectedWorkspace, !settings.isEmpty,
+              let token = try? tokenStore.read(hostname: hostname), !token.isEmpty, !isSavingWorkspaceSettings else { return false }
+        let host = hostname, organization = selectedOrganization
+        isSavingWorkspaceSettings = true
+        workspaceSettingsError = nil
+        defer { isSavingWorkspaceSettings = false }
+        do {
+            let updated = try await client.updateWorkspace(hostname: host, organization: organization,
+                                                           workspaceID: workspace.id, settings: settings, token: token)
+            guard isConnected, hostname == host, selectedOrganization == organization,
+                  let index = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return false }
+            let old = workspaces[index]
+            workspaces[index] = HCPWorkspace(id: old.id, name: updated.name, terraformVersion: updated.terraformVersion,
+                                             executionMode: updated.executionMode, locked: updated.locked, htmlURL: old.htmlURL,
+                                             tagNames: old.tagNames, vcs: old.vcs, projectID: old.projectID, projectName: old.projectName,
+                                             currentRunStatus: old.currentRunStatus, currentRunCreatedAt: old.currentRunCreatedAt,
+                                             updatedAt: Date(), resourceCount: old.resourceCount, description: updated.description,
+                                             autoApply: updated.autoApply, workingDirectory: updated.workingDirectory)
+            return true
+        } catch {
+            guard isConnected, hostname == host, selectedOrganization == organization else { return false }
+            if case HCPViewerError.response(let status, _) = error, status == 403 || status == 401 {
+                workspaceSettingsError = "Your credential cannot change this workspace’s settings."
+            } else if case HCPViewerError.response(let status, _) = error, status == 422 {
+                workspaceSettingsError = "HCP Terraform rejected one of these values. Check the Terraform version and working directory."
+            } else {
+                workspaceSettingsError = "Couldn’t save the workspace settings. Check access and try again."
+            }
+            return false
+        }
     }
 
     @discardableResult
