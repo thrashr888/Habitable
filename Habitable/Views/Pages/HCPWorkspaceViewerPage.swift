@@ -708,9 +708,32 @@ private struct HCPRunDetailView: View {
     /// Stage cards the person opened or closed; stages not listed follow the run's progress.
     @State private var stageOverrides: [String: Bool] = [:]
 
-    /// The run with provenance: the detail fetch carries it, the list copy is the fallback.
+    /// The run with provenance: the detail fetch carries it; the list copy fills any gaps.
     private var run: HCPRun {
-        details.run.source != nil || details.run.branch != nil ? details.run : (listedRun ?? details.run)
+        var merged = details.run
+        if let listed = listedRun {
+            merged.source = merged.source ?? listed.source
+            merged.createdBy = merged.createdBy ?? listed.createdBy
+            merged.branch = merged.branch ?? listed.branch
+            merged.commitSHA = merged.commitSHA ?? listed.commitSHA
+            merged.commitURL = merged.commitURL ?? listed.commitURL
+            merged.sender = merged.sender ?? listed.sender
+            merged.pullRequestNumber = merged.pullRequestNumber ?? listed.pullRequestNumber
+            merged.triggerReason = merged.triggerReason ?? listed.triggerReason
+            merged.commitMessage = merged.commitMessage ?? listed.commitMessage
+            merged.repositoryIdentifier = merged.repositoryIdentifier ?? listed.repositoryIdentifier
+        }
+        return merged
+    }
+
+    /// "GitHub" when the commit link says so, else the repository host, else "VCS".
+    private var vcsHostWord: String {
+        guard let host = run.commitURL?.host?.lowercased() else { return "VCS" }
+        if host.contains("github") { return "GitHub" }
+        if host.contains("gitlab") { return "GitLab" }
+        if host.contains("bitbucket") { return "Bitbucket" }
+        if host.contains("dev.azure") { return "Azure DevOps" }
+        return host
     }
 
     private var statusWord: String { details.run.status.replacingOccurrences(of: "_", with: " ").capitalized }
@@ -936,7 +959,7 @@ private struct HCPRunDetailView: View {
         let who = run.sender ?? run.createdBy
         let how: String? = {
             switch run.source {
-            case "tfe-configuration-version", "tfe-vcs": return "from " + (run.repositoryIdentifier.map { _ in "GitHub" } ?? "VCS")
+            case "tfe-configuration-version", "tfe-vcs": return "from " + vcsHostWord
             case "tfe-api": return "through the API"
             case "tfe-ui": return "in HCP Terraform"
             case "terraform+cloud", "terraform", "tfe-cli": return "from the CLI"
@@ -965,8 +988,8 @@ private struct HCPRunDetailView: View {
                     if let identifier = run.repositoryIdentifier {
                         HStack(spacing: 4) {
                             Text("Repo").foregroundStyle(.secondary)
-                            if let url = URL(string: "https://github.com/\(identifier)"), run.source != nil, run.commitURL?.host == "github.com" {
-                                Link(identifier, destination: url)
+                            if let base = run.commitURL.flatMap({ URL(string: "https://\($0.host ?? "")/\(identifier)") }), run.commitURL?.scheme == "https" {
+                                Link(identifier, destination: base)
                             } else { Text(identifier) }
                         }
                     }
@@ -994,7 +1017,7 @@ private struct HCPRunDetailView: View {
     private var configurationWord: String {
         let who = run.sender ?? run.createdBy
         switch run.source {
-        case "tfe-configuration-version", "tfe-vcs": return "From " + (run.commitURL?.host == "github.com" ? "GitHub" : "VCS") + (who.map { " by \($0)" } ?? "")
+        case "tfe-configuration-version", "tfe-vcs": return "From " + vcsHostWord + (who.map { " by \($0)" } ?? "")
         case "tfe-api": return "Uploaded through the API" + (who.map { " by \($0)" } ?? "")
         case "tfe-ui": return "Started in HCP Terraform" + (who.map { " by \($0)" } ?? "")
         case "terraform+cloud", "terraform", "tfe-cli": return "Uploaded from the CLI" + (who.map { " by \($0)" } ?? "")
