@@ -320,6 +320,15 @@ struct HCPWorkspaceViewer: View {
             previewCaption: previewCaption,
             faceRequest: faceRequest)
         .task(id: model.mapRequestKey) { await model.refreshMap() }
+        .onChange(of: model.requestedFace) { face in
+            guard let face else { return }
+            section = .map
+            faceRequest = MapSideFaceRequest(faceID: face)
+            model.requestedFace = nil
+        }
+        .onAppear {
+            if let face = model.requestedFace { faceRequest = MapSideFaceRequest(faceID: face); model.requestedFace = nil }
+        }
         Divider()
         MapTimelineStrip(clips: remoteChangeClips, selectedID: model.viewingStateVersion?.runID,
                          hint: model.runs.isEmpty ? "" : "Select a change to see the Map as it was after that run",

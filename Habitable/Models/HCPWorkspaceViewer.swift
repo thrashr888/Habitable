@@ -1179,6 +1179,9 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
     /// The tail of the failed run's plan log, redacted, so the reason is readable here.
     @Published private(set) var proposalLog: String?
+    /// A face another window asks the cloud window to show (e.g. a checkout's
+    /// "Make a change" opens Proposal). The page consumes and clears it.
+    @Published var requestedFace: String?
     @Published private(set) var proposalPreview: MapChangePreview?
     @Published private(set) var isProposing = false
     @Published private(set) var previewedRunID: String?
