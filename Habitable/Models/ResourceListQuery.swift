@@ -229,9 +229,11 @@ enum ResourceListBuilder {
     /// so a tile of five resources does not read as five identical names.
     static func name(for resource: MapDisplayResource, tile: MapTile?, parsedName: String, typeByAddress: [String: String]) -> String {
         guard let tile else { return parsedName }
-        if tile.anchors.contains(resource.address) || tile.resources.count == 1 { return tile.title }
+        // A title that is only the resource name capitalized ("This") adds nothing; keep the name as written.
+        let title = tile.title == parsedName.capitalized ? parsedName : tile.title
+        if tile.anchors.contains(resource.address) || tile.resources.count == 1 { return title }
         let anchorType = tile.anchors.compactMap { typeByAddress[$0] }.first ?? ""
-        return tile.title + " · " + role(of: resource.type, relativeTo: anchorType)
+        return title + " · " + role(of: resource.type, relativeTo: anchorType)
     }
 
     /// "aws_s3_bucket_acl" relative to "aws_s3_bucket" is "acl"; with no shared
