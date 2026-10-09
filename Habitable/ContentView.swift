@@ -8,6 +8,8 @@ struct WorkspaceWindowActions {
     let openFolder: () -> Void
     let openRecent: (URL) -> Void
     let clearRecents: () -> Void
+    /// Opens the New Infrastructure chooser (Exploration F) in this window.
+    let newInfrastructure: () -> Void
     let plan: () -> Void
     let initialize: () -> Void
     let validate: () -> Void
@@ -71,14 +73,18 @@ struct ContentView: View {
     /// Opening a window with this value shows the Library instead of restoring
     /// the last folder (File › Library, or the Library toolbar button).
     static let libraryURL = URL(string: "habitable://library")!
+    /// A Library window that opens with the New Infrastructure chooser up.
+    static let newInfrastructureURL = URL(string: "habitable://library/new")!
 
     init(initialDirectory: URL? = nil, cloud: HCPWorkspaceViewerModel, agentAccess: HabitableAgentAccess,
          onOpenRemoteWorkspace: @escaping (TerraformRemoteWorkspaceLink) -> Void = { _ in }) {
         self.onOpenRemoteWorkspace = onOpenRemoteWorkspace
         self.cloud = cloud
         self.agentAccess = agentAccess
-        let wantsLibrary = initialDirectory == Self.libraryURL
+        let wantsNew = initialDirectory == Self.newInfrastructureURL
+        let wantsLibrary = initialDirectory == Self.libraryURL || wantsNew
         let directory = wantsLibrary ? nil : initialDirectory
+        _showingNewInfrastructure = State(initialValue: wantsNew)
         // Settings › General › "Open last folder at launch".
         let restoreLast = UserDefaults.standard.object(forKey: "general.restoreLastFolder") as? Bool ?? true
         _workspace = StateObject(wrappedValue: Workspace(
@@ -452,6 +458,7 @@ struct ContentView: View {
             openFolder: openFolder,
             openRecent: openRecent,
             clearRecents: recentWorkspaces.clear,
+            newInfrastructure: { showingNewInfrastructure = true },
             plan: isCheckout ? openCloudProposal : previewChanges,
             initialize: { workspace.initialize() },
             validate: { workspace.validate() },

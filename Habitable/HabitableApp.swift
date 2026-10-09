@@ -135,6 +135,10 @@ private struct WorkspaceCommands: Commands {
                 .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(after: .newItem) {
+            Button("New Infrastructure…") {
+                if let actions { actions.newInfrastructure() } else { openWindow(id: "Workspace.viewer", value: ContentView.newInfrastructureURL) }
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Library") { openWindow(id: "Workspace.viewer", value: ContentView.libraryURL) }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
             Button("New Local Workspace Window") { openWindow(id: "Workspace.viewer") }
