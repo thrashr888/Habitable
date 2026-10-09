@@ -361,7 +361,7 @@ struct ContentView: View {
         Group {
             if workspace.workingDirectory == nil {
                 LibraryView(library: library, cloud: cloud, recentFolders: recentWorkspaces.folders,
-                            onOpenFolder: openRecent, onChooseFolder: openFolder,
+                            onOpenFolder: openRecent, onForgetFolder: { recentWorkspaces.forget($0) }, onChooseFolder: openFolder,
                             onOpenCloud: { cloudWorkspace, organization, hostname in
                                 let link = TerraformRemoteWorkspaceLink(hostname: hostname, organization: organization,
                                     workspaceName: cloudWorkspace.name, url: cloudWorkspace.htmlURL ?? URL(string: "https://\(hostname)")!)

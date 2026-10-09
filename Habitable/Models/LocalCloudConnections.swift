@@ -35,6 +35,8 @@ private final class BoundedOutput: @unchecked Sendable {
 final class LocalCloudConnectionsModel: ObservableObject {
     @Published private(set) var connections: [LocalCloudConnection]
     @Published private(set) var isRefreshing = false
+    /// Providers whose checks are still running; each row clears on its own.
+    @Published private(set) var refreshing: Set<String> = []
     @Published private(set) var connectingID: String?
     @Published private(set) var loginMessages: [String: String] = [:]
     private let loginRunner: CloudCommandRunner
@@ -61,13 +63,18 @@ final class LocalCloudConnectionsModel: ObservableObject {
     func refresh() async {
         guard !isRefreshing, connectingID == nil else { return }
         isRefreshing = true
-        defer { isRefreshing = false }
-        async let aws = discoverAWS()
-        async let azure = discoverAzure()
-        async let gcp = discoverGCP()
-        let results = await [aws, azure, gcp]
-        connections = results
-        for connection in results where connection.isAuthenticated { loginMessages[connection.id] = nil }
+        refreshing = ["aws", "azure", "gcp"]
+        defer { isRefreshing = false; refreshing = [] }
+        await withTaskGroup(of: LocalCloudConnection.self) { group in
+            group.addTask { await self.discoverAWS() }
+            group.addTask { await self.discoverAzure() }
+            group.addTask { await self.discoverGCP() }
+            for await connection in group {
+                if let index = connections.firstIndex(where: { $0.id == connection.id }) { connections[index] = connection }
+                if connection.isAuthenticated { loginMessages[connection.id] = nil }
+                refreshing.remove(connection.id)
+            }
+        }
     }
 
     private func loginConfiguration(_ id: String) -> (String, [String])? {
@@ -181,7 +188,7 @@ final class LocalCloudConnectionsModel: ObservableObject {
     }
 
     private func call(_ exe: URL, _ args: [String]) async -> CloudCommandResult {
-        await runner(exe, args, normalizedEnvironment(), 20)
+        await runner(exe, args, normalizedEnvironment(), 10)
     }
 
     private func callDiscardingOutput(_ exe: URL, _ args: [String]) async -> CloudCommandResult {

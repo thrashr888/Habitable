@@ -77,3 +77,20 @@ final class RecentWorkspaceTests: XCTestCase {
     }
 
 }
+
+extension RecentWorkspaceTests {
+    @MainActor
+    func testForgetRemovesOneFolderAndLeavesTheRest() throws {
+        let suite = "RecentWorkspaceTests.forget.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = RecentWorkspaceStore(defaults: defaults)
+        let a = URL(fileURLWithPath: "/tmp/habitable-a", isDirectory: true)
+        let b = URL(fileURLWithPath: "/tmp/habitable-b", isDirectory: true)
+        store.recordSuccessfulOpen(a)
+        store.recordSuccessfulOpen(b)
+        store.forget(a)
+        XCTAssertEqual(store.folders.map(\.lastPathComponent), ["habitable-b"])
+        XCTAssertEqual(defaults.stringArray(forKey: RecentWorkspaceStore.defaultsKey)?.count, 1)
+    }
+}
