@@ -11,6 +11,7 @@ struct HCPWorkspaceSettingsFace: View {
     @State private var autoApply = false
     @State private var executionMode = "remote"
     @State private var workingDirectory = ""
+    @State private var description = ""
     @State private var loadedFor: String?
     @State private var saved = false
 
@@ -18,7 +19,7 @@ struct HCPWorkspaceSettingsFace: View {
     private var recordSignature: String {
         guard let workspace else { return "" }
         return [workspace.id, workspace.terraformVersion ?? "", workspace.executionMode ?? "", workspace.workingDirectory ?? "",
-                workspace.autoApply ? "auto" : "confirm"].joined(separator: "|")
+                workspace.autoApply ? "auto" : "confirm", workspace.description ?? "", workspace.locked ? "locked" : "open"].joined(separator: "|")
     }
 
     /// "latest", the workspace's own value, then released versions newest first.
@@ -43,6 +44,8 @@ struct HCPWorkspaceSettingsFace: View {
         if executionMode != (workspace.executionMode ?? "remote") { change.executionMode = executionMode }
         let directory = workingDirectory.trimmingCharacters(in: .whitespaces)
         if directory != (workspace.workingDirectory ?? "") { change.workingDirectory = directory }
+        let text = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text != (workspace.description ?? "") { change.description = text }
         return change
     }
 
@@ -50,6 +53,29 @@ struct HCPWorkspaceSettingsFace: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let workspace {
+                    section("Workspace") {
+                        row("Description") {
+                            TextField("What this workspace manages", text: $description, axis: .vertical)
+                                .textFieldStyle(.roundedBorder).lineLimit(1...4).frame(maxWidth: 300)
+                        }
+                        row("Project") {
+                            Text(workspace.projectName ?? "Default Project").font(.system(size: 13))
+                        }
+                        row("Lock") {
+                            HStack(spacing: 10) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: workspace.locked ? "lock.fill" : "lock.open")
+                                    Text(workspace.locked ? "Locked" : "Unlocked")
+                                }
+                                .font(.system(size: 13))
+                                Button(workspace.locked ? "Unlock" : "Lock…") {
+                                    Task { _ = await model.setSelectedWorkspaceLocked(!workspace.locked) }
+                                }
+                                .disabled(model.isSavingWorkspaceSettings)
+                                .help(workspace.locked ? "Lets runs start again" : "Queues new runs until the workspace is unlocked")
+                            }
+                        }
+                    }
                     section("Terraform") {
                         row("Version") {
                             Picker("Terraform version", selection: $terraformVersion) {
@@ -143,6 +169,7 @@ struct HCPWorkspaceSettingsFace: View {
         autoApply = workspace.autoApply
         executionMode = workspace.executionMode ?? "remote"
         workingDirectory = workspace.workingDirectory ?? ""
+        description = workspace.description ?? ""
         loadedFor = workspace.id
     }
 

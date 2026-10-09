@@ -133,6 +133,26 @@ struct HCPRun: Identifiable, Equatable, Sendable {
     var commitURL: URL? = nil
     var sender: String? = nil
     var pullRequestNumber: Int? = nil
+    var triggerReason: String? = nil
+    var commitMessage: String? = nil
+    var repositoryIdentifier: String? = nil
+
+    /// HCP's trigger reasons, in words: "File change detected in VCS", "Started by hand"...
+    var triggerWord: String? {
+        switch triggerReason {
+        case "manual": return "Started by hand"
+        case "disabled": return source == "tfe-configuration-version" ? "File change detected in VCS" : nil
+        case "matched": return "File change detected in VCS"
+        case "unmatched": return "VCS push without matching file changes"
+        case "cli": return "Started from the CLI"
+        case "api": return "Started through the API"
+        case "run_trigger", "run-trigger": return "Started by a run trigger"
+        case "scheduled", "schedule": return "Scheduled"
+        case "auto_destroy", "auto-destroy": return "Workspace lifecycle"
+        case let other?: return other.replacingOccurrences(of: "_", with: " ").capitalized
+        case nil: return nil
+        }
+    }
 
     /// "VCS", "API", "UI", "CLI", "Lifecycle", "Run trigger" from HCP's source string.
     var sourceWord: String? {
@@ -186,6 +206,11 @@ struct HCPRunDetails: Equatable, Sendable {
     var taskStages: [HCPTaskStage] = []
     var outputs: [HCPStateOutput] = []
     var stateVersionID: String? = nil
+    /// Stage timing from HCP's status timestamps.
+    var planStartedAt: Date? = nil
+    var planFinishedAt: Date? = nil
+    var applyStartedAt: Date? = nil
+    var applyFinishedAt: Date? = nil
 }
 
 struct HCPPolicyCheck: Identifiable, Equatable, Sendable {
@@ -596,11 +621,15 @@ struct HCPAPIClient: Sendable {
                                        workspaceID: run.workspaceID, workspaceName: run.workspaceName) else {
             throw HCPViewerError.invalidResponse
         }
+        let decoded = freshRun
         freshRun = HCPRun(id: freshRun.id, workspaceID: freshRun.workspaceID, workspaceName: run.workspaceName,
                           status: freshRun.status, message: freshRun.message, operation: freshRun.operation,
                           createdAt: freshRun.createdAt, hasChanges: freshRun.hasChanges, isDestroy: freshRun.isDestroy,
                           planID: freshRun.planID, applyID: freshRun.applyID, htmlURL: run.htmlURL ?? freshRun.htmlURL)
+        freshRun.source = decoded.source
+        freshRun.triggerReason = decoded.triggerReason
         let included = array(object["included"])
+        freshRun = RunProvenanceIndex(included: included).apply(to: freshRun, row: row)
         let planRow = included.first { ($0["type"] as? String) == "plans" && ($0["id"] as? String) == freshRun.planID }
         let applyRow = included.first { ($0["type"] as? String) == "applies" && ($0["id"] as? String) == freshRun.applyID }
         var planLogs: String?
@@ -617,6 +646,13 @@ struct HCPAPIClient: Sendable {
         var details = HCPRunDetails(run: freshRun, planStatus: planStatus, applyStatus: applyStatus,
                                     planLogs: Self.redactLogs(planLogs), applyLogs: Self.redactLogs(applyLogs),
                                     planReviewURL: planReview, runURL: freshRun.htmlURL)
+        func timestamp(_ attributes: [String: Any]?, _ key: String) -> Date? {
+            ((attributes?["status-timestamps"] as? [String: Any])?[key] as? String).flatMap(isoDate)
+        }
+        details.planStartedAt = timestamp(planAttributes, "started-at") ?? timestamp(planAttributes, "queued-at")
+        details.planFinishedAt = timestamp(planAttributes, "finished-at") ?? timestamp(planAttributes, "errored-at")
+        details.applyStartedAt = timestamp(applyAttributes, "started-at")
+        details.applyFinishedAt = timestamp(applyAttributes, "finished-at") ?? timestamp(applyAttributes, "errored-at")
         details.policyChecks = Self.decodePolicyChecks(included)
         details.costEstimate = Self.decodeCostEstimate(included)
         details.taskStages = Self.decodeTaskStages(included)
@@ -660,7 +696,7 @@ struct HCPAPIClient: Sendable {
         return details
     }
 
-    static let runDetailsInclude = "plan,apply,cost_estimate,policy_checks,task_stages.task_results"
+    static let runDetailsInclude = "plan,apply,cost_estimate,policy_checks,task_stages.task_results,created_by,configuration_version.ingress_attributes"
 
     private static func firstStateVersionID(_ applyRow: [String: Any]?) -> String? {
         let relationship = (applyRow?["relationships"] as? [String: Any])?["state-versions"] as? [String: Any]
@@ -1014,6 +1050,29 @@ struct HCPAPIClient: Sendable {
                             workingDirectory: (attributes["working-directory"] as? String).flatMap { $0.isEmpty ? nil : $0 })
     }
 
+    /// Locks or unlocks a workspace. Locked workspaces queue runs until unlocked.
+    func setWorkspaceLock(hostname: String, workspaceID: String, locked: Bool, reason: String?, token: String) async throws {
+        guard let host = Self.normalizedHostname(hostname), let base = URL(string: "https://\(host)"),
+              let url = URL(string: "/api/v2/workspaces/\(pathComponent(workspaceID))/actions/\(locked ? "lock" : "unlock")", relativeTo: base)?.absoluteURL else {
+            throw HCPViewerError.invalidHost
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Accept")
+        request.setValue("application/vnd.api+json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 25
+        if locked { request.httpBody = try JSONSerialization.data(withJSONObject: ["reason": reason ?? "Locked from Habitable"]) }
+        do {
+            let (_, response) = try await boundedData(for: request, limit: Self.apiResponseLimit)
+            guard let http = response as? HTTPURLResponse else { throw HCPViewerError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else {
+                throw HCPViewerError.response(status: http.statusCode, message: locked ? "HCP Terraform did not lock the workspace." : "HCP Terraform did not unlock the workspace.")
+            }
+        } catch let error as HCPViewerError { throw error }
+        catch { throw HCPViewerError.transport("Could not reach HCP Terraform. Check the connection and try again.") }
+    }
+
     /// Changes workspace settings (`terraform-version`, `auto-apply`, `execution-mode`,
     /// `working-directory`, `description`) and returns the workspace as HCP now has it.
     func updateWorkspace(hostname: String, organization: String, workspaceID: String,
@@ -1069,6 +1128,7 @@ struct HCPAPIClient: Sendable {
                          isDestroy: attributes["is-destroy"] as? Bool ?? false,
                          planID: planID, applyID: applyID, htmlURL: url)
         run.source = attributes["source"] as? String
+        run.triggerReason = attributes["trigger-reason"] as? String
         return run
     }
 
@@ -1110,6 +1170,8 @@ struct HCPAPIClient: Sendable {
                 run.commitSHA = (attributes["commit-sha"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 run.sender = (attributes["sender-username"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 run.pullRequestNumber = (attributes["pull-request-number"] as? NSNumber)?.intValue
+                run.commitMessage = (attributes["commit-message"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(200)) }
+                run.repositoryIdentifier = (attributes["identifier"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 if let text = attributes["commit-url"] as? String, let url = URL(string: text), url.scheme == "https" { run.commitURL = url }
             }
             return run
@@ -1799,6 +1861,39 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     @discardableResult
+    /// Locks or unlocks the selected workspace; the local record follows on success.
+    func setSelectedWorkspaceLocked(_ locked: Bool) async -> Bool {
+        guard !isSample, isConnected, let workspace = selectedWorkspace,
+              let token = try? tokenStore.read(hostname: hostname), !token.isEmpty, !isSavingWorkspaceSettings else { return false }
+        let host = hostname, organization = selectedOrganization
+        isSavingWorkspaceSettings = true
+        workspaceSettingsError = nil
+        defer { isSavingWorkspaceSettings = false }
+        do {
+            try await client.setWorkspaceLock(hostname: host, workspaceID: workspace.id, locked: locked, reason: nil, token: token)
+            guard isConnected, hostname == host, selectedOrganization == organization,
+                  let index = workspaces.firstIndex(where: { $0.id == workspace.id }) else { return false }
+            let old = workspaces[index]
+            workspaces[index] = HCPWorkspace(id: old.id, name: old.name, terraformVersion: old.terraformVersion,
+                                             executionMode: old.executionMode, locked: locked, htmlURL: old.htmlURL,
+                                             tagNames: old.tagNames, vcs: old.vcs, projectID: old.projectID, projectName: old.projectName,
+                                             currentRunStatus: old.currentRunStatus, currentRunCreatedAt: old.currentRunCreatedAt,
+                                             updatedAt: Date(), resourceCount: old.resourceCount, description: old.description,
+                                             autoApply: old.autoApply, workingDirectory: old.workingDirectory)
+            return true
+        } catch {
+            guard isConnected, hostname == host, selectedOrganization == organization else { return false }
+            if case HCPViewerError.response(let status, _) = error, status == 409 {
+                workspaceSettingsError = locked ? "The workspace is already locked, or a run holds the lock." : "The workspace is locked by a run or by someone else; it can be force-unlocked in HCP Terraform."
+            } else if case HCPViewerError.response(let status, _) = error, status == 403 || status == 401 {
+                workspaceSettingsError = "Your credential cannot lock or unlock this workspace."
+            } else {
+                workspaceSettingsError = locked ? "Couldn’t lock the workspace." : "Couldn’t unlock the workspace."
+            }
+            return false
+        }
+    }
+
     func updateVariable(variableID: String, value: String) async -> Bool {
         guard !isSample, isConnected, let workspace = selectedWorkspace,
               workspaceVariables.contains(where: { $0.id == variableID }),
