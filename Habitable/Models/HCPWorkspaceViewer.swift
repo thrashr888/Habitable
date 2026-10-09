@@ -1172,7 +1172,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
             .first { Self.message($0.message, namesPullRequest: merge.number) }
     }
 
-    static func message(_ message: String?, namesPullRequest number: Int) -> Bool {
+    nonisolated static func message(_ message: String?, namesPullRequest number: Int) -> Bool {
         guard let message else { return false }
         let pattern = "(^|[^0-9])#\(number)([^0-9]|$)"
         return message.range(of: pattern, options: .regularExpression) != nil
