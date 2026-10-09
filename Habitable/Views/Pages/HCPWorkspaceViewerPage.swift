@@ -315,17 +315,20 @@ struct HCPWorkspaceViewer: View {
             historyBanner: historyNotice.map { text in (text: text, dismiss: { model.returnToCurrentState() }) },
             workspaceDescription: model.selectedWorkspace?.description,
             preview: model.proposalPreview,
-            onDiscardPreview: previewedRun.map { run in { Task { await model.discard(run: run) } } },
-            onReviewPreview: previewedRun.flatMap { run in
-                ["planned", "cost_estimated", "policy_checked"].contains(run.status)
-                    ? { Task { await model.confirmApply(run: run) } } : nil
-            },
-            previewDiscardTitle: previewedRun.map { ["planned", "cost_estimated", "policy_checked"].contains($0.status) } == true ? "Discard Run" : "Hide",
-            previewReviewTitle: "Confirm Apply",
-            previewCaption: previewCaption,
+            onDiscardPreview: pullRequestOnMap != nil ? model.pullRequestActions.map { actions in { actions.close() } }
+                : previewedRun.map { run in { Task { await model.discard(run: run) } } },
+            onReviewPreview: pullRequestOnMap != nil ? model.pullRequestActions.map { actions in { actions.merge() } }
+                : previewedRun.flatMap { run in
+                    ["planned", "cost_estimated", "policy_checked"].contains(run.status)
+                        ? { Task { await model.confirmApply(run: run) } } : nil
+                },
+            previewDiscardTitle: pullRequestOnMap != nil ? "Close Proposal"
+                : (previewedRun.map { ["planned", "cost_estimated", "policy_checked"].contains($0.status) } == true ? "Discard Run" : "Hide"),
+            previewReviewTitle: pullRequestOnMap.map { pr in "Merge and Plan on \(pr.baseBranch)" } ?? "Confirm Apply",
+            previewCaption: pullRequestOnMap.map(mergeReadiness) ?? previewCaption,
             onShowPlanOutput: previewedRun.map { run in { runSelection.wrappedValue = run.id; section = .runs } },
             autoApplyBadge: model.selectedWorkspace?.autoApply == true ? "Applies without confirmation" : nil,
-            previewReviewIsApply: true,
+            previewReviewIsApply: pullRequestOnMap == nil,
             faceRequest: faceRequest,
             selectionRequest: mapSelectionRequest,
             listMode: section == .list,
@@ -405,6 +408,29 @@ struct HCPWorkspaceViewer: View {
     private var previewedRun: HCPRun? {
         let id = model.proposal?.runID ?? model.previewedRunID
         return id.flatMap { id in model.runs.first { $0.id == id } }
+    }
+
+    /// The open pull request, when the plan on the Map is its speculative plan.
+    private var pullRequestOnMap: GitProposal.PullRequest? {
+        guard let pr = model.openPullRequest, let run = previewedRun else { return nil }
+        let viaCheck = pr.checks.contains { GitProposal.PullRequest.runID(in: $0) == run.id }
+        let viaMessage = (run.message ?? "").localizedCaseInsensitiveContains(pr.title) && run.status == "planned_and_finished"
+        return viaCheck || viaMessage ? pr : nil
+    }
+
+    /// Exploration G's sentence beside Merge: what passed, who approved, what merging starts.
+    private func mergeReadiness(_ pr: GitProposal.PullRequest) -> String {
+        let failed = pr.checks.filter { $0.state == .failure }.count
+        let pending = pr.checks.filter { $0.state == .pending }.count
+        var parts: [String] = []
+        if failed > 0 { parts.append("\(failed) \(failed == 1 ? "check" : "checks") failed.") }
+        else if pending > 0 { parts.append("\(pending) \(pending == 1 ? "check is" : "checks are") still running.") }
+        else if !pr.checks.isEmpty { parts.append("Checks passed.") }
+        if let review = pr.approvedBy { parts.append("\(review.author) approved the pull request.") }
+        else if pr.reviewDecision == "CHANGES_REQUESTED" { parts.append("A reviewer asked for changes.") }
+        let ready = failed == 0 && pending == 0 && pr.reviewDecision != "CHANGES_REQUESTED" && pr.mergeable != "CONFLICTING"
+        let lead = pr.mergeable == "CONFLICTING" ? "Conflicts with \(pr.baseBranch)." : (ready ? "Ready to merge." : "Not ready to merge.")
+        return ([lead] + parts).joined(separator: " ") + " Merging starts a run on \(pr.baseBranch) in HCP Terraform; you'll confirm the apply here when its plan matches this preview."
     }
 
     private var previewCaption: String? {

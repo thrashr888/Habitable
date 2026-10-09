@@ -190,6 +190,10 @@ struct HCPProposalFace: View {
                 Text(pr.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
             }
             VStack(alignment: .leading, spacing: 0) {
+                if !pr.files.isEmpty {
+                    timelineRow(done: true, color: .green, title: "Edited",
+                                detail: "\(pr.files.count) \(pr.files.count == 1 ? "file" : "files") on \(pr.headBranch)", trailing: nil)
+                }
                 timelineRow(done: true, color: .green, title: "Pull request opened",
                             detail: "\(pr.headBranch) → \(pr.baseBranch)" + ((pr.additions != nil && pr.deletions != nil) ? " · +\(pr.additions!) −\(pr.deletions!)" : ""),
                             trailing: AnyView(Button("GitHub") { NSWorkspace.shared.open(pr.url) }.buttonStyle(.link).font(.system(size: 13))))
@@ -230,22 +234,81 @@ struct HCPProposalFace: View {
                 }
                 timelineRow(done: pr.reviewDecision == "APPROVED",
                             color: pr.reviewDecision == "APPROVED" ? .green : (pr.reviewDecision == "CHANGES_REQUESTED" ? .red : .secondary),
-                            title: "Review",
-                            detail: pr.reviewDecision.map { $0.replacingOccurrences(of: "_", with: " ").capitalized } ?? "No review yet",
+                            title: pr.reviewDecision == "APPROVED" ? "Approved" : (pr.reviewDecision == "CHANGES_REQUESTED" ? "Changes requested" : "Review"),
+                            detail: pr.approvedBy.map { review in
+                                review.author + (review.submittedAt.map { " · " + $0.formatted(.relative(presentation: .named)) } ?? "")
+                            } ?? (pr.reviewDecision == "CHANGES_REQUESTED" ? "A reviewer asked for changes" : "No review yet"),
                             trailing: nil)
                 timelineRow(done: false, color: .secondary, title: "Merge",
                             detail: "Starts a run on \(pr.baseBranch) in HCP Terraform", trailing: nil)
                 timelineRow(done: false, color: .secondary, title: "Confirm apply",
                             detail: "Here, once that run's plan matches this preview", trailing: nil, last: true)
             }
+            if let preview = model.proposalPreview, model.previewedRunID == (specRun?.id ?? planRunID) {
+                changesList(preview)
+            }
             HStack {
                 Button("Close Proposal") { Task { await closePullRequest(pr, in: folder) } }.disabled(isWorking)
                 Spacer()
                 Button("Merge…") { Task { await merge(pr, in: folder) } }.buttonStyle(.borderedProminent).disabled(isWorking)
             }
+            let conversation = pr.reviews.filter { !$0.body.isEmpty } .map { ($0.author, $0.state == "APPROVED" ? "approved" : ($0.state == "CHANGES_REQUESTED" ? "requested changes" : "commented"), $0.body, $0.submittedAt) }
+                + pr.comments.map { ($0.author, "commented", $0.body, $0.createdAt) }
+            if !conversation.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Conversation").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    ForEach(Array(conversation.suffix(3).enumerated()), id: \.offset) { _, entry in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 4) {
+                                Text(entry.0).font(.system(size: 13, weight: .semibold))
+                                Text(entry.1).font(.system(size: 13)).foregroundStyle(.secondary)
+                                if let when = entry.3 { Text("· " + when.formatted(.relative(presentation: .named))).font(.system(size: 12)).foregroundStyle(.secondary) }
+                            }
+                            Text(entry.2).font(.system(size: 13)).lineLimit(4).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
         }
         .padding(12)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// "3 changes": the tiles the previewed plan touches, each with its action word.
+    private func changesList(_ preview: MapChangePreview) -> some View {
+        let changed = preview.map.tiles.filter { (preview.tileActions[$0.id] ?? .none) != .none }
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(changed.count) \(changed.count == 1 ? "change" : "changes")").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            ForEach(changed, id: \.id) { tile in
+                let action = preview.tileActions[tile.id] ?? .none
+                HStack(spacing: 8) {
+                    Text(tile.title).font(.system(size: 13)).lineLimit(1)
+                    Spacer()
+                    Text(actionWord(action)).font(.system(size: 12, weight: .medium)).foregroundStyle(actionTint(action))
+                }
+            }
+        }
+    }
+
+    private func actionWord(_ action: MapChangeAction) -> String {
+        switch action {
+        case .create: return "new"
+        case .update: return "update"
+        case .replace: return "replace"
+        case .delete: return "remove"
+        case .read: return "read"
+        case .none: return ""
+        }
+    }
+
+    private func actionTint(_ action: MapChangeAction) -> Color {
+        switch action {
+        case .create: return .green
+        case .update: return .orange
+        case .replace: return Color(red: 0.93, green: 0.33, blue: 0.62)
+        case .delete: return .red
+        default: return .secondary
+        }
     }
 
     @State private var showChecks = false
@@ -573,6 +636,14 @@ struct HCPProposalFace: View {
         switch result {
         case .success(let (status, pr, open)):
             gitStatus = status; pullRequest = pr; openPullRequests = open; gitError = nil
+            model.openPullRequest = pr
+            if let pr {
+                model.pullRequestActions = PullRequestActions(
+                    merge: { Task { await merge(pr, in: folder) } },
+                    close: { Task { await closePullRequest(pr, in: folder) } })
+            } else {
+                model.pullRequestActions = nil
+            }
         case .failure(let error):
             gitStatus = nil; gitError = error.localizedDescription
         }

@@ -87,14 +87,20 @@ private struct FolderOpenHandler: View {
             .onReceive(requests.$pending.dropFirst()) { folders in
                 guard !folders.isEmpty else { return }
                 requests.pending = []
-                for folder in folders {
-                    let url = folder.standardizedFileURL
-                    // One window per folder: a second open brings the existing window forward.
-                    if let existing = NSApp.windows.first(where: { $0.representedURL?.standardizedFileURL == url }) {
-                        existing.makeKeyAndOrderFront(nil)
-                    } else {
-                        HabitableAppDelegate.markExternal(url)
-                        openWindow(id: "Workspace.viewer", value: url)
+                Task { @MainActor in
+                    // At launch the open arrives before restored windows have set their
+                    // represented files; give restoration a moment so a folder that is
+                    // already open is found rather than opened twice.
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    for folder in folders {
+                        let url = folder.standardizedFileURL
+                        // One window per folder: a second open brings the existing window forward.
+                        if let existing = NSApp.windows.first(where: { $0.representedURL?.standardizedFileURL == url }) {
+                            existing.makeKeyAndOrderFront(nil)
+                        } else {
+                            HabitableAppDelegate.markExternal(url)
+                            openWindow(id: "Workspace.viewer", value: url)
+                        }
                     }
                 }
             }

@@ -58,6 +58,10 @@ enum GitProposal {
         var checks: [Check] = []
         /// Files the pull request changes, with their line counts.
         var files: [ChangedPath] = []
+        /// Reviews and comments, newest last, for the conversation.
+        var reviews: [Review] = []
+        var comments: [Comment] = []
+        var approvedBy: Review? { reviews.last { $0.state == "APPROVED" } }
 
         /// The HCP Terraform run a check links to, when the check is one of HCP's.
         static func runID(in check: Check) -> String? {
@@ -66,6 +70,19 @@ enum GitProposal {
                   url.pathComponents[index + 1].hasPrefix("run-") else { return nil }
             return url.pathComponents[index + 1]
         }
+    }
+
+    struct Review: Equatable, Sendable {
+        let author: String
+        let state: String      // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
+        let body: String
+        let submittedAt: Date?
+    }
+
+    struct Comment: Equatable, Sendable {
+        let author: String
+        let body: String
+        let createdAt: Date?
     }
 
     struct ChangedPath: Equatable, Sendable {
@@ -83,7 +100,7 @@ enum GitProposal {
 
     static let branchPrefix = "habitable/"
     private static let commandTimeout: TimeInterval = 300
-    private static let jsonFields = "number,title,url,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions,statusCheckRollup,files"
+    private static let jsonFields = "number,title,url,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions,statusCheckRollup,files,reviews,comments"
 
     // MARK: Status
 
@@ -317,8 +334,37 @@ enum GitProposal {
             additions: (object["additions"] as? NSNumber)?.intValue,
             deletions: (object["deletions"] as? NSNumber)?.intValue,
             checks: parseChecks(object["statusCheckRollup"]),
-            files: parseFiles(object["files"])
+            files: parseFiles(object["files"]),
+            reviews: parseReviews(object["reviews"]),
+            comments: parseComments(object["comments"])
         )
+    }
+
+    /// A formatter per call: ISO8601DateFormatter is not Sendable, and these parse a handful of dates.
+    private static func isoDate(_ text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: text) ?? { formatter.formatOptions.insert(.withFractionalSeconds); return formatter.date(from: text) }()
+    }
+
+    static func parseReviews(_ value: Any?) -> [Review] {
+        guard let rows = value as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            guard let state = row["state"] as? String else { return nil }
+            let author = ((row["author"] as? [String: Any])?["login"] as? String) ?? "someone"
+            let body = String(((row["body"] as? String) ?? "").prefix(600))
+            let when = (row["submittedAt"] as? String).flatMap(isoDate)
+            return Review(author: author, state: state, body: body, submittedAt: when)
+        }
+    }
+
+    static func parseComments(_ value: Any?) -> [Comment] {
+        guard let rows = value as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            guard let body = row["body"] as? String, !body.isEmpty else { return nil }
+            let author = ((row["author"] as? [String: Any])?["login"] as? String) ?? "someone"
+            let when = (row["createdAt"] as? String).flatMap(isoDate)
+            return Comment(author: author, body: String(body.prefix(600)), createdAt: when)
+        }
     }
 
     /// Pure: `files` rows carry `path`, `additions`, `deletions`.
