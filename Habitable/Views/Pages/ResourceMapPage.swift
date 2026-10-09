@@ -54,6 +54,9 @@ struct ResourceMapPage: View {
     var onDiscardPreview: (() -> Void)? = nil
     var onReviewPreview: (() -> Void)? = nil
     var selectionRequest: MapSelectionRequest? = nil
+    var listMode = false
+    var onShowOnMap: ((String) -> Void)? = nil
+    var onOpenSource: ((String) -> Void)? = nil
 
     var body: some View {
         ResourceMapContent(
@@ -79,6 +82,7 @@ struct ResourceMapPage: View {
             sideFaces: sideFaces,
             preview: preview, onDiscardPreview: onDiscardPreview, onReviewPreview: onReviewPreview,
             selectionRequest: selectionRequest,
+            listMode: listMode, onShowOnMap: onShowOnMap, onOpenSource: onOpenSource,
             terraformExecutableURL: workspace.runner.executableURL,
             workspaceInitialized: workspace.isInitialized)
     }
@@ -165,6 +169,36 @@ struct ResourceMapContent: View {
     var faceRequest: MapSideFaceRequest? = nil
     /// Another part of the window asking the Map to select a resource.
     var selectionRequest: MapSelectionRequest? = nil
+    /// The List (Exploration E): the same workspace as a table where the canvas
+    /// was, with the same Inspector and faces beside it.
+    var listMode = false
+    var onShowOnMap: ((String) -> Void)? = nil
+    var onOpenSource: ((String) -> Void)? = nil
+    @State private var listSelection: Set<String> = []
+
+    private var listRows: [ResourceListRow] {
+        var actions: [String: String] = [:]
+        for (address, action) in preview?.resourceActions ?? [:] where action != .none { actions[address] = "\(action)" }
+        return ResourceListBuilder.rows(resources: resources, tiles: tiles, actions: actions, drifted: [])
+    }
+
+    private var listTable: some View {
+        ResourceTableView(rows: listRows, selection: $listSelection,
+                          isLoading: isLoading && map == nil,
+                          emptyTitle: emptyTitle ?? "No resources",
+                          emptyDetail: emptyDetail ?? "Resources appear here after they are recorded in Terraform state.",
+                          onShowOnMap: onShowOnMap,
+                          onOpenReference: { row in
+                              if let url = TerraformRegistryDocsModel.documentationURL(type: row.type, providerName: row.provider, mode: row.isDataSource ? "data" : "managed") {
+                                  NSWorkspace.shared.open(url)
+                              }
+                          },
+                          onOpenSource: onOpenSource)
+            .onChange(of: listSelection) { ids in
+                if ids.count == 1, let address = ids.first { select(address: address) }
+                else if ids.isEmpty { selectedTileID = nil; selectedMember = nil }
+            }
+    }
     @State private var changesOnly = false
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
@@ -199,8 +233,10 @@ struct ResourceMapContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            if !listMode {
+                header
+                Divider()
+            }
             if let historyBanner {
                 HStack(spacing: 10) {
                     Image(systemName: "clock.arrow.circlepath").foregroundStyle(Color.accentColor)
@@ -215,13 +251,17 @@ struct ResourceMapContent: View {
             VSplitView {
                 HStack(spacing: 0) {
                     // The inventory slides like a Finder sidebar; HSplitView cannot animate.
-                    if showingInventory, !tiles.isEmpty {
+                    if showingInventory, !tiles.isEmpty, !listMode {
                         inventory.frame(width: 224).frame(maxHeight: .infinity)
                             .transition(.move(edge: .leading).combined(with: .opacity))
                         Divider()
                     }
                     HSplitView {
-                        canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        if listMode {
+                            listTable.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        } else {
+                            canvas.frame(minWidth: 330, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        }
                         if selectedTile != nil || !sideFaces.isEmpty {
                             sidePane.frame(minWidth: 320, idealWidth: 360, maxWidth: 440, maxHeight: .infinity)
                         }
@@ -341,8 +381,6 @@ struct ResourceMapContent: View {
                 Toggle(isOn: $showsConnections) { Image(systemName: "point.3.connected.trianglepath.dotted") }
                     .toggleStyle(.button).accessibilityLabel("Show dependency connections")
                     .help("Show Terraform dependencies between groups")
-                Button(action: onShowList) { Label("List", systemImage: "list.bullet") }
-                    .buttonStyle(.bordered).help("Open the resource list")
                 Button(action: refresh) { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.bordered).disabled(!canRefresh)
                     .accessibilityLabel("Refresh map").help("Refresh map from Terraform state")

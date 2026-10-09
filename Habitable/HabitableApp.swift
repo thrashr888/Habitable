@@ -203,7 +203,7 @@ private struct CloudWorkspaceWindow: View {
                     let folders = linkedLocalFolders
                     if folders.count == 1, let folder = folders.first {
                         Button { openWindow(id: "Workspace.viewer", value: folder) } label: {
-                            Label("Open local folder", systemImage: "folder.badge.gearshape")
+                            Label("Open Folder", systemImage: "folder.badge.gearshape").labelStyle(.titleAndIcon)
                         }
                         .help("Open \(folder.path), whose Terraform backend is this workspace")
                     } else if folders.count > 1 {
@@ -211,7 +211,7 @@ private struct CloudWorkspaceWindow: View {
                             ForEach(folders, id: \.path) { folder in
                                 Button(folder.path) { openWindow(id: "Workspace.viewer", value: folder) }
                             }
-                        } label: { Label("Open local folder", systemImage: "folder.badge.gearshape") }
+                        } label: { Label("Open Folder", systemImage: "folder.badge.gearshape").labelStyle(.titleAndIcon) }
                         .help("Local folders whose Terraform backend is this workspace")
                     } else if let workspace = model.selectedWorkspace, workspace.vcs?.cloneURL != nil {
                         if checkout.job != nil {
@@ -221,13 +221,13 @@ private struct CloudWorkspaceWindow: View {
                                 checkout.checkOut(workspace: workspace, organization: model.selectedOrganization, hostname: model.hostname) { folder in
                                     openWindow(id: "Workspace.viewer", value: folder)
                                 }
-                            } label: { Label("Check Out…", systemImage: "arrow.down.to.line") }
+                            } label: { Label("Check Out…", systemImage: "arrow.down.to.line").labelStyle(.titleAndIcon) }
                             .help("Clone \(workspace.vcs?.displayName ?? "the repository") onto this Mac and open it")
                         }
                     } else {
-                        Button { openWindow(id: "Workspace.viewer") } label: { Label("Local workspace", systemImage: "folder") }
+                        Button { openWindow(id: "Workspace.viewer") } label: { Label("Local Folder", systemImage: "folder").labelStyle(.titleAndIcon) }
                     }
-                    Button { openWindow(id: "App.settings") } label: { Label("Connections", systemImage: "network") }
+                    Button { openWindow(id: "App.settings") } label: { Label("Connections", systemImage: "network").labelStyle(.titleAndIcon) }
                 }
             }
             .onAppear { model.setVisible(true) }
