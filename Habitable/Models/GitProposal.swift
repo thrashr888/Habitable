@@ -56,6 +56,8 @@ enum GitProposal {
         let deletions: Int?
         /// GitHub's status checks for the head commit (CI, HCP Terraform runs, policy).
         var checks: [Check] = []
+        /// Files the pull request changes, with their line counts.
+        var files: [ChangedPath] = []
 
         /// The HCP Terraform run a check links to, when the check is one of HCP's.
         static func runID(in check: Check) -> String? {
@@ -64,6 +66,12 @@ enum GitProposal {
                   url.pathComponents[index + 1].hasPrefix("run-") else { return nil }
             return url.pathComponents[index + 1]
         }
+    }
+
+    struct ChangedPath: Equatable, Sendable {
+        let path: String
+        let additions: Int
+        let deletions: Int
     }
 
     struct Check: Equatable, Sendable {
@@ -75,7 +83,7 @@ enum GitProposal {
 
     static let branchPrefix = "habitable/"
     private static let commandTimeout: TimeInterval = 300
-    private static let jsonFields = "number,title,url,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions,statusCheckRollup"
+    private static let jsonFields = "number,title,url,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions,statusCheckRollup,files"
 
     // MARK: Status
 
@@ -308,8 +316,19 @@ enum GitProposal {
             mergeable: text("mergeable"), reviewDecision: text("reviewDecision"),
             additions: (object["additions"] as? NSNumber)?.intValue,
             deletions: (object["deletions"] as? NSNumber)?.intValue,
-            checks: parseChecks(object["statusCheckRollup"])
+            checks: parseChecks(object["statusCheckRollup"]),
+            files: parseFiles(object["files"])
         )
+    }
+
+    /// Pure: `files` rows carry `path`, `additions`, `deletions`.
+    static func parseFiles(_ value: Any?) -> [ChangedPath] {
+        guard let rows = value as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            guard let path = row["path"] as? String, !path.isEmpty else { return nil }
+            return ChangedPath(path: path, additions: (row["additions"] as? NSNumber)?.intValue ?? 0,
+                               deletions: (row["deletions"] as? NSNumber)?.intValue ?? 0)
+        }
     }
 
     /// Pure: `statusCheckRollup` holds StatusContext rows (`context`, `state`,

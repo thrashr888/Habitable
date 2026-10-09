@@ -25,6 +25,12 @@ struct MapChangePreview: Equatable, Sendable {
     let resourceActions: [String: MapChangeAction]
     let newTileIDs: Set<String>
     let consequences: PlanConsequences
+    /// The plan the preview came from, for per-resource before/after in the Inspector.
+    var plan: TerraformPlan? = nil
+
+    func change(for address: String) -> PlanResourceChange? {
+        plan?.resourceChanges.first { $0.address == address && $0.action != "no-op" }
+    }
 
     var changedTileCount: Int { tileActions.values.filter { $0 != .none }.count }
     var unchangedTileCount: Int { tileActions.count - changedTileCount }
@@ -62,8 +68,10 @@ struct MapChangePreview: Equatable, Sendable {
             tileActions[tile.id] = members.compactMap { resourceActions[$0] }.max() ?? MapChangeAction.none
             if members.isDisjoint(with: existing) { newTileIDs.insert(tile.id) }
         }
-        return MapChangePreview(map: map, tileActions: tileActions, resourceActions: resourceActions,
+        var built = MapChangePreview(map: map, tileActions: tileActions, resourceActions: resourceActions,
                                 newTileIDs: newTileIDs, consequences: plan.consequences)
+        built.plan = plan
+        return built
     }
 
     /// Overlay a plan on an already-classified map: current tiles and connections stay exactly as they are,
@@ -92,8 +100,10 @@ struct MapChangePreview: Equatable, Sendable {
         for tile in map.tiles {
             tileActions[tile.id] = (tile.resources + [tile.id]).compactMap { resourceActions[$0] }.max() ?? MapChangeAction.none
         }
-        return MapChangePreview(map: map, tileActions: tileActions, resourceActions: resourceActions,
+        var built = MapChangePreview(map: map, tileActions: tileActions, resourceActions: resourceActions,
                                 newTileIDs: Set(newTiles.map(\.id)), consequences: plan.consequences)
+        built.plan = plan
+        return built
     }
 
     static func parse(address: String) -> (type: String, name: String, module: String, isData: Bool)? {

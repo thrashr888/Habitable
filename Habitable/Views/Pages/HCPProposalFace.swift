@@ -193,6 +193,22 @@ struct HCPProposalFace: View {
                 timelineRow(done: true, color: .green, title: "Pull request opened",
                             detail: "\(pr.headBranch) → \(pr.baseBranch)" + ((pr.additions != nil && pr.deletions != nil) ? " · +\(pr.additions!) −\(pr.deletions!)" : ""),
                             trailing: AnyView(Button("GitHub") { NSWorkspace.shared.open(pr.url) }.buttonStyle(.link).font(.system(size: 13))))
+                if !pr.files.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Files changed").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        ForEach(pr.files.prefix(6), id: \.path) { file in
+                            HStack(spacing: 8) {
+                                Text(file.path).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Text("+\(file.additions) −\(file.deletions)").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                            }
+                        }
+                        if pr.files.count > 6 {
+                            Text("and \(pr.files.count - 6) more").font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.leading, 19).padding(.bottom, 10)
+                }
                 // The run HCP actually recorded outranks GitHub's status context for it.
                 timelineRow(done: specRun.map { $0.status == "planned_and_finished" } ?? (planCheck?.state == .success),
                             color: specRun.map { run in run.status == "errored" ? Color.red : (run.status == "planned_and_finished" ? .green : .orange) }
@@ -270,7 +286,7 @@ struct HCPProposalFace: View {
                 Spacer()
                 if waiting, let run {
                     Button("Discard") { Task { await model.discard(run: run) } }
-                    Button("Confirm Apply") { Task { await model.confirmApply(run: run) } }.buttonStyle(.borderedProminent)
+                    confirmApplyButton(runID: run.id) { Task { await model.confirmApply(run: run) } }
                 } else if applied || failed || run == nil {
                     Button("Done") { model.clearMerge() }
                 }
@@ -412,7 +428,7 @@ struct HCPProposalFace: View {
                 switch proposal.step {
                 case .needsConfirmation:
                     Button("Discard") { Task { await model.discardProposal() } }
-                    Button("Confirm Apply") { Task { await model.confirmProposalApply() } }.buttonStyle(.borderedProminent)
+                    confirmApplyButton(runID: proposal.runID) { Task { await model.confirmProposalApply() } }
                 case .applied, .errored, .discarded:
                     Button("Done") { model.dismissProposal() }
                 default:
@@ -473,7 +489,7 @@ struct HCPProposalFace: View {
                             Button(model.previewedRunID == run.id ? "On the Map" : "Show on Map") { onShowRun(run) }
                                 .buttonStyle(.link).font(.system(size: 13)).disabled(model.previewedRunID == run.id)
                             Button("Discard") { Task { await model.discard(run: run) } }.controlSize(.small)
-                            Button("Confirm Apply") { Task { await model.confirmApply(run: run) } }.buttonStyle(.borderedProminent).controlSize(.small)
+                            confirmApplyButton(runID: run.id) { Task { await model.confirmApply(run: run) } }
                         }
                     }
                     .padding(10)
@@ -522,6 +538,16 @@ struct HCPProposalFace: View {
         guard log.contains("Blocks of type \"cloud\" are not expected") || log.contains("Unsupported block type"),
               let version = workspace?.terraformVersion else { return nil }
         return "This workspace runs Terraform \(version). The folder's cloud block needs 1.1 or later; change the workspace's Terraform version in Settings, or use a remote backend block instead."
+    }
+
+    /// Confirm Apply holds when the previewed plan for this run replaces or removes
+    /// anything (Exploration C); additive plans apply on a click.
+    @ViewBuilder private func confirmApplyButton(runID: String, action: @escaping () -> Void) -> some View {
+        if model.previewedRunID == runID, let c = model.proposalPreview?.consequences, c.replace + c.destroy > 0 {
+            HoldToConfirmButton(title: "Confirm Apply", action: action)
+        } else {
+            Button("Confirm Apply", action: action).buttonStyle(.borderedProminent)
+        }
     }
 
     private var footnote: some View {

@@ -111,3 +111,65 @@ struct HeaderDisclosureStyle: DisclosureGroupStyle {
         }
     }
 }
+
+
+/// A button that fires only after being held, like Delete in Photos. Used
+/// where a preview would replace or remove something (Exploration C).
+struct HoldToConfirmButton: View {
+    let title: String
+    var holdSeconds: Double = 1.2
+    let action: () -> Void
+    @State private var progress = 0.0
+    @State private var holding = false
+    @State private var timer: Timer?
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.25))
+            GeometryReader { geometry in
+                RoundedRectangle(cornerRadius: 6).fill(Color.accentColor)
+                    .frame(width: geometry.size.width * progress)
+            }
+            Text(holding ? "Keep holding…" : title)
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
+                .padding(.horizontal, 12).frame(maxWidth: .infinity)
+        }
+        .frame(height: 24).fixedSize(horizontal: true, vertical: false)
+        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .gesture(LongPressGesture(minimumDuration: holdSeconds).onEnded { _ in finish() }
+            .simultaneously(with: DragGesture(minimumDistance: 0)
+                .onChanged { _ in if !holding { start() } }
+                .onEnded { _ in if progress < 1 { cancel() } }))
+        .help("Press and hold to \(title.lowercased())")
+        .accessibilityLabel(title)
+        .accessibilityHint("Press and hold")
+        .accessibilityAction { action() }
+    }
+
+    private func start() {
+        holding = true
+        progress = 0
+        timer?.invalidate()
+        let step = 0.02 / holdSeconds
+        timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
+            Task { @MainActor in
+                progress = min(1, progress + step)
+                withAnimation(.linear(duration: 0.02)) {}
+            }
+        }
+    }
+
+    private func cancel() {
+        timer?.invalidate(); timer = nil
+        withAnimation(.easeOut(duration: 0.2)) { progress = 0 }
+        holding = false
+    }
+
+    private func finish() {
+        timer?.invalidate(); timer = nil
+        progress = 1
+        holding = false
+        action()
+        withAnimation(.easeOut(duration: 0.3)) { progress = 0 }
+    }
+}

@@ -554,7 +554,11 @@ struct ContentView: View {
                                 onShowOnMap: { address in
                                     mapSelectionRequest = MapSelectionRequest(address: address)
                                     navigationSelection.wrappedValue = .map
-                                })
+                                },
+                                onShowPlanOutput: {
+                                    if let run = previewRun { selectedRun = run.id; navigationSelection.wrappedValue = .runs }
+                                },
+                                autoApplyBadge: workspace.autoApply ? "Applies automatically" : nil)
                 Divider()
                 MapTimelineStrip(clips: localChangeClips, selectedID: selectedRun?.uuidString,
                                  hint: "Select a change to review its run",
