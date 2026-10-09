@@ -10,6 +10,14 @@ struct InfrastructureTemplate: Identifiable, Equatable, Sendable {
         case networks = "Networks"
         case learn = "Learn"
         case playground = "Playground (no cloud)"
+        /// Public Terraform Registry modules, searched live; not a static catalog.
+        case registry = "From the registry"
+    }
+
+    /// Where a template came from, so the folder and the chooser link back to it.
+    struct Link: Equatable, Sendable {
+        let title: String
+        let url: URL
     }
 
     struct PlannedResource: Equatable, Sendable {
@@ -35,6 +43,7 @@ struct InfrastructureTemplate: Identifiable, Equatable, Sendable {
     let inputs: [Input]
     /// Filename to contents. `${input}` placeholders are filled in when written.
     let files: [String: String]
+    var links: [Link] = []
 
     var resourceCount: Int { resources.count }
 }
