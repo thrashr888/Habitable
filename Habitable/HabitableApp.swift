@@ -199,12 +199,24 @@ private struct CloudWorkspaceWindow: View {
             .navigationTitle(model.selectedWorkspace?.name ?? "HCP Terraform")
             .navigationSubtitle(model.isConnected ? "\(model.selectedOrganization) · HCP Terraform" : "")
             .toolbar {
+                // Plain buttons, like Variables: the shared glass pill made the pair read as one control.
+                if #available(macOS 26, *) {
+                    cloudToolbarGroup.sharedBackgroundVisibility(.hidden)
+                } else {
+                    cloudToolbarGroup
+                }
+            }
+            .modifier(CloudWindowModifiers(model: model, recentWorkspaces: recentWorkspaces, localLinks: localLinks, checkout: checkout))
+    }
+
+    private var cloudToolbarGroup: some ToolbarContent {
                 ToolbarItemGroup {
                     let folders = linkedLocalFolders
                     if folders.count == 1, let folder = folders.first {
                         Button { openWindow(id: "Workspace.viewer", value: folder) } label: {
                             Label("Open Folder", systemImage: "folder.badge.gearshape").labelStyle(.titleAndIcon)
                         }
+                        .buttonStyle(.borderless)
                         .help("Open \(folder.path), whose Terraform backend is this workspace")
                     } else if folders.count > 1 {
                         Menu {
@@ -228,8 +240,20 @@ private struct CloudWorkspaceWindow: View {
                         Button { openWindow(id: "Workspace.viewer") } label: { Label("Local Folder", systemImage: "folder").labelStyle(.titleAndIcon) }
                     }
                     Button { openWindow(id: "App.settings") } label: { Label("Connections", systemImage: "network").labelStyle(.titleAndIcon) }
+                        .buttonStyle(.borderless)
                 }
-            }
+    }
+}
+
+/// The cloud window's lifecycle hooks, kept off the toolbar builder.
+private struct CloudWindowModifiers: ViewModifier {
+    @ObservedObject var model: HCPWorkspaceViewerModel
+    @ObservedObject var recentWorkspaces: RecentWorkspaceStore
+    @ObservedObject var localLinks: LocalWorkspaceLinkIndex
+    @ObservedObject var checkout: WorkspaceCheckoutCoordinator
+
+    func body(content: Content) -> some View {
+        content
             .onAppear { model.setVisible(true) }
             .onDisappear { model.setVisible(false) }
             .task { if !model.isConnected && !model.isLoading && model.hasStoredCredential { await model.connect() } }
