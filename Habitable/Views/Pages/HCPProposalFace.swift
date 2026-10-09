@@ -55,6 +55,15 @@ struct HCPProposalFace: View {
         }
         .task(id: folder?.path) { await refreshGit() }
         .onChange(of: model.runs.count) { _ in Task { await refreshGit() } }
+        // While a pull request is open, its checks and review state change on GitHub's side.
+        .task(id: pullRequest?.number) {
+            guard pullRequest != nil else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                guard !Task.isCancelled else { return }
+                await refreshGit()
+            }
+        }
     }
 
     // MARK: Source folder
@@ -123,7 +132,7 @@ struct HCPProposalFace: View {
                 } else if gitError == nil {
                     LoadingIndicator(size: 16, label: "Reading the checkout…")
                 }
-                if !openPullRequests.isEmpty {
+                if openPullRequests.contains(where: { $0.number != pullRequest?.number }) {
                     otherProposals
                 }
             }
@@ -168,6 +177,32 @@ struct HCPProposalFace: View {
                 }
                 if let add = pr.additions, let del = pr.deletions {
                     Text("+\(add) −\(del)").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                }
+            }
+            if !pr.checks.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Checks").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    ForEach(pr.checks, id: \.name) { check in
+                        HStack(spacing: 8) {
+                            Circle().fill(checkColor(check.state)).frame(width: 7, height: 7)
+                            Text(check.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            if let runID = GitProposal.PullRequest.runID(in: check), isThisWorkspace(check) {
+                                Button(model.previewedRunID == runID ? "On the Map" : "Show plan on Map") {
+                                    guard let workspace else { return }
+                                    let run = HCPRun(id: runID, workspaceID: workspace.id, workspaceName: workspace.name,
+                                                     status: check.state == .pending ? "planning" : "planned_and_finished",
+                                                     message: pr.title, operation: "plan", createdAt: nil, hasChanges: nil,
+                                                     isDestroy: false, planID: nil, applyID: nil, htmlURL: check.url)
+                                    onShowRun(run)
+                                }
+                                .buttonStyle(.link).font(.system(size: 13))
+                                .disabled(model.previewedRunID == runID || check.state == .pending)
+                            } else if let url = check.url {
+                                Button("Open") { NSWorkspace.shared.open(url) }.buttonStyle(.link).font(.system(size: 13))
+                            }
+                        }
+                    }
                 }
             }
             HStack {
@@ -327,6 +362,21 @@ struct HCPProposalFace: View {
                     }
                 }
             }
+        }
+    }
+
+    /// HCP's check for this very workspace is named "Terraform Cloud/<org>/<workspace>".
+    private func isThisWorkspace(_ check: GitProposal.Check) -> Bool {
+        guard let workspace else { return false }
+        return check.name.hasSuffix("/\(model.selectedOrganization)/\(workspace.name)")
+    }
+
+    private func checkColor(_ state: GitProposal.Check.State) -> Color {
+        switch state {
+        case .success: return .green
+        case .failure: return .red
+        case .pending: return .orange
+        case .neutral: return .secondary
         }
     }
 

@@ -54,11 +54,28 @@ enum GitProposal {
         let reviewDecision: String?
         let additions: Int?
         let deletions: Int?
+        /// GitHub's status checks for the head commit (CI, HCP Terraform runs, policy).
+        var checks: [Check] = []
+
+        /// The HCP Terraform run a check links to, when the check is one of HCP's.
+        static func runID(in check: Check) -> String? {
+            guard let url = check.url, url.pathComponents.count >= 2,
+                  let index = url.pathComponents.lastIndex(of: "runs"), index + 1 < url.pathComponents.count,
+                  url.pathComponents[index + 1].hasPrefix("run-") else { return nil }
+            return url.pathComponents[index + 1]
+        }
+    }
+
+    struct Check: Equatable, Sendable {
+        enum State: String, Sendable { case pending, success, failure, neutral }
+        let name: String
+        let state: State
+        let url: URL?
     }
 
     static let branchPrefix = "habitable/"
     private static let commandTimeout: TimeInterval = 300
-    private static let jsonFields = "number,title,url,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions"
+    private static let jsonFields = "number,title,url,headRefName,baseRefName,state,isDraft,mergeable,reviewDecision,additions,deletions,statusCheckRollup"
 
     // MARK: Status
 
@@ -278,8 +295,30 @@ enum GitProposal {
             isDraft: (object["isDraft"] as? Bool) ?? false,
             mergeable: text("mergeable"), reviewDecision: text("reviewDecision"),
             additions: (object["additions"] as? NSNumber)?.intValue,
-            deletions: (object["deletions"] as? NSNumber)?.intValue
+            deletions: (object["deletions"] as? NSNumber)?.intValue,
+            checks: parseChecks(object["statusCheckRollup"])
         )
+    }
+
+    /// Pure: `statusCheckRollup` holds StatusContext rows (`context`, `state`,
+    /// `targetUrl`) and CheckRun rows (`name`, `status`, `conclusion`, `detailsUrl`).
+    static func parseChecks(_ value: Any?) -> [Check] {
+        guard let rows = value as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            let name = (row["context"] as? String) ?? (row["name"] as? String) ?? ""
+            guard !name.isEmpty else { return nil }
+            let raw = ((row["conclusion"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                       ?? (row["state"] as? String) ?? (row["status"] as? String) ?? "").uppercased()
+            let state: Check.State
+            switch raw {
+            case "SUCCESS": state = .success
+            case "FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE": state = .failure
+            case "PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED": state = .pending
+            default: state = .neutral
+            }
+            let url = ((row["targetUrl"] as? String) ?? (row["detailsUrl"] as? String)).flatMap { URL(string: $0) }
+            return Check(name: name, state: state, url: url?.scheme == "https" ? url : nil)
+        }
     }
 
     // MARK: Process plumbing
