@@ -264,3 +264,11 @@ Still from D: Quick Help on individual Inspector facts and on run stages; the "W
 - Templates: Static website, Edge site, Redirect domain, Container website, Postgres database, Private network, Learn: Outputs and inputs, Playground. Their READMEs state what the template leaves out (certificate validation, bucket policy, IAM roles).
 - Quick Help is now per window: each window owns its toggle and card; new windows start from the last choice. Verified: off in a folder window, still on in the HCP Terraform window.
 - The welcome's "Needs from you" line uses the workspace's missing required inputs.
+
+## Modules from the Registry (New infrastructure, continued)
+
+- The chooser gains a Modules section: **From the registry** searches registry.terraform.io as you type, with a provider filter; verified modules first with no query, results sorted by downloads. Read-only, no credentials.
+- A module's page shows what it creates (the root's declared resources, or a line saying it builds from submodules), the inputs it requires, and **View in Registry** and **Source** buttons. Source links only when the module's source is https.
+- Create Folder writes `main.tf` with one `module` block pinned to the chosen version, `variables.tf` for the required inputs (blank values become `""`, `[]`, `{}` by type so validate still passes), and a README that links back to the Registry page and the source and lists the outputs. The module's code stays at its source; Terraform fetches it on the first Preview.
+- The welcome ("Declared, not built.") now counts module calls: "main.tf calls 1 module", with a card per module showing source, version and a Registry link. Verified live with terraform-google-modules/project-factory.
+- File menu: **New Infrastructure…** (⌘⇧N) opens the chooser in the front window, or a Library window with the chooser up. Library footer rows take the click across the full row.

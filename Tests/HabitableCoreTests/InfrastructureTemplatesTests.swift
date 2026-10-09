@@ -66,7 +66,7 @@ final class InfrastructureTemplatesTests: XCTestCase {
         XCTAssertNil(InfrastructureTemplates.template(id: "nope"))
         XCTAssertEqual(InfrastructureTemplates.templates(in: .playground).map(\.id), ["playground"])
         XCTAssertTrue(InfrastructureTemplates.templates(in: .websites).count >= 3)
-        for category in InfrastructureTemplate.Category.allCases {
+        for category in InfrastructureTemplate.Category.allCases where category != .registry {
             XCTAssertFalse(InfrastructureTemplates.templates(in: category).isEmpty, category.rawValue)
         }
         let playground = try XCTUnwrap(InfrastructureTemplates.template(id: "playground"))

@@ -125,15 +125,40 @@ struct MapWelcome: Equatable {
         var sourceFile: String = ""
         var id: String { address }
     }
+    /// A `module` block: the folder calls it, and it brings its own resources.
+    struct DeclaredModule: Equatable, Identifiable {
+        let name: String
+        let source: String
+        var version: String? = nil
+        var sourceFile: String = ""
+        var id: String { name }
+        /// Public Registry page when the source is a `namespace/name/provider` path.
+        var registryURL: URL? {
+            let parts = source.split(separator: "/")
+            guard parts.count == 3, parts.allSatisfy({ !$0.isEmpty && !$0.contains(".") && !$0.contains(":") }) else { return nil }
+            return URL(string: "https://registry.terraform.io/modules/\(source)" + (version.map { "/\($0)" } ?? ""))
+        }
+    }
     let declared: [Declared]
     let hasReadme: Bool
     let previewTitle: String
     /// Required inputs with no value yet, by name.
     var neededInputs: [String] = []
+    var modules: [DeclaredModule] = []
+
+    /// "2 resources", "1 module", or "2 resources and calls 1 module".
+    var declaresPhrase: String {
+        let count = declared.count
+        let resources = "\(count) \(count == 1 ? "resource" : "resources")"
+        let calls = "\(modules.count) \(modules.count == 1 ? "module" : "modules")"
+        if modules.isEmpty { return "declares \(resources)" }
+        if declared.isEmpty { return "calls \(calls)" }
+        return "declares \(resources) and calls \(calls)"
+    }
 
     /// "main.tf" or "main.tf and 2 other files".
     var filesPhrase: String {
-        let files = Array(Set(declared.map(\.sourceFile).filter { !$0.isEmpty })).sorted()
+        let files = Array(Set((declared.map(\.sourceFile) + modules.map(\.sourceFile)).filter { !$0.isEmpty })).sorted()
         guard let first = files.first else { return "The configuration" }
         if files.count == 1 { return first }
         return "\(first) and \(files.count - 1) other \(files.count == 2 ? "file" : "files")"
@@ -1209,11 +1234,10 @@ struct ResourceMapContent: View {
     /// "This folder describes 2 things. None of them exist yet." Then the action,
     /// the three steps, and the declared resources as cards that will be created.
     private func welcomeView(_ welcome: MapWelcome) -> some View {
-        let count = welcome.declared.count
         return VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Declared, not built.").font(.system(size: 20, weight: .semibold))
-                Text("\(welcome.filesPhrase) declares \(count) \(count == 1 ? "resource" : "resources"). None exist yet. \(welcome.previewTitle) shows what Terraform would create; nothing changes until you apply.")
+                Text("\(welcome.filesPhrase) \(welcome.declaresPhrase). None exist yet. \(welcome.previewTitle) shows what Terraform would create; nothing changes until you apply.")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 560, alignment: .leading)
             }
@@ -1245,10 +1269,27 @@ struct ResourceMapContent: View {
                     if index < 2 { Text("→").foregroundStyle(.tertiary) }
                 }
             }
-            if !welcome.declared.isEmpty {
+            if !welcome.declared.isEmpty || !welcome.modules.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Declared in \(welcome.filesPhrase)").font(.headline)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), alignment: .leading)], alignment: .leading, spacing: 10) {
+                        ForEach(welcome.modules) { module in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(module.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                Text(module.source + (module.version.map { " v\($0)" } ?? ""))
+                                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                HStack(spacing: 8) {
+                                    Text("Module · its resources appear after Preview").font(.system(size: 12)).foregroundStyle(.secondary)
+                                    if let url = module.registryURL {
+                                        Link("Registry", destination: url).font(.system(size: 12))
+                                    }
+                                }
+                            }
+                            .quickHelp(glossary: "module")
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])).foregroundStyle(Color.green.opacity(0.6)))
+                        }
                         ForEach(welcome.declared.prefix(12)) { declared in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(declared.address.split(separator: ".").last.map(String.init) ?? declared.address)

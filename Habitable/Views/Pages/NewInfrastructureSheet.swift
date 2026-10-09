@@ -19,6 +19,11 @@ struct NewInfrastructureSheet: View {
     @State private var destination: URL = WorkspaceCheckoutStore.ensureCheckoutFolder()
     @State private var folderName = ""
     @State private var error: String?
+    @StateObject private var registry = RegistryModulesModel()
+    @State private var registryQuery = ""
+    @State private var registryProvider = ""
+    @State private var registrySelection: RegistryModuleSummary?
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         HSplitView {
@@ -36,9 +41,11 @@ struct NewInfrastructureSheet: View {
             sidebarRow("Folder on this Mac…", symbol: "folder", choice: .folder)
             sidebarRow("HCP Terraform workspace…", symbol: "cloud", choice: .cloud)
             Text("Start from a template").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 14)
-            ForEach(InfrastructureTemplate.Category.allCases, id: \.self) { category in
+            ForEach(InfrastructureTemplate.Category.allCases.filter { $0 != .registry }, id: \.self) { category in
                 sidebarRow(category.rawValue, symbol: symbol(for: category), choice: .category(category))
             }
+            Text("Modules").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 14)
+            sidebarRow(InfrastructureTemplate.Category.registry.rawValue, symbol: symbol(for: .registry), choice: .category(.registry))
             Spacer()
         }
         .padding(8)
@@ -71,6 +78,7 @@ struct NewInfrastructureSheet: View {
         case .networks: return "point.3.connected.trianglepath.dotted"
         case .learn: return "book"
         case .playground: return "sparkles"
+        case .registry: return "shippingbox.circle"
         }
     }
 
@@ -79,6 +87,8 @@ struct NewInfrastructureSheet: View {
     @ViewBuilder private var content: some View {
         if let template {
             templateDetail(template)
+        } else if case .category(.registry) = choice {
+            registryPage
         } else if case .category(let category) = choice {
             templateGrid(category)
         } else {
@@ -133,6 +143,98 @@ struct NewInfrastructureSheet: View {
         }
     }
 
+    // MARK: Registry
+
+    private var registryPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("From the registry").font(.system(size: 17, weight: .semibold))
+                    Text("Public modules from registry.terraform.io. The folder calls the module; its code stays at the source.")
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding(20)
+            Divider()
+            HStack(spacing: 10) {
+                FilterField(placeholder: "Search modules, like vpc or static site", text: $registryQuery, accessibilityLabel: "Search modules")
+                    .frame(maxWidth: 360)
+                    .onSubmit { runRegistrySearch() }
+                    .task(id: registryQuery) {
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        guard !Task.isCancelled else { return }
+                        runRegistrySearch()
+                    }
+                Picker("Provider", selection: $registryProvider) {
+                    Text("Any provider").tag("")
+                    ForEach(["aws", "google", "azurerm", "cloudflare", "kubernetes", "github"], id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().fixedSize()
+                .onChange(of: registryProvider) { _ in runRegistrySearch() }
+                if registry.isSearching { LoadingIndicator(size: 14, label: "Searching…") }
+                Spacer()
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10)
+            Divider()
+            if let message = registry.message, registry.results.isEmpty {
+                Text(message).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(registry.results) { module in
+                    Button { selectRegistryModule(module) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text("\(module.namespace)/\(module.name)").font(.system(size: 13, weight: .semibold))
+                                if module.verified {
+                                    Image(systemName: "checkmark.seal.fill").font(.system(size: 11)).foregroundStyle(Color.accentColor)
+                                        .accessibilityLabel("Verified")
+                                }
+                                if registry.isLoadingDetail, registrySelection?.id == module.id { LoadingIndicator(size: 12, label: "Loading…") }
+                            }
+                            if !module.description.isEmpty {
+                                Text(module.description).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Text("\(module.provider) · v\(module.version) · \(downloadsText(module.downloads)) downloads")
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.inset)
+            }
+            Divider()
+            HStack {
+                Text("Creates a folder in \(abbreviated(destination)) with a main.tf that calls the module, pinned to its version.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 20).padding(.vertical, 12)
+        }
+    }
+
+    private func runRegistrySearch() {
+        Task { await registry.search(query: registryQuery, provider: registryProvider.isEmpty ? nil : registryProvider) }
+    }
+
+    private func selectRegistryModule(_ module: RegistryModuleSummary) {
+        registrySelection = module
+        Task {
+            await registry.load(module)
+            guard registrySelection?.id == module.id, let detail = registry.detail else { return }
+            select(RegistryModules.template(for: detail))
+        }
+    }
+
+    private func downloadsText(_ count: Int) -> String {
+        switch count {
+        case 1_000_000...: return String(format: "%.1fM", Double(count) / 1_000_000)
+        case 1_000...: return "\(count / 1_000)K"
+        default: return "\(count)"
+        }
+    }
+
     private func select(_ item: InfrastructureTemplate) {
         template = item
         inputs = Dictionary(uniqueKeysWithValues: item.inputs.map { ($0.name, "") })
@@ -150,7 +252,13 @@ struct NewInfrastructureSheet: View {
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Back") { template = nil }
+                ForEach(item.links, id: \.url) { link in
+                    Button {
+                        openURL(link.url)
+                    } label: { Label(link.title, systemImage: "arrow.up.right.square") }
+                        .help(link.url.absoluteString)
+                }
+                Button("Back") { template = nil; registry.clearDetail() }
             }
             .padding(20)
             Divider()
@@ -158,14 +266,25 @@ struct NewInfrastructureSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("What it creates").font(.headline)
-                        ForEach(Array(item.resources.enumerated()), id: \.offset) { _, resource in
+                        if item.category == .registry {
+                            Text(item.resources.isEmpty
+                                 ? "The module builds from its own submodules, so the Registry lists no resources at the top level. Preview Changes shows what it would create."
+                                 : "The module declares \(item.resourceCount) \(item.resourceCount == 1 ? "resource" : "resources"); which ones Terraform creates depends on the inputs.")
+                                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        ForEach(Array(item.resources.prefix(24).enumerated()), id: \.offset) { _, resource in
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text(resource.name).font(.system(size: 13, weight: .medium)).frame(width: 180, alignment: .leading)
-                                Text(resource.type).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                                Text(resource.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                                    .frame(width: 220, alignment: .leading)
+                                Text(resource.type).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                                 if let note = resource.note { Text("· \(note)").font(.system(size: 12)).foregroundStyle(.secondary) }
                             }
                         }
-                        if item.category != .playground, item.category != .learn {
+                        if item.resources.count > 24 {
+                            Text("and \(item.resources.count - 24) more; the README and the Map list them all.")
+                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                        if item.category != .playground, item.category != .learn, item.category != .registry {
                             Text("Costs are rough, from the provider's public prices; your account's usage sets the real number.")
                                 .font(.system(size: 12)).foregroundStyle(.secondary)
                         }

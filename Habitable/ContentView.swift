@@ -108,6 +108,7 @@ struct ContentView: View {
     @Environment(\.quickHelpModel) private var quickHelpEnvironment
     /// Resources the folder declares, read from configuration for the welcome.
     @State private var declaredResources: [MapWelcome.Declared] = []
+    @State private var declaredModules: [MapWelcome.DeclaredModule] = []
     @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
     @State private var selectedOutput: String?
@@ -313,26 +314,34 @@ struct ContentView: View {
     private var mapWelcome: MapWelcome? {
         guard workspace.workingDirectory != nil, !workspace.hasState, workspace.resourceMap == nil,
               workspace.errorMessage == nil, !workspace.awaitingInitializationConsent,
-              remoteWorkspaceLink == nil, !declaredResources.isEmpty else { return nil }
+              remoteWorkspaceLink == nil, !declaredResources.isEmpty || !declaredModules.isEmpty else { return nil }
         let hasReadme = workspace.workingDirectory.map { directory in
             ["README.md", "readme.md", "README"].contains { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
         } ?? false
         let needed = workspace.terraformVariables.filter(\.isMissingRequiredInput).map(\.key)
-        return MapWelcome(declared: declaredResources, hasReadme: hasReadme, previewTitle: windowActions.planTitle, neededInputs: needed)
+        return MapWelcome(declared: declaredResources, hasReadme: hasReadme, previewTitle: windowActions.planTitle,
+                          neededInputs: needed, modules: declaredModules)
     }
 
     private func loadDeclaredResources(_ directory: URL?) async {
         declaredResources = []
+        declaredModules = []
         guard let directory else { return }
-        let declared = await Task.detached(priority: .utility) { () -> [MapWelcome.Declared] in
-            TerraformConfigurationInspector.inspectMetadata(directory: directory).resources.map { declaration in
+        let (declared, modules) = await Task.detached(priority: .utility) { () -> ([MapWelcome.Declared], [MapWelcome.DeclaredModule]) in
+            let metadata = TerraformConfigurationInspector.inspectMetadata(directory: directory)
+            let resources = metadata.resources.map { declaration in
                 let parts = declaration.address.split(separator: ".").map(String.init)
                 let type = parts.count >= 2 ? parts[parts.count - 2] : declaration.address
                 return MapWelcome.Declared(address: declaration.address, type: type, sourceFile: declaration.sourceFile)
             }
+            let modules = metadata.modules.sorted { $0.name < $1.name }.map {
+                MapWelcome.DeclaredModule(name: $0.name, source: $0.source, version: $0.version, sourceFile: $0.sourceFile)
+            }
+            return (resources, modules)
         }.value
         guard directory == workspace.workingDirectory else { return }
         declaredResources = declared
+        declaredModules = modules
     }
 
     private var newRunTitle: String {
