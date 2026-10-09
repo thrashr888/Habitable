@@ -241,17 +241,19 @@ struct LibraryView: View {
                 Button(action: onNewInfrastructure) {
                     Label("New…", systemImage: "plus.square").font(.system(size: 13))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 4)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).padding(.horizontal, 18).padding(.top, 12)
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .buttonStyle(.plain)
                 .help("Start from a folder, a workspace, or a template")
             }
             Button(action: onChooseFolder) {
                 Label("Open Folder…", systemImage: "folder.badge.plus").font(.system(size: 13))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 18).padding(.vertical, 12)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).padding(.horizontal, 18).padding(.vertical, 12)
-            .keyboardShortcut("o", modifiers: .command)
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 0)
     }
