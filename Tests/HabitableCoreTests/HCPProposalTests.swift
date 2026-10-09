@@ -94,3 +94,13 @@ extension HCPProposalTests {
         XCTAssertNil(attributes["working-directory"])
     }
 }
+
+extension HCPProposalTests {
+    func testMergeRunMatchesPullRequestNumberOnly() {
+        XCTAssertTrue(HCPWorkspaceViewerModel.message("Format main.tf (#2)", namesPullRequest: 2))
+        XCTAssertTrue(HCPWorkspaceViewerModel.message("Merge pull request #2 from o/b", namesPullRequest: 2))
+        XCTAssertFalse(HCPWorkspaceViewerModel.message("Merge pull request #22 from o/b", namesPullRequest: 2))
+        XCTAssertFalse(HCPWorkspaceViewerModel.message("Format main.tf", namesPullRequest: 2))
+        XCTAssertFalse(HCPWorkspaceViewerModel.message(nil, namesPullRequest: 2))
+    }
+}
