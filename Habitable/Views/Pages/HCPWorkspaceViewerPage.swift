@@ -349,7 +349,11 @@ struct HCPWorkspaceViewer: View {
             MapSideFace(id: "proposal", title: "Proposal") {
                 HCPProposalFace(model: model, folders: proposalFolders, onCheckOut: onCheckOut,
                                 onChooseFolder: chooseProposalFolder,
-                                onShowRun: { run in Task { await model.showPlanPreview(for: run) } })
+                                onShowRun: { run in Task { await model.showPlanPreview(for: run) } },
+                                onOpenSettings: { faceRequest = MapSideFaceRequest(faceID: "settings") })
+            },
+            MapSideFace(id: "settings", title: "Settings") {
+                HCPWorkspaceSettingsFace(model: model)
             }
         ]
     }

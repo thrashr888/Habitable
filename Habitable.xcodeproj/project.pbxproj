@@ -25,6 +25,7 @@
 		AA60400000000000000000C4 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000C5 /* LoadingIndicator.swift */; };
 		AA60400000000000000000C0 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000C1 /* LibraryView.swift */; };
 		AA60400000000000000000E0 /* HCPProposalFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000E1 /* HCPProposalFace.swift */; };
+		AA60400000000000000000E2 /* HCPWorkspaceSettingsFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */; };
 		AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B9 /* ConnectionsPane.swift */; };
 		AA60400000000000000000BA /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000BB /* SettingsWindow.swift */; };
 		AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B1 /* MapTimelineStrip.swift */; };
@@ -119,6 +120,7 @@
 		AA60400000000000000000C5 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
 		AA60400000000000000000C1 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		AA60400000000000000000E1 /* HCPProposalFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPProposalFace.swift; sourceTree = "<group>"; };
+		AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPWorkspaceSettingsFace.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B9 /* ConnectionsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsPane.swift; sourceTree = "<group>"; };
 		AA60400000000000000000BB /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B1 /* MapTimelineStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapTimelineStrip.swift; sourceTree = "<group>"; };
@@ -300,6 +302,7 @@
 				AA60400000000000000000C5 /* LoadingIndicator.swift */,
 				AA60400000000000000000C1 /* LibraryView.swift */,
 				AA60400000000000000000E1 /* HCPProposalFace.swift */,
+				AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */,
 				AA60400000000000000000B9 /* ConnectionsPane.swift */,
 				AA60400000000000000000BB /* SettingsWindow.swift */,
 				AA60400000000000000000B5 /* HCPVariablesPanel.swift */,
@@ -496,6 +499,7 @@
 				AA60400000000000000000C4 /* LoadingIndicator.swift in Sources */,
 				AA60400000000000000000C0 /* LibraryView.swift in Sources */,
 				AA60400000000000000000E0 /* HCPProposalFace.swift in Sources */,
+				AA60400000000000000000E2 /* HCPWorkspaceSettingsFace.swift in Sources */,
 				AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */,
 				AA60400000000000000000BA /* SettingsWindow.swift in Sources */,
 				AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */,
