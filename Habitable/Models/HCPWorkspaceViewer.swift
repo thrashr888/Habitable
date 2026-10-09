@@ -669,11 +669,12 @@ struct HCPAPIClient: Sendable {
                 }
             }
         }
+        // Policy checks never ride the run's include; they have their own endpoint.
+        if details.policyChecks.isEmpty, (relationships?["policy-checks"] as? [String: Any]).map({ !array($0["data"]).isEmpty }) ?? !extendedInclude,
+           let checks = try? await get(path: "\(runPath)/policy-checks", hostname: hostname, token: token) {
+            details.policyChecks = Self.decodePolicyChecks(array(checks["data"]))
+        }
         if !extendedInclude {
-            if details.policyChecks.isEmpty,
-               let checks = try? await get(path: "\(runPath)/policy-checks", hostname: hostname, token: token) {
-                details.policyChecks = Self.decodePolicyChecks(array(checks["data"]))
-            }
             if details.costEstimate == nil, let costID = relationshipID(relationships?["cost-estimate"]),
                let cost = try? await get(path: "/api/v2/cost-estimates/\(pathComponent(costID))", hostname: hostname, token: token),
                let costRow = cost["data"] as? [String: Any] {
@@ -696,7 +697,7 @@ struct HCPAPIClient: Sendable {
         return details
     }
 
-    static let runDetailsInclude = "plan,apply,cost_estimate,policy_checks,task_stages.task_results,created_by,configuration_version.ingress_attributes"
+    static let runDetailsInclude = "plan,apply,cost_estimate,task_stages,created_by,configuration_version.ingress_attributes"
 
     private static func firstStateVersionID(_ applyRow: [String: Any]?) -> String? {
         let relationship = (applyRow?["relationships"] as? [String: Any])?["state-versions"] as? [String: Any]
