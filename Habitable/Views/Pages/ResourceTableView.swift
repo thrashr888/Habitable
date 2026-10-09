@@ -200,6 +200,7 @@ struct ResourceTableView: View {
         }
         .font(.system(size: 13))
         .accessibilityElement(children: .combine)
+        .quickHelp(glossary: status == "replace" ? "replace" : (status == "remove" ? "remove" : (status == "drifted" ? "drift" : "state")))
     }
 
     private var empty: some View {

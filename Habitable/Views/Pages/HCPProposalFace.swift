@@ -615,6 +615,7 @@ struct HCPProposalFace: View {
 
     private var footnote: some View {
         Text("Habitable never applies from your Mac. Runs happen in HCP Terraform; you confirm them here.")
+            .quickHelp(glossary: "speculative-plan")
             .font(.system(size: 12)).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }

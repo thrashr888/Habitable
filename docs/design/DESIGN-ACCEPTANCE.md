@@ -239,6 +239,15 @@ Not in this round from E: targeted Preview Changes for selected rows (needs `-ta
 
 Checked against the mocks while here: **C (Preview Changes)** has the overlay, review bar, replacement warning and Discard; still missing are the "Changes only / Everything" switch as segments, Show Plan Output on the bar, the Inputs used and Checks side panel, the per-tile "What changes" before→after diff with "Who's affected" and "Exclude from this apply", Hold to Apply for replace/remove, and the auto-apply badge. **G (Changing cloud infrastructure)** has the PR timeline, checks, merge and confirm; still missing are "Files changed" on the open PR card, Open in VS Code / View on GitHub as header buttons, approvals by name and the conversation, and policy/cost inline on the Map.
 
+## Quick Help for newcomers (Exploration D), October 9, 2026
+
+| Figure | Change | Verified |
+| --- | --- | --- |
+| Welcome on an empty Map | A local folder with configuration and no recorded state opens to "This folder describes N things. None of them exist yet." with the one explanation sentence, **Preview Changes** (and **Read the README** when one exists), the steps 1 Preview → 2 Review → 3 Apply, and the declared resources as dashed green cards marked "Will be created" with their types, read from the configuration inspector. It never shows for remote folders, errors, or a folder waiting for its init consent. | Live on the scratch folder: "This folder describes 2 things." |
+| Quick Help (?) | A **Quick Help** toggle in both windows' toolbars (⌘⇧/). While on, a 320pt card docked at the bottom right explains whatever the pointer is over, in a sentence, with a Learn more link to the Terraform docs where one fits; off, the same sentences are the native tooltips. A 23-entry glossary (output, variable, state, plan, apply, replace, remove, data source, module, provider, workspace, tile, band, drift, run, speculative plan, auto-apply, lock, configuration version, pull request, sensitive, backend, checkout) is unit-tested for voice and https links. Attached to the toolbar verbs, Map tiles (what a tile is and why it sits in its row), the review bar counts, Defined in / Reference / History, the Changes strip, the List's status words, the auto-apply switch, and the welcome cards. | Live: toggle on shows the card with "Hover anything to learn what it is."; hovering was not driven from the background tools. |
+
+Still from D: Quick Help on individual Inspector facts and on run stages; the "What's an output?" line on the Outputs page; the welcome's "Needs from you" (required inputs shown on the resource that needs them).
+
 ## Gate for every page handoff
 
 1. Name the relevant exploration/figure and settled decisions in the work notes before implementation.

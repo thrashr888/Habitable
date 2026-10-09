@@ -109,6 +109,7 @@ struct HCPWorkspaceSettingsFace: View {
                             }
                         }
                         .toggleStyle(.switch)
+                        .quickHelp(glossary: "auto-apply")
                     }
                     if workspace.locked {
                         Text("This workspace is locked in HCP Terraform; settings still save, but runs wait for the unlock.")
