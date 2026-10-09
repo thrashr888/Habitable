@@ -57,6 +57,8 @@ struct ResourceMapPage: View {
     var listMode = false
     var onShowOnMap: ((String) -> Void)? = nil
     var onOpenSource: ((String) -> Void)? = nil
+    var onShowPlanOutput: (() -> Void)? = nil
+    var autoApplyBadge: String? = nil
 
     var body: some View {
         ResourceMapContent(
@@ -81,6 +83,7 @@ struct ResourceMapPage: View {
             onShowVariables: onShowVariables,
             sideFaces: sideFaces,
             preview: preview, onDiscardPreview: onDiscardPreview, onReviewPreview: onReviewPreview,
+            onShowPlanOutput: onShowPlanOutput, autoApplyBadge: autoApplyBadge,
             selectionRequest: selectionRequest,
             listMode: listMode, onShowOnMap: onShowOnMap, onOpenSource: onOpenSource,
             terraformExecutableURL: workspace.runner.executableURL,
@@ -165,6 +168,14 @@ struct ResourceMapContent: View {
     var previewReviewTitle = "Review and Apply…"
     /// A caption under the counts, e.g. which remote run the preview came from.
     var previewCaption: String? = nil
+    /// Opens the raw plan output (the run page) for anyone who wants the exact text.
+    var onShowPlanOutput: (() -> Void)? = nil
+    /// "Applies automatically" / "Applies without confirmation": shown as a
+    /// persistent badge, never a silent setting.
+    var autoApplyBadge: String? = nil
+    /// True when the review action applies directly (cloud Confirm Apply): a
+    /// preview that replaces or removes then needs a press-and-hold.
+    var previewReviewIsApply = false
     /// Another part of the window asking the right pane to show a face.
     var faceRequest: MapSideFaceRequest? = nil
     /// Another part of the window asking the Map to select a resource.
@@ -792,10 +803,27 @@ struct ResourceMapContent: View {
                 consequence(c.update, "to change", .orange)
                 consequence(c.replace, "to replace", actionColor(.replace))
                 consequence(c.destroy, "to remove", .red)
+                if let autoApplyBadge {
+                    Label(autoApplyBadge, systemImage: "bolt.fill").font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .foregroundStyle(.orange).background(Color.orange.opacity(0.14), in: Capsule())
+                        .help("This workspace applies as soon as a plan succeeds.")
+                }
                 Spacer()
-                Toggle("Changes only", isOn: $changesOnly).toggleStyle(.checkbox).font(.system(size: 13))
+                Picker("Show", selection: Binding(get: { changesOnly ? 1 : 0 }, set: { changesOnly = $0 == 1 })) {
+                    Text("Everything").tag(0)
+                    Text("Changes only").tag(1)
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                if let onShowPlanOutput { Button("Show Plan Output", action: onShowPlanOutput).buttonStyle(.link).font(.system(size: 13)) }
                 if let onDiscardPreview { Button(previewDiscardTitle, action: onDiscardPreview).buttonStyle(.bordered) }
-                if let onReviewPreview { Button(previewReviewTitle, action: onReviewPreview).buttonStyle(.borderedProminent) }
+                if let onReviewPreview {
+                    if previewReviewIsApply, c.replace + c.destroy > 0 {
+                        HoldToConfirmButton(title: previewReviewTitle, action: onReviewPreview)
+                    } else {
+                        Button(previewReviewTitle, action: onReviewPreview).buttonStyle(.borderedProminent)
+                    }
+                }
             }
             if let previewCaption {
                 Text(previewCaption).font(.system(size: 13)).foregroundStyle(.secondary)
@@ -923,7 +951,10 @@ struct ResourceMapContent: View {
                             DisclosureGroup(isExpanded: Binding(
                                 get: { selectedMember == address },
                                 set: { expanded in selectedMember = expanded ? address : (selectedMember == address ? nil : selectedMember) })) {
-                                memberDetails(address)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    if let change = preview?.change(for: address) { whatChanges(change) }
+                                    memberDetails(address)
+                                }
                             } label: {
                                 HStack(alignment: .top, spacing: 8) {
                                     Text(address).font(.system(size: 13, design: .monospaced)).multilineTextAlignment(.leading)
@@ -1131,6 +1162,42 @@ struct ResourceMapContent: View {
                 }
             }
         }
+    }
+
+    /// Exploration C's "What changes": each attribute the plan changes, before → after,
+    /// with the ones that force a replacement called out.
+    private func whatChanges(_ change: PlanResourceChange) -> some View {
+        let word: String = {
+            switch MapChangePreview.action(for: change) {
+            case .create: return "Will be created"
+            case .update: return "Will change"
+            case .replace: return "Will be replaced · delete, then create"
+            case .delete: return "Will be removed"
+            case .read: return "Will be read"
+            case .none: return "No change"
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("What changes").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            Text(word).font(.system(size: 13, weight: .medium)).foregroundStyle(actionColor(MapChangePreview.action(for: change)))
+            ForEach(change.attributes.prefix(12)) { attribute in
+                HStack(alignment: .top, spacing: 6) {
+                    Text(attribute.path).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                        .frame(width: 130, alignment: .leading).lineLimit(1).truncationMode(.middle)
+                    if change.replacementPaths.contains(attribute.path) {
+                        Text("forces replacement").font(.system(size: 11, weight: .medium)).foregroundStyle(actionColor(.replace))
+                    }
+                    Text(attribute.before.displayValue).font(.system(size: 12, design: .monospaced)).lineLimit(2).strikethrough(attribute.after != attribute.before && attribute.before != .absent)
+                    Text("→").foregroundStyle(.secondary)
+                    Text(attribute.after.displayValue).font(.system(size: 12, design: .monospaced)).lineLimit(2)
+                }
+            }
+            if change.attributes.count > 12 {
+                Text("and \(change.attributes.count - 12) more attributes").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .background(actionColor(MapChangePreview.action(for: change)).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// Selects the tile holding an address and opens that resource in the Inspector.
