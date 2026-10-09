@@ -95,6 +95,7 @@ struct ContentView: View {
     /// when that run's own published state (plan result, status) changes.
     @State private var previewRunID: UUID?
     @State private var previewTick = 0
+    @State private var mapSelectionRequest: MapSelectionRequest?
     @State private var selectedRunDetail: TerraformRun?
     @State private var selectedResource: String?
     @State private var selectedOutput: String?
@@ -479,7 +480,12 @@ struct ContentView: View {
     @ViewBuilder private var collection: some View {
         switch selection {
         case .runs: RunListPage(selection: $selectedRun)
-        case .resources: ResourceListPage(selection: $selectedResource)
+        case .resources:
+            ResourceListPage(selection: $selectedResource, preview: mapPreview,
+                             onShowOnMap: { address in
+                                 mapSelectionRequest = MapSelectionRequest(address: address)
+                                 navigationSelection.wrappedValue = .map
+                             })
         case .outputs: OutputsListPage(selection: $selectedOutput)
         default: EmptyView()
         }
@@ -548,7 +554,8 @@ struct ContentView: View {
                                 onDiscardPreview: { previewRun?.doDiscard(); previewRunID = nil },
                                 onReviewPreview: {
                                     if let run = previewRun { selectedRun = run.id; navigationSelection.wrappedValue = .runs }
-                                })
+                                },
+                                selectionRequest: mapSelectionRequest)
                 Divider()
                 MapTimelineStrip(clips: localChangeClips, selectedID: selectedRun?.uuidString,
                                  hint: "Select a change to review its run",
