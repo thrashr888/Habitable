@@ -191,3 +191,76 @@ struct HoldToConfirmButton: View {
         withAnimation(.easeOut(duration: 0.3)) { progress = 0 }
     }
 }
+
+/// Where a workspace lives, at the start of every workspace window's title bar
+/// (docs/design/INFORMATION-ARCHITECTURE.md §A). Neutral for this Mac, blue for
+/// HCP Terraform; the same spot in both windows so the eye learns it once.
+struct SourceBadge: View {
+    enum Kind: Equatable {
+        case thisMac
+        case cloud(organization: String)
+    }
+    let kind: Kind
+    var action: (() -> Void)? = nil
+
+    private var title: String {
+        switch kind {
+        case .thisMac: "This Mac"
+        case .cloud(let organization): organization.isEmpty ? "HCP Terraform" : organization
+        }
+    }
+    private var symbol: String { kind == .thisMac ? "folder.fill" : "cloud.fill" }
+    private var tint: Color { kind == .thisMac ? Color.secondary : Color(red: 0.16, green: 0.45, blue: 0.95) }
+    private var help: String {
+        switch kind {
+        case .thisMac: "This workspace is a folder on this Mac. Open the Library to see every workspace."
+        case .cloud: "This workspace lives in HCP Terraform. Open the Library to see every workspace."
+        }
+    }
+
+    var body: some View {
+        Button(action: { action?() }) {
+            Label(title, systemImage: symbol)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(tint.opacity(0.14), in: Capsule())
+                .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .help(help)
+        .accessibilityLabel("Workspace source: \(title)")
+    }
+}
+
+/// A mode announces itself: its title on the left and one way out on the right,
+/// always in the same place (INFORMATION-ARCHITECTURE.md §E).
+struct ModeBar<Trailing: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    let exitTitle: String
+    let onExit: () -> Void
+    @ViewBuilder var trailing: () -> Trailing
+
+    init(_ title: String, subtitle: String? = nil, exitTitle: String, onExit: @escaping () -> Void,
+         @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
+        self.title = title; self.subtitle = subtitle; self.exitTitle = exitTitle; self.onExit = onExit; self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                if let subtitle { Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            Spacer()
+            trailing()
+            Button(exitTitle, action: onExit).buttonStyle(.bordered).controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}

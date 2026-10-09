@@ -863,6 +863,8 @@ struct ResourceMapContent: View {
         let c = preview.consequences
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 18) {
+                // A mode announces itself: the title on the left, the way out on the right.
+                Text("Preview").font(.headline).accessibilityAddTraits(.isHeader)
                 consequence(c.create, "to add", .green)
                 consequence(c.update, "to change", .orange)
                 consequence(c.replace, "to replace", actionColor(.replace))

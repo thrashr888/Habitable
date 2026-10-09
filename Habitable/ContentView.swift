@@ -43,7 +43,7 @@ struct ContentView: View {
             case .runs: "Runs"
             case .resources: "Resources"
             case .outputs: "Outputs"
-            case .variables: "Variables"
+            case .variables: "Inputs"
             case .envVariables: "Environment Variables"
             case .settings: "Settings"
             }
@@ -221,12 +221,19 @@ struct ContentView: View {
           QuietToolbar {
             if workspace.workingDirectory != nil {
                 ToolbarItemGroup(placement: .navigation) {
-                    Picker("View", selection: viewModeSelection) {
+                    SourceBadge(kind: .thisMac, action: { openWindow(id: "Workspace.viewer", value: Self.libraryURL) })
+                    // The section rail, the same in both workspace windows
+                    // (INFORMATION-ARCHITECTURE.md §D).
+                    Picker("Section", selection: viewModeSelection) {
                         Text("Map").tag(ViewMode.map)
                         Text("List").tag(ViewMode.list)
+                        Text("Changes").tag(ViewMode.changes)
+                        Text("Inputs").tag(ViewMode.inputs)
+                        Text("Outputs").tag(ViewMode.outputs)
+                        Text("Settings").tag(ViewMode.settings)
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 132)
-                    .help("Map shows resources grouped by what they do. List is the complete table.")
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .help("Map and List show the resources. Changes, Inputs, Outputs and Settings are the workspace's other sections.")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button(windowActions.planTitle) { windowActions.plan() }
@@ -236,30 +243,17 @@ struct ContentView: View {
                         .help(workspace.autoApply
                               ? "Preview changes, then apply them automatically when the preview succeeds"
                               : "Preview what Terraform would change. Nothing changes until you apply.")
-                    Button { navigationSelection.wrappedValue = .variables } label: { Label("Inputs", systemImage: "slider.horizontal.3").labelStyle(.titleAndIcon) }
-                        .quickHelp(glossary: "variable")
-                        .help("Terraform input variables for this folder")
-                    Button { navigationSelection.wrappedValue = .runs } label: { Label("Changes", systemImage: "clock.arrow.circlepath").labelStyle(.titleAndIcon) }
-                        .quickHelp(glossary: "run")
-                        .help("Previewed and applied changes")
                     if let quickHelp = quickHelpEnvironment { QuickHelpToggle(model: quickHelp) }
                     Menu {
                         Button("Overview") { navigationSelection.wrappedValue = .workspace }
                         Button("About (README)") { navigationSelection.wrappedValue = .readme }
                         Button("Source files") { navigationSelection.wrappedValue = .configuration }
-                        Button("Outputs") { navigationSelection.wrappedValue = .outputs }
                         Button("Environment variables") { navigationSelection.wrappedValue = .envVariables }
-                        Divider()
-                        Button("Workspace settings…") { navigationSelection.wrappedValue = .settings }
                     } label: { Label("Workspace", systemImage: "info.circle") }
-                    .help("Workspace details and settings")
+                    .help("Overview, README, source files and environment variables")
                 }
             }
             ToolbarItemGroup(placement: .automatic) {
-                if workspace.workingDirectory != nil {
-                    Button { openWindow(id: "Workspace.viewer", value: Self.libraryURL) } label: { Label("Library", systemImage: "books.vertical") }
-                        .help("Show the Library of folders and cloud workspaces")
-                }
                 if let link = remoteWorkspaceLink {
                     Button {
                         onOpenRemoteWorkspace(link)
@@ -275,25 +269,36 @@ struct ContentView: View {
         }
     }
 
-    private enum ViewMode: Hashable { case map, list, other }
+    private enum ViewMode: Hashable { case map, list, changes, inputs, outputs, settings, other }
 
-    /// Map and List are the two views of the same workspace (Exploration B).
-    /// Other pages leave neither segment selected.
+    /// The rail's six sections map onto pages; README, source files and the
+    /// overview leave no segment selected and show a mode bar instead.
     private var viewModeSelection: Binding<ViewMode> {
         Binding(get: {
             switch selection {
             case .map: .map
             case .resources: .list
+            case .runs: .changes
+            case .variables: .inputs
+            case .outputs: .outputs
+            case .settings: .settings
             default: .other
             }
         }, set: { mode in
             switch mode {
             case .map: navigationSelection.wrappedValue = .map
             case .list: navigationSelection.wrappedValue = .resources
+            case .changes: navigationSelection.wrappedValue = .runs
+            case .inputs: navigationSelection.wrappedValue = .variables
+            case .outputs: navigationSelection.wrappedValue = .outputs
+            case .settings: navigationSelection.wrappedValue = .settings
             case .other: break
             }
         })
     }
+
+    /// Pages the rail reaches directly; the rest are modes with one exit.
+    private static let railPages: Set<NavigationItem> = [.map, .resources, .runs, .variables, .outputs, .settings]
 
     /// A checkout's runs happen in HCP Terraform; its changes start in the cloud
     /// window's Proposal face rather than as a local plan.
@@ -430,8 +435,8 @@ struct ContentView: View {
                             }, onOpenConnections: { openWindow(id: "App.settings") })
             } else {
                 VStack(spacing: 0) {
-                    // Map and List are the two views of the workspace; neither gets the page bar.
-                    if let page = selection, page != .map, page != .resources {
+                    // Rail sections need no bar; README, source files and the overview are modes.
+                    if let page = selection, !Self.railPages.contains(page) {
                         pageHeader(page)
                         Divider()
                     }
@@ -475,7 +480,7 @@ struct ContentView: View {
                 && workspace.historyError == nil && !workspace.isInspectingInputs && !workspace.hasUnavailableRememberedInputs,
             canInitialize: workspace.workingDirectory != nil && !workspace.locked,
             canValidate: workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
-            planTitle: isCheckout ? "Make a Change in HCP Terraform" : (workspace.autoApply ? "Preview and apply automatically" : "Preview Changes")
+            planTitle: isCheckout ? "Make a Change" : (workspace.autoApply ? "Preview and apply automatically" : "Preview Changes")
         )
     }
 
@@ -510,16 +515,9 @@ struct ContentView: View {
     /// Secondary pages open in place of the Map and return to it, so the window
     /// keeps one subject (the workspace) instead of a sidebar of Terraform internals.
     private func pageHeader(_ page: NavigationItem) -> some View {
-        HStack(spacing: 12) {
-            Button { navigationSelection.wrappedValue = .map } label: { Label("Map", systemImage: "chevron.left") }
-                .buttonStyle(.bordered).controlSize(.small)
-                .keyboardShortcut("[", modifiers: .command)
-                .help("Back to the Map")
-            Text(page.title).font(.headline)
-            Spacer()
+        ModeBar(page.title, exitTitle: "Back to Map", onExit: { navigationSelection.wrappedValue = .map }) {
             workspaceStatusLabel.font(.system(size: 12)).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
     }
 
     @ViewBuilder private var workspaceStatusLabel: some View {

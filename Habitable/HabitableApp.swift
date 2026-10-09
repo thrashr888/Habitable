@@ -210,7 +210,8 @@ private struct CloudWorkspaceWindow: View {
             linkedFolders: linkedLocalFolders,
             onCheckOut: model.selectedWorkspace.map { workspace in
                 { checkout.checkOut(workspace: workspace, organization: model.selectedOrganization, hostname: model.hostname) { _ in } }
-            })
+            },
+            onOpenLibrary: { openWindow(id: "Workspace.viewer", value: ContentView.libraryURL) })
             .navigationTitle(model.selectedWorkspace?.name ?? "HCP Terraform")
             .navigationSubtitle(model.isConnected ? "\(model.selectedOrganization) · HCP Terraform" : "")
             .toolbar {

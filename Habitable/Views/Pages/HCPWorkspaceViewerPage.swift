@@ -1,10 +1,14 @@
 import SwiftUI
 
+/// The section rail, the same in both workspace windows
+/// (INFORMATION-ARCHITECTURE.md §D): Map · List · Runs · Inputs · Outputs · Settings.
 private enum HCPWorkspaceSection: String, CaseIterable, Identifiable {
     case map = "Map"
     case list = "List"
     case runs = "Runs"
-    case variables = "Variables"
+    case variables = "Inputs"
+    case outputs = "Outputs"
+    case settings = "Settings"
     var id: String { rawValue }
 }
 
@@ -17,6 +21,8 @@ struct HCPWorkspaceViewer: View {
     /// window's Check Out action, for the Proposal face.
     var linkedFolders: [URL] = []
     var onCheckOut: (() -> Void)? = nil
+    /// The Library is the one home; the badge at the start of the title bar opens it.
+    var onOpenLibrary: () -> Void = {}
     @State private var workspaceSearch = ""
     @State private var faceRequest: MapSideFaceRequest?
     @State private var mapSelectionRequest: MapSelectionRequest?
@@ -33,10 +39,10 @@ struct HCPWorkspaceViewer: View {
 
     init(model: HCPWorkspaceViewerModel, connectionOnly: Bool = false,
          onOpenConnections: @escaping () -> Void = {}, onOpenWorkspaces: @escaping () -> Void = {},
-         linkedFolders: [URL] = [], onCheckOut: (() -> Void)? = nil) {
+         linkedFolders: [URL] = [], onCheckOut: (() -> Void)? = nil, onOpenLibrary: @escaping () -> Void = {}) {
         self.model = model; self.connectionOnly = connectionOnly
         self.onOpenConnections = onOpenConnections; self.onOpenWorkspaces = onOpenWorkspaces
-        self.linkedFolders = linkedFolders; self.onCheckOut = onCheckOut
+        self.linkedFolders = linkedFolders; self.onCheckOut = onCheckOut; self.onOpenLibrary = onOpenLibrary
     }
 
     private var filteredWorkspaces: [HCPWorkspace] {
@@ -60,6 +66,22 @@ struct HCPWorkspaceViewer: View {
                 } else if section == .variables {
                     HCPMapVariablesPanel(model: model).id(model.mapRequestKey)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if section == .outputs {
+                    HCPWorkspaceOutputsPage(model: model).id(model.mapRequestKey)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if section == .settings {
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Settings").font(.system(size: 17, weight: .semibold))
+                            Text("How this workspace runs in HCP Terraform. Changes are saved only when you choose Save.")
+                                .font(.system(size: 13)).foregroundStyle(.secondary)
+                        }
+                        Divider()
+                        ScrollView {
+                            HCPWorkspaceSettingsFace(model: model).id(model.mapRequestKey)
+                                .frame(maxWidth: 720, alignment: .leading)
+                        }
+                    }
                 } else {
                     GeometryReader { geometry in
                         if geometry.size.width >= 960 {
@@ -91,34 +113,26 @@ struct HCPWorkspaceViewer: View {
             if !connectionOnly && model.isConnected {
               QuietToolbar {
                 ToolbarItemGroup(placement: .navigation) {
-                    // The window title already names the workspace; the chooser names
-                    // the collection it opens, as a Finder pop-up would.
+                    SourceBadge(kind: .cloud(organization: model.selectedOrganization), action: onOpenLibrary)
+                    // The switcher names the workspace, as a Finder pop-up names its folder.
                     Button { showingWorkspaces.toggle() } label: {
-                        Label(model.selectedWorkspace == nil ? "Choose workspace" : "Workspaces", systemImage: "square.grid.2x2")
-                            .labelStyle(.titleAndIcon)
+                        HStack(spacing: 4) {
+                            Text(model.selectedWorkspace?.name ?? "Choose workspace").lineLimit(1)
+                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                        }
                     }
-                    .accessibilityLabel("Choose cloud workspace")
-                    .help("Choose an organization and workspace")
+                    .accessibilityLabel("Switch cloud workspace")
+                    .help("Switch to another workspace in this organization")
                     .popover(isPresented: $showingWorkspaces) {
                         VStack(alignment: .leading, spacing: 12) {
                             organizationPicker
                             workspaceColumn
                         }.padding(16).frame(width: 340, height: 520)
                     }
-                    Picker("Workspace view", selection: Binding(get: { section == .variables ? .map : section },
-                                                              set: { section = $0 })) {
-                        Text("Map").tag(HCPWorkspaceSection.map)
-                        Text("List").tag(HCPWorkspaceSection.list)
-                        Text("Runs").tag(HCPWorkspaceSection.runs)
-                    }.pickerStyle(.segmented).labelsHidden().frame(width: 190)
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Toggle(isOn: Binding(get: { section == .variables }, set: { section = $0 ? .variables : .map })) {
-                        Label("Variables", systemImage: "slider.horizontal.3").labelStyle(.titleAndIcon)
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide workspace variables")
-                    .accessibilityLabel("Show workspace variables")
+                    Picker("Section", selection: Binding(get: { section }, set: { section = $0 })) {
+                        ForEach(HCPWorkspaceSection.allCases) { item in Text(item.rawValue).tag(item) }
+                    }.pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .help("Map and List show the resources. Runs, Inputs, Outputs and Settings are the workspace's other sections.")
                 }
               }
             }
@@ -361,22 +375,15 @@ struct HCPWorkspaceViewer: View {
         }
     }
 
-    /// Runs and Variables ride the cloud Map's inspector as faces (DESIGN.md §2).
+    /// The Proposal rides the cloud Map's inspector as a face (DESIGN.md §2).
+    /// Inputs and Settings are sections of the rail, not faces.
     private var remoteSideFaces: [MapSideFace] {
         [
-            // Runs live in the Changes strip; a second list in the inspector was duplicative.
-            MapSideFace(id: "variables", title: "Variables",
-                        count: model.workspaceVariables.isEmpty ? nil : model.workspaceVariables.count) {
-                RemoteVariablesFace(model: model, onOpen: { section = .variables })
-            },
             MapSideFace(id: "proposal", title: "Proposal") {
                 HCPProposalFace(model: model, folders: proposalFolders, onCheckOut: onCheckOut,
                                 onChooseFolder: chooseProposalFolder,
                                 onShowRun: { run in Task { await model.showPlanPreview(for: run) } },
-                                onOpenSettings: { faceRequest = MapSideFaceRequest(faceID: "settings") })
-            },
-            MapSideFace(id: "settings", title: "Settings") {
-                HCPWorkspaceSettingsFace(model: model)
+                                onOpenSettings: { section = .settings })
             }
         ]
     }
@@ -637,8 +644,8 @@ struct HCPWorkspaceViewer: View {
             }
             HStack(spacing: 14) {
                 Button("Map") { section = .map }.buttonStyle(.link)
-                Button("Variables") { section = .variables }.buttonStyle(.link)
-                Button("Settings") { section = .map; faceRequest = MapSideFaceRequest(faceID: "settings") }.buttonStyle(.link)
+                Button("Inputs") { section = .variables }.buttonStyle(.link)
+                Button("Settings") { section = .settings }.buttonStyle(.link)
                 Button("Make a change") { section = .map; faceRequest = MapSideFaceRequest(faceID: "proposal") }.buttonStyle(.link)
             }
             .font(.system(size: 13))
@@ -1469,64 +1476,54 @@ private struct HCPMapResourceSheet: View {
 
 }
 
-/// Compact Variables face for the cloud Map. Masked values stay masked;
-/// editing happens on the Variables page.
-private struct RemoteVariablesFace: View {
-    @ObservedObject var model: HCPWorkspaceViewerModel
-    let onOpen: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if model.isLoadingVariables && model.workspaceVariables.isEmpty {
-                LoadingIndicator(size: 18, label: "Loading variables…").frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = model.variablesError, model.workspaceVariables.isEmpty {
-                Text(error).font(.system(size: 13)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
-            } else if model.workspaceVariables.isEmpty {
-                Text("This workspace has no variables.").font(.system(size: 13)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(16)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(model.workspaceVariables) { variable in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 6) {
-                                    Text(variable.key).font(.system(size: 13, weight: .semibold, design: .monospaced))
-                                        .lineLimit(1).truncationMode(.middle)
-                                    Spacer(minLength: 4)
-                                    Text(variable.category == "env" ? "Environment" : "Terraform")
-                                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                                }
-                                if variable.isMaskedForDisplay {
-                                    Label("Private value · hidden", systemImage: "lock.fill")
-                                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                                } else {
-                                    Text(variable.value?.isEmpty == false ? variable.value! : "Empty value")
-                                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
-                                        .lineLimit(1).truncationMode(.middle)
-                                }
-                            }
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .onTapGesture(perform: onOpen)
-                            .accessibilityElement(children: .combine)
-                            Divider().padding(.leading, 16)
-                        }
-                    }
-                }
-            }
-            Divider()
-            Button("Open Variables", action: onOpen).buttonStyle(.link).font(.system(size: 13))
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 10)
-        }
-        .task(id: model.mapRequestKey) {
-            if model.workspaceVariables.isEmpty, !model.isLoadingVariables { await model.refreshVariables() }
-        }
-    }
-}
 
 
 private extension String {
     var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}
+
+/// Outputs of the workspace's current state, the same rows the run page uses.
+struct HCPWorkspaceOutputsPage: View {
+    @ObservedObject var model: HCPWorkspaceViewerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Outputs").font(.system(size: 17, weight: .semibold))
+                    Text("An output is a value Terraform hands back after applying, such as a hostname or an id. These come from the workspace's current state.")
+                        .font(.system(size: 13)).foregroundStyle(.secondary).quickHelp(glossary: "output")
+                }
+                Spacer()
+                if model.workspaceOutputsLoading { LoadingIndicator(size: 14, label: "Loading…") }
+                Button { Task { await model.refreshWorkspaceOutputs() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+            }
+            Divider()
+            if model.workspaceOutputs.isEmpty {
+                Text(model.workspaceOutputsMessage ?? (model.workspaceOutputsLoading ? "" : "Outputs appear here after the first apply."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(model.workspaceOutputs) { output in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(output.name).font(.system(size: 13, weight: .medium)).frame(width: 200, alignment: .leading).lineLimit(1)
+                                if let value = output.value {
+                                    Text(value).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading).lineLimit(6)
+                                    MapCopyButton(value: value, label: "output \(output.name)")
+                                } else {
+                                    Text("Sensitive value hidden").font(.system(size: 13)).foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .task(id: model.selectedWorkspace?.id) { await model.refreshWorkspaceOutputs() }
+    }
 }
