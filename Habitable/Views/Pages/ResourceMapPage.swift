@@ -122,11 +122,22 @@ struct MapWelcome: Equatable {
     struct Declared: Equatable, Identifiable {
         let address: String
         let type: String
+        var sourceFile: String = ""
         var id: String { address }
     }
     let declared: [Declared]
     let hasReadme: Bool
     let previewTitle: String
+    /// Required inputs with no value yet, by name.
+    var neededInputs: [String] = []
+
+    /// "main.tf" or "main.tf and 2 other files".
+    var filesPhrase: String {
+        let files = Array(Set(declared.map(\.sourceFile).filter { !$0.isEmpty })).sorted()
+        guard let first = files.first else { return "The configuration" }
+        if files.count == 1 { return first }
+        return "\(first) and \(files.count - 1) other \(files.count == 2 ? "file" : "files")"
+    }
 }
 
 /// Asks the Map to select a resource (from the List or a palette); a new `id` repeats it.
@@ -941,6 +952,7 @@ struct ResourceMapContent: View {
                     ForEach(presentation(for: tile).facts) { fact in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(fact.label).foregroundStyle(.secondary)
+                                .quickHelp(fact.label, "\(fact.label) as recorded in Terraform state for this resource. Habitable reads it from state; it does not query the provider live.")
                             Spacer(minLength: 4)
                             Text(fact.value).multilineTextAlignment(.trailing).textSelection(.enabled)
                             MapCopyButton(value: fact.value, label: fact.label)
@@ -1200,12 +1212,18 @@ struct ResourceMapContent: View {
         let count = welcome.declared.count
         return VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Welcome").font(.system(size: 13)).foregroundStyle(.secondary)
-                Text("This folder describes \(count) \(count == 1 ? "thing" : "things"). \(count == 1 ? "It doesn't" : "None of them") exist yet.")
-                    .font(.system(size: 20, weight: .semibold))
-                Text("Terraform reads the files in this folder and makes the real world match them. Press \(welcome.previewTitle) to see what it would create. Nothing happens until you apply.")
+                Text("Declared, not built.").font(.system(size: 20, weight: .semibold))
+                Text("\(welcome.filesPhrase) declares \(count) \(count == 1 ? "resource" : "resources"). None exist yet. \(welcome.previewTitle) shows what Terraform would create; nothing changes until you apply.")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 560, alignment: .leading)
+            }
+            if !welcome.neededInputs.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Needs from you").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text(welcome.neededInputs.joined(separator: ", ")).font(.system(size: 13, design: .monospaced))
+                    Text("· set them in Inputs before previewing").font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                .quickHelp(glossary: "variable")
             }
             HStack(spacing: 10) {
                 if let onPreviewChanges {
@@ -1229,7 +1247,7 @@ struct ResourceMapContent: View {
             }
             if !welcome.declared.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("What it describes").font(.headline)
+                    Text("Declared in \(welcome.filesPhrase)").font(.headline)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), alignment: .leading)], alignment: .leading, spacing: 10) {
                         ForEach(welcome.declared.prefix(12)) { declared in
                             VStack(alignment: .leading, spacing: 4) {

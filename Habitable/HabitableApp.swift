@@ -48,7 +48,6 @@ struct HabitableApp: App {
     @StateObject private var cloud = HCPWorkspaceViewerModel()
     @StateObject private var agentAccess = HabitableAgentAccess()
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
-    @StateObject private var quickHelp = QuickHelpModel()
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer", for: URL.self) { $directory in
             ContentView(initialDirectory: directory, cloud: cloud, agentAccess: agentAccess, onOpenRemoteWorkspace: { link in
@@ -59,16 +58,14 @@ struct HabitableApp: App {
                 .id(directory)
                 .frame(minWidth: 900, minHeight: 560)
                 .background(FolderOpenHandler())
-                .environment(\.quickHelpModel, quickHelp)
-                .overlay(alignment: .bottomTrailing) { if quickHelp.isEnabled { QuickHelpPanel(model: quickHelp).padding(16) } }
+                .modifier(QuickHelpWindowModifier())
         }
         .windowToolbarStyle(.unifiedCompact)
         .commands { WorkspaceCommands(recentWorkspaces: recentWorkspaces) }
 
         Window("HCP Terraform", id: "HCP.browser") {
             CloudWorkspaceWindow(model: cloud)
-                .environment(\.quickHelpModel, quickHelp)
-                .overlay(alignment: .bottomTrailing) { if quickHelp.isEnabled { QuickHelpPanel(model: quickHelp).padding(16) } }
+                .modifier(QuickHelpWindowModifier())
                 .frame(minWidth: 900, minHeight: 560)
                 .background(WindowMenuMembership())
         }.windowToolbarStyle(.unifiedCompact).defaultSize(width: 1400, height: 880)
@@ -289,5 +286,16 @@ private struct ConnectionsSettingsWindow: View {
             onOpenWorkspaces: { openWindow(id: "HCP.browser") },
             onOpenLocalWorkspace: { openWindow(id: "Workspace.viewer") })
             .navigationTitle("Settings")
+    }
+}
+
+/// Quick Help is per window: each window owns its model, so turning it on in one
+/// window leaves the others alone. New windows start from the last choice.
+private struct QuickHelpWindowModifier: ViewModifier {
+    @StateObject private var quickHelp = QuickHelpModel()
+    func body(content: Content) -> some View {
+        content
+            .environment(\.quickHelpModel, quickHelp)
+            .overlay(alignment: .bottomTrailing) { if quickHelp.isEnabled { QuickHelpPanel(model: quickHelp).padding(16) } }
     }
 }

@@ -50,6 +50,15 @@ struct OutputsListPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Exploration D: say what an output is where outputs live.
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle").foregroundStyle(.secondary)
+                Text("An output is a value Terraform hands back after applying, like a website address. Habitable shows outputs as Endpoints on the Map.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .quickHelp(glossary: "output")
+            Divider()
             SearchField(search: $searchText, accessibilityLabel: "Search outputs")
                 .padding(12)
             Divider()

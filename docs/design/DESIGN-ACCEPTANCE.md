@@ -255,3 +255,12 @@ Still from D: Quick Help on individual Inspector facts and on run stages; the "W
 3. Exercise the real end-to-end page in the one stable `~/Applications/Habitable Preview.app`. Check normal window size, long labels, search, selection/inspector, error/empty states and relevant local/HCP behavior. Use isolated fixtures for failure tests only; never surface them as product onboarding.
 4. Capture and inspect the final running build, compare to the reference, and record concrete remaining mismatches in beads. Do not claim missing behavior works because a screenshot or unit test looks plausible.
 5. Report separately: implemented, automated tests, installed build, inspected live, and unresolved design acceptance. Provide the exact user test route and screenshots. Do not call the refresh complete while the gap table still contains unfulfilled required behavior.
+
+## New infrastructure (Exploration F) and per-window Quick Help
+
+- Library gains **New…** (⌘⇧N) above Open Folder…. The chooser is GarageBand's project picker for infrastructure: Open (Folder on this Mac…, HCP Terraform workspace…) and Start from a template by category (Websites, Apps & APIs, Databases, Networks, Learn, Playground (no cloud)).
+- A template card shows provider, resource count and a rough monthly cost before anything is written. Its page lists what it creates (name, type, note), the inputs it needs from you, and where the folder goes (default `~/Documents/Habitable/<slug>`, Choose… for elsewhere). "Readable .tf files you own. Nothing is created in any cloud until you preview and apply."
+- Create Folder writes `main.tf`, `README.md` and `variables.tf` (when there are inputs), refuses a non-empty folder, then opens the folder in the same window, landing on the "Declared, not built." welcome with Preview Changes as the next step. Verified live with Playground.
+- Templates: Static website, Edge site, Redirect domain, Container website, Postgres database, Private network, Learn: Outputs and inputs, Playground. Their READMEs state what the template leaves out (certificate validation, bucket policy, IAM roles).
+- Quick Help is now per window: each window owns its toggle and card; new windows start from the last choice. Verified: off in a folder window, still on in the HCP Terraform window.
+- The welcome's "Needs from you" line uses the workspace's missing required inputs.

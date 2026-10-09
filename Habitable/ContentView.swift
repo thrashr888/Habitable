@@ -98,6 +98,7 @@ struct ContentView: View {
     @State private var previewRunID: UUID?
     @State private var previewTick = 0
     @State private var mapSelectionRequest: MapSelectionRequest?
+    @State private var showingNewInfrastructure = false
     @Environment(\.quickHelpModel) private var quickHelpEnvironment
     /// Resources the folder declares, read from configuration for the welcome.
     @State private var declaredResources: [MapWelcome.Declared] = []
@@ -139,6 +140,11 @@ struct ContentView: View {
                 recentWorkspaces.recordSuccessfulOpen(directory)
                 navigationSelection.wrappedValue = .map
             }
+        }
+        .sheet(isPresented: $showingNewInfrastructure) {
+            NewInfrastructureSheet(onOpenFolder: openFolder,
+                                   onOpenCloud: { openWindow(id: "HCP.browser") },
+                                   onCreated: { folder in openRecent(folder) })
         }
         .alert("Unable to Open Folder", isPresented: $isOpenErrorPresented) {
             Button("OK", role: .cancel) { workspace.dismissWorkspaceOpenError() }
@@ -305,7 +311,8 @@ struct ContentView: View {
         let hasReadme = workspace.workingDirectory.map { directory in
             ["README.md", "readme.md", "README"].contains { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
         } ?? false
-        return MapWelcome(declared: declaredResources, hasReadme: hasReadme, previewTitle: windowActions.planTitle)
+        let needed = workspace.terraformVariables.filter(\.isMissingRequiredInput).map(\.key)
+        return MapWelcome(declared: declaredResources, hasReadme: hasReadme, previewTitle: windowActions.planTitle, neededInputs: needed)
     }
 
     private func loadDeclaredResources(_ directory: URL?) async {
@@ -315,7 +322,7 @@ struct ContentView: View {
             TerraformConfigurationInspector.inspectMetadata(directory: directory).resources.map { declaration in
                 let parts = declaration.address.split(separator: ".").map(String.init)
                 let type = parts.count >= 2 ? parts[parts.count - 2] : declaration.address
-                return MapWelcome.Declared(address: declaration.address, type: type)
+                return MapWelcome.Declared(address: declaration.address, type: type, sourceFile: declaration.sourceFile)
             }
         }.value
         guard directory == workspace.workingDirectory else { return }
@@ -399,6 +406,7 @@ struct ContentView: View {
             if workspace.workingDirectory == nil {
                 LibraryView(library: library, cloud: cloud, recentFolders: recentWorkspaces.folders,
                             onOpenFolder: openRecent, onForgetFolder: { recentWorkspaces.forget($0) }, onChooseFolder: openFolder,
+                            onNewInfrastructure: { showingNewInfrastructure = true },
                             onOpenCloud: { cloudWorkspace, organization, hostname in
                                 let link = TerraformRemoteWorkspaceLink(hostname: hostname, organization: organization,
                                     workspaceName: cloudWorkspace.name, url: cloudWorkspace.htmlURL ?? URL(string: "https://\(hostname)")!)
