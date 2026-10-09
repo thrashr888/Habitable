@@ -819,11 +819,23 @@ private struct HCPRunDetailView: View {
         }
     }
 
+    /// `status` is an HCP status word (snake_case) and gets title-cased; pass
+    /// `verbatim:` for text that is already written for people.
     private func phase(_ label: String, _ status: String) -> some View {
+        phase(label, verbatim: status.replacingOccurrences(of: "_", with: " ").capitalized)
+    }
+
+    private func phase(_ label: String, verbatim text: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
-            Text(status.replacingOccurrences(of: "_", with: " ").capitalized).font(.system(size: 13))
+            Text(text).font(.system(size: 13))
         }
+    }
+
+    /// "$12.34/mo" from HCP's decimal strings.
+    private func money(_ text: String?) -> String {
+        guard let text, let value = Double(text) else { return "—" }
+        return "$" + String(format: "%.2f", value) + "/mo"
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -936,10 +948,10 @@ private struct HCPRunDetailView: View {
         let hasAny = !details.policyChecks.isEmpty || details.costEstimate != nil || !details.taskStages.isEmpty || !details.outputs.isEmpty
         if hasAny {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
-                phase("Policy checks", policySummary)
-                phase("Cost estimate", costSummary)
-                phase("Run tasks", taskSummary)
-                phase("Outputs", details.outputs.isEmpty ? "None" : "\(details.outputs.count)")
+                phase("Policy checks", verbatim: policySummary)
+                phase("Cost estimate", verbatim: costSummary)
+                phase("Run tasks", verbatim: taskSummary)
+                phase("Outputs", verbatim: details.outputs.isEmpty ? "None" : "\(details.outputs.count)")
             }
         }
     }
@@ -993,11 +1005,11 @@ private struct HCPRunDetailView: View {
                 Text(error).font(.system(size: 13)).foregroundStyle(.secondary)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
-                    phase("Before", estimate.priorMonthlyCost.map { "$\($0)/mo" } ?? "—")
-                    phase("After", estimate.proposedMonthlyCost.map { "$\($0)/mo" } ?? "—")
-                    phase("Change", costSummary)
+                    phase("Before", verbatim: money(estimate.priorMonthlyCost))
+                    phase("After", verbatim: money(estimate.proposedMonthlyCost))
+                    phase("Change", verbatim: costSummary)
                     if let matched = estimate.matchedResourcesCount, let count = estimate.resourcesCount {
-                        phase("Priced", "\(matched) of \(count) resources")
+                        phase("Priced", verbatim: "\(matched) of \(count) resources")
                     }
                 }
             }
