@@ -76,6 +76,12 @@ struct HCPWorkspaceSettingsChange: Equatable, Sendable {
     }
 }
 
+/// Merge and close, supplied by the Proposal face, which owns the checkout.
+struct PullRequestActions {
+    let merge: @MainActor () -> Void
+    let close: @MainActor () -> Void
+}
+
 struct HCPMergedPullRequest: Equatable, Sendable {
     let number: Int
     let title: String
@@ -1504,6 +1510,9 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     @Published private(set) var proposalError: String?
     /// A pull request merged from Habitable; the face follows the run it starts.
     @Published private(set) var recentMerge: HCPMergedPullRequest?
+    /// The open pull request for the checkout, and what the Map's review bar can do with it.
+    @Published var openPullRequest: GitProposal.PullRequest?
+    @Published var pullRequestActions: PullRequestActions?
 
     func noteMerge(_ merge: HCPMergedPullRequest) { recentMerge = merge }
     func clearMerge() { recentMerge = nil }
@@ -1539,6 +1548,8 @@ final class HCPWorkspaceViewerModel: ObservableObject {
 
     private func invalidateProposal() {
         recentMerge = nil
+        openPullRequest = nil
+        pullRequestActions = nil
         proposalLog = nil
         proposalOperation = UUID()
         proposalTask?.cancel()

@@ -60,6 +60,24 @@ struct WindowMenuMembership: NSViewRepresentable {
             guard let window else { return }
             if window.isExcludedFromWindowsMenu { window.isExcludedFromWindowsMenu = false }
             if window.representedURL != folder { window.representedURL = folder }
+            // One window per folder, also across restoration: a second window for the
+            // same folder (left over from an earlier session) closes itself.
+            if let folder {
+                let mine = folder.standardizedFileURL
+                // Restored windows get their represented files one by one; check now and
+                // again once restoration has settled.
+                for delay in [0.0, 1.5] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
+                        guard let window, window.representedURL?.standardizedFileURL == mine else { return }
+                        // Only the newer window yields, so two twins never close each other.
+                        let hasOlderTwin = NSApp.windows.contains {
+                            $0 !== window && $0.isVisible && $0.windowNumber < window.windowNumber
+                                && $0.representedURL?.standardizedFileURL == mine
+                        }
+                        if hasOlderTwin { window.close() }
+                    }
+                }
+            }
         }
     }
 }
