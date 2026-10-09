@@ -520,8 +520,8 @@ struct HCPWorkspaceViewer: View {
                 ForEach(model.runs) { run in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(run.message?.isEmpty == false ? run.message! : run.operation ?? "Terraform run")
-                                .font(.system(size: 13, weight: .medium)).lineLimit(2)
+                            Text(hcpRunTitle(run))
+                                .font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.tail)
                             Spacer(minLength: 0)
                             if run.isDestroy { Image(systemName: "trash").foregroundStyle(.orange).help("Destroy run") }
                         }
@@ -620,7 +620,8 @@ struct HCPWorkspaceViewer: View {
 
     @ViewBuilder private var runDetail: some View {
         if let details = model.selectedRunDetails {
-            HCPRunDetailView(details: details, listedRun: model.runs.first { $0.id == details.run.id })
+            HCPRunDetailView(details: details, listedRun: model.runs.first { $0.id == details.run.id },
+                             executionMode: model.selectedWorkspace?.executionMode)
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "list.bullet.rectangle").font(.system(size: 30)).foregroundStyle(.secondary)
@@ -663,6 +664,12 @@ private func hcpActionStyle(_ action: ChangeActions) -> (word: String, color: Co
     }
 }
 
+/// A commit message's first line; bodies and blank lines stay out of the list.
+private func hcpRunTitle(_ run: HCPRun) -> String {
+    let first = run.message?.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    return first.isEmpty ? (run.operation?.replacingOccurrences(of: "_", with: " ").capitalized ?? "Terraform run") : first
+}
+
 /// "VCS · master · 6b85f52 · thrashr888" or "API · pthrasher": how a run came to be.
 private func hcpRunProvenance(_ run: HCPRun) -> String? {
     var parts: [String] = []
@@ -695,28 +702,82 @@ private struct HCPRunDetailView: View {
     let details: HCPRunDetails
     /// The same run as the list holds it, with provenance from the page's includes.
     var listedRun: HCPRun? = nil
+    var executionMode: String? = nil
     @State private var plan: HCPRunLogPresentation?
     @State private var apply: HCPRunLogPresentation?
+    /// Stage cards the person opened or closed; stages not listed follow the run's progress.
+    @State private var stageOverrides: [String: Bool] = [:]
+
+    /// The run with provenance: the detail fetch carries it, the list copy is the fallback.
+    private var run: HCPRun {
+        details.run.source != nil || details.run.branch != nil ? details.run : (listedRun ?? details.run)
+    }
 
     private var statusWord: String { details.run.status.replacingOccurrences(of: "_", with: " ").capitalized }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
                 header
-                if let summary = plan?.summary ?? apply?.summary {
-                    consequences(summary, replaces: plan?.replaceCount ?? apply?.replaceCount ?? 0)
+                summaryStrip
+                if needsConfirmation, let review = details.planReviewURL {
+                    HStack(spacing: 8) {
+                        Image(systemName: "hand.raised.fill").foregroundStyle(Color.accentColor)
+                        Text("This plan is waiting for a confirmation.").font(.system(size: 13))
+                        Link("Review in HCP Terraform", destination: review).font(.system(size: 13))
+                    }
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 }
-                phases
-                checksStrip
-                if let plan, !plan.plannedChanges.isEmpty { plannedChanges(plan.plannedChanges) }
-                if let apply, !apply.applyEvents.isEmpty { applyActivity(apply.applyEvents) }
-                if !details.outputs.isEmpty { outputsSection }
-                if !details.policyChecks.isEmpty { policySection }
-                if let estimate = details.costEstimate { costSection(estimate) }
-                if !details.taskStages.isEmpty { taskSection }
-                diagnosticsSection
-                otherOutput
+                stageCard("details", title: "Run details", symbol: "list.bullet.rectangle", color: .secondary,
+                          when: run.createdAt, trailing: triggeredBy) { runDetailsFacts }
+                if details.planStatus != nil || plan != nil {
+                    stageCard("plan", title: "Plan " + stageWord(details.planStatus ?? "pending"),
+                              symbol: stageSymbol(details.planStatus), color: stageColor(details.planStatus),
+                              when: details.planFinishedAt ?? details.planStartedAt, trailing: planTrailing) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if let started = details.planStartedAt {
+                                timing(started: started, finished: details.planFinishedAt)
+                            }
+                            if let plan, !plan.plannedChanges.isEmpty { plannedChanges(plan.plannedChanges) }
+                            else if let summary = plan?.summary, summary.add + summary.change + summary.remove + summary.import == 0 {
+                                Text("No changes. Infrastructure matches the configuration.").font(.system(size: 13)).foregroundStyle(.secondary)
+                            }
+                            diagnostics(for: "plan", plan?.diagnostics ?? [])
+                            otherOutput(plan)
+                        }
+                    }
+                }
+                if !details.policyChecks.isEmpty {
+                    let worst = details.policyChecks.contains { $0.hardFailed > 0 } ? "failed" : (details.policyChecks.contains { $0.softFailed > 0 || $0.advisoryFailed > 0 } ? "soft_failed" : "passed")
+                    stageCard("policy", title: "Policy check " + stageWord(worst), symbol: stageSymbol(worst), color: stageColor(worst),
+                              when: nil, trailing: Text(policySummary)) { policySection }
+                }
+                if let estimate = details.costEstimate {
+                    stageCard("cost", title: "Cost estimate " + stageWord(estimate.status), symbol: stageSymbol(estimate.status),
+                              color: stageColor(estimate.status), when: nil, trailing: Text(costSummary)) { costSection(estimate) }
+                }
+                if !details.taskStages.isEmpty {
+                    let results = details.taskStages.flatMap(\.results)
+                    let worst = results.contains { $0.status == "failed" } ? "failed" : (results.allSatisfy { $0.status == "passed" } ? "passed" : "running")
+                    stageCard("tasks", title: "Run tasks " + stageWord(worst), symbol: stageSymbol(worst), color: stageColor(worst),
+                              when: nil, trailing: Text(taskSummary)) { taskSection }
+                }
+                if hasApplyStage {
+                    stageCard("apply", title: "Apply " + stageWord(details.applyStatus ?? "pending"),
+                              symbol: stageSymbol(details.applyStatus), color: stageColor(details.applyStatus),
+                              when: details.applyFinishedAt ?? details.applyStartedAt, trailing: applyTrailing) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            if let started = details.applyStartedAt {
+                                timing(started: started, finished: details.applyFinishedAt)
+                            }
+                            if let apply, !apply.applyEvents.isEmpty { applyActivity(apply.applyEvents) }
+                            if !details.outputs.isEmpty { outputsSection }
+                            diagnostics(for: "apply", apply?.diagnostics ?? [])
+                            otherOutput(apply)
+                        }
+                    }
+                }
                 if details.planLogs == nil && details.applyLogs == nil {
                     Text("Run output is unavailable for this account or run phase. Open the run in HCP Terraform for the full event timeline.")
                         .font(.system(size: 13)).foregroundStyle(.secondary)
@@ -732,35 +793,285 @@ private struct HCPRunDetailView: View {
             plan = details.planLogs.map(HCPRunLogPresentation.parse)
             apply = details.applyLogs.map(HCPRunLogPresentation.parse)
         }
+        // A new run, or a run that moved on: the cards follow its progress again.
+        .onChange(of: details.run.id) { _ in stageOverrides = [:] }
+        .onChange(of: details.run.status) { _ in stageOverrides = [:] }
+    }
+
+    // MARK: Stages
+
+    private var needsConfirmation: Bool {
+        ["planned", "cost_estimated", "policy_checked", "policy_override", "post_plan_awaiting_decision", "pre_apply_awaiting_decision"].contains(details.run.status)
+    }
+
+    private var hasApplyStage: Bool {
+        details.applyStatus?.lowercased() != "unreachable" && (details.applyStatus != nil || details.run.applyID != nil || apply != nil)
+    }
+
+    private var isRunFinished: Bool { !details.run.isActive }
+
+    /// Which stage is live: pending or running stages are open; when the run is
+    /// over, the last stage stays open so the outcome is in view.
+    private func stageOpenByDefault(_ key: String) -> Bool {
+        switch key {
+        case "details": return false
+        case "plan":
+            if let status = details.planStatus, Self.activeStageStatuses.contains(status) { return true }
+            return needsConfirmation || !hasApplyStage && isRunFinished
+        case "apply":
+            if let status = details.applyStatus, Self.activeStageStatuses.contains(status) { return true }
+            return isRunFinished
+        case "policy", "cost", "tasks":
+            return needsConfirmation && !hasApplyStage
+        default: return false
+        }
+    }
+    private static let activeStageStatuses: Set<String> = ["pending", "queued", "running", "managed_queued", "mfa_waiting"]
+
+    private func isStageOpen(_ key: String) -> Binding<Bool> {
+        Binding(get: { stageOverrides[key] ?? stageOpenByDefault(key) },
+                set: { stageOverrides[key] = $0 })
+    }
+
+    private func stageCard<Content: View, Trailing: View>(_ key: String, title: String, symbol: String, color: Color, when: Date?,
+                                                           trailing: Trailing, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { isStageOpen(key).wrappedValue.toggle() } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isStageOpen(key).wrappedValue ? 90 : 0)).frame(width: 12)
+                    Image(systemName: symbol).foregroundStyle(color)
+                    Text(title).font(.system(size: 14, weight: .semibold))
+                    if let when { Text(hcpRelativeDate(when)).font(.system(size: 13)).foregroundStyle(.secondary) }
+                    Spacer(minLength: 8)
+                    trailing.font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(isStageOpen(key).wrappedValue ? "Expanded" : "Collapsed")
+            if isStageOpen(key).wrappedValue {
+                content().padding(.top, 12)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+        .animation(.easeInOut(duration: 0.15), value: isStageOpen(key).wrappedValue)
+    }
+
+    private func stageWord(_ status: String) -> String {
+        switch status {
+        case "finished", "passed": return status == "passed" ? "passed" : "finished"
+        case "errored": return "errored"
+        case "canceled": return "canceled"
+        case "running": return "running"
+        case "pending", "queued": return "pending"
+        case "unreachable": return "skipped"
+        case "soft_failed": return "passed with advisories"
+        case "hard_failed", "failed": return "failed"
+        default: return status.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    private func stageSymbol(_ status: String?) -> String {
+        switch status {
+        case "finished", "passed", "applied": return "checkmark.circle.fill"
+        case "errored", "hard_failed", "failed": return "xmark.octagon.fill"
+        case "canceled", "unreachable": return "minus.circle"
+        case "running", "queued", "pending": return "circle.dotted"
+        case "soft_failed": return "exclamationmark.triangle.fill"
+        default: return "circle"
+        }
+    }
+
+    private func stageColor(_ status: String?) -> Color {
+        switch status {
+        case "finished", "passed", "applied": return .green
+        case "errored", "hard_failed", "failed": return .red
+        case "running", "queued", "pending": return .orange
+        case "soft_failed": return .orange
+        default: return .secondary
+        }
+    }
+
+    private func timing(started: Date, finished: Date?) -> some View {
+        HStack(spacing: 6) {
+            Text("Started").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            Text(hcpRelativeDate(started)).font(.system(size: 12)).foregroundStyle(.secondary)
+            if let finished {
+                Text("›").foregroundStyle(.tertiary)
+                Text("Finished").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                Text(hcpRelativeDate(finished)).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("· \(durationWord(from: started, to: finished))").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func durationWord(from start: Date, to end: Date) -> String {
+        let seconds = Int(end.timeIntervalSince(start))
+        if seconds < 60 { return "less than a minute" }
+        if seconds < 3600 { return "\(seconds / 60) min" }
+        return "\(seconds / 3600) h \((seconds % 3600) / 60) min"
+    }
+
+    @ViewBuilder private var planTrailing: some View {
+        if let summary = plan?.summary {
+            let replaces = plan?.replaceCount ?? 0
+            Text("+\(max(0, summary.add - replaces)) ~\(summary.change) −\(max(0, summary.remove - replaces))" + (replaces > 0 ? " ±\(replaces)" : ""))
+                .monospacedDigit()
+        } else {
+            changeStateLabel
+        }
+    }
+
+    @ViewBuilder private var applyTrailing: some View {
+        if let apply, let summary = apply.summary {
+            Text("+\(summary.add) ~\(summary.change) −\(summary.remove)").monospacedDigit()
+        }
+    }
+
+    /// "thrashr888 triggered a run from GitHub" / "pthrasher triggered a run through the API".
+    @ViewBuilder private var triggeredBy: some View {
+        let who = run.sender ?? run.createdBy
+        let how: String? = {
+            switch run.source {
+            case "tfe-configuration-version", "tfe-vcs": return "from " + (run.repositoryIdentifier.map { _ in "GitHub" } ?? "VCS")
+            case "tfe-api": return "through the API"
+            case "tfe-ui": return "in HCP Terraform"
+            case "terraform+cloud", "terraform", "tfe-cli": return "from the CLI"
+            case "tfe-infrastructure-lifecycle": return "by the workspace lifecycle"
+            case "tfe-run-trigger": return "by a run trigger"
+            default: return nil
+            }
+        }()
+        if who != nil || how != nil {
+            Text([who, "triggered a run", how].compactMap { $0 }.joined(separator: " ")).lineLimit(1)
+        }
+    }
+
+    private var runDetailsFacts: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            detailRow("Run ID") {
+                HStack(spacing: 6) {
+                    Text(details.run.id).font(.system(size: 13, design: .monospaced))
+                    MapCopyButton(value: details.run.id, label: "run ID")
+                }
+            }
+            detailRow("Configuration") {
+                HStack(spacing: 14) {
+                    Text(configurationWord)
+                    if let branch = run.branch { HStack(spacing: 4) { Text("Branch").foregroundStyle(.secondary); Text(branch) } }
+                    if let identifier = run.repositoryIdentifier {
+                        HStack(spacing: 4) {
+                            Text("Repo").foregroundStyle(.secondary)
+                            if let url = URL(string: "https://github.com/\(identifier)"), run.source != nil, run.commitURL?.host == "github.com" {
+                                Link(identifier, destination: url)
+                            } else { Text(identifier) }
+                        }
+                    }
+                }
+            }
+            if let sha = run.shortSHA {
+                detailRow("Commit") {
+                    HStack(spacing: 6) {
+                        if let url = run.commitURL { Link(sha, destination: url).font(.system(size: 13, design: .monospaced)) }
+                        else { Text(sha).font(.system(size: 13, design: .monospaced)) }
+                        if let message = run.commitMessage { Text(message).lineLimit(1) }
+                    }
+                }
+            }
+            if let number = run.pullRequestNumber { detailRow("Pull request") { Text("#\(number)") } }
+            if let trigger = run.triggerWord { detailRow("Trigger") { Text(trigger) } }
+            if let mode = executionMode { detailRow("Execution mode") { Text(mode.capitalized) } }
+            if let operation = run.operation, operation != "plan_and_apply" {
+                detailRow("Operation") { Text(operation.replacingOccurrences(of: "_", with: " ").capitalized) }
+            }
+        }
+        .font(.system(size: 13))
+    }
+
+    private var configurationWord: String {
+        let who = run.sender ?? run.createdBy
+        switch run.source {
+        case "tfe-configuration-version", "tfe-vcs": return "From " + (run.commitURL?.host == "github.com" ? "GitHub" : "VCS") + (who.map { " by \($0)" } ?? "")
+        case "tfe-api": return "Uploaded through the API" + (who.map { " by \($0)" } ?? "")
+        case "tfe-ui": return "Started in HCP Terraform" + (who.map { " by \($0)" } ?? "")
+        case "terraform+cloud", "terraform", "tfe-cli": return "Uploaded from the CLI" + (who.map { " by \($0)" } ?? "")
+        case "tfe-infrastructure-lifecycle": return "Workspace lifecycle"
+        case "tfe-run-trigger": return "Run trigger"
+        case let other?: return other.replacingOccurrences(of: "tfe-", with: "").replacingOccurrences(of: "-", with: " ").capitalized
+        case nil: return who.map { "By \($0)" } ?? "Unknown"
+        }
+    }
+
+    private func detailRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 110, alignment: .trailing)
+            content()
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// HCP's top strip: policy, cost, duration, resources changed, run tasks, outputs.
+    private var summaryStrip: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 12) {
+            phase("Policy checks", verbatim: policySummary)
+            phase("Cost estimate", verbatim: costSummary)
+            if let start = details.planStartedAt, let end = details.applyFinishedAt ?? details.planFinishedAt {
+                phase("Plan & apply duration", verbatim: durationWord(from: start, to: end).capitalizedFirst)
+            }
+            resourcesChanged
+            phase("Run tasks", verbatim: taskSummary)
+            phase("Outputs", verbatim: details.outputs.isEmpty ? "None" : "\(details.outputs.count)")
+        }
+    }
+
+    @ViewBuilder private var resourcesChanged: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Resources changed").font(.system(size: 12)).foregroundStyle(.secondary)
+            if let summary = plan?.summary ?? apply?.summary {
+                let replaces = plan?.replaceCount ?? apply?.replaceCount ?? 0
+                HStack(spacing: 8) {
+                    Text("+\(max(0, summary.add - replaces))").foregroundStyle(summary.add - replaces > 0 ? .green : .secondary)
+                    Text("~\(summary.change)").foregroundStyle(summary.change > 0 ? .orange : .secondary)
+                    if replaces > 0 { Text("±\(replaces)").foregroundStyle(hcpReplaceColor) }
+                    Text("−\(max(0, summary.remove - replaces))").foregroundStyle(summary.remove - replaces > 0 ? .red : .secondary)
+                }
+                .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+            } else {
+                changeStateLabel
+            }
+        }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(details.run.message?.isEmpty == false ? details.run.message! : "Remote run")
-                .font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(details.run.message?.isEmpty == false ? details.run.message! : "Remote run")
+                    .font(.system(size: 17, weight: .semibold)).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                HStack(spacing: 5) {
+                    Image(systemName: stageSymbol(details.run.status == "applied" || details.run.status == "planned_and_finished" ? "finished" : (needsConfirmation ? "pending" : details.run.status)))
+                    Text(statusWord)
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hcpStatusColor(details.run.status))
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(hcpStatusColor(details.run.status).opacity(0.14), in: Capsule())
+            }
             HStack(spacing: 4) {
-                Text(([statusWord] + [details.run.operation].compactMap { $0 }
-                      + [details.run.createdAt.map(hcpRelativeDate)].compactMap { $0 }).joined(separator: " · "))
-                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                if let date = details.run.createdAt { Text(hcpRelativeDate(date)).font(.system(size: 13)).foregroundStyle(.secondary) }
                 if let url = details.runURL {
                     Text("·").foregroundStyle(.secondary)
                     Link("Open in HCP Terraform", destination: url).font(.system(size: 13))
                 }
             }
             .accessibilityElement(children: .contain)
-            HStack(spacing: 8) {
-                Text(details.run.id).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
-                MapCopyButton(value: details.run.id, label: "run ID")
-            }
-            // The run the detail shows may predate the provenance fields; the list's copy has them.
-            if let run = listedRun, let provenance = hcpRunProvenance(run) {
-                HStack(spacing: 6) {
-                    Text(provenance).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-                    if let url = run.commitURL {
-                        Link("Commit", destination: url).font(.system(size: 12))
-                    }
-                }
+            if (plan?.diagnostics.isEmpty == false) || (apply?.diagnostics.isEmpty == false) {
+                Label("Diagnostics were found in this run", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13)).foregroundStyle(.orange)
             }
         }
     }
@@ -787,20 +1098,6 @@ private struct HCPRunDetailView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(value) \(label)")
-    }
-
-    private var phases: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
-            phase("Plan", details.planStatus ?? (details.run.planID == nil ? "Not available" : "Available"))
-            // A plan-only run has no apply stage; HCP reports it as "unreachable".
-            if details.applyStatus?.lowercased() != "unreachable", details.applyStatus != nil || details.run.applyID != nil {
-                phase("Apply", details.applyStatus ?? "Available")
-            }
-            changeStateLabel
-            if let review = details.planReviewURL {
-                Link("Review plan in HCP Terraform", destination: review).font(.system(size: 13))
-            }
-        }
     }
 
     /// Never shows "No changes" for a failed run; that is only claimed when a parsed summary says zero.
@@ -899,14 +1196,13 @@ private struct HCPRunDetailView: View {
         }
     }
 
-    @ViewBuilder private var diagnosticsSection: some View {
-        let all = (plan?.diagnostics ?? []).map { ("plan", $0) } + (apply?.diagnostics ?? []).map { ("apply", $0) }
-        if !all.isEmpty {
-            let errors = all.filter { $0.1.severity.lowercased() == "error" }.count
-            DisclosureGroup(isExpanded: $showDiagnostics) {
+    @ViewBuilder private func diagnostics(for phaseName: String, _ list: [HCPRunLogPresentation.Diagnostic]) -> some View {
+        if !list.isEmpty {
+            let errors = list.filter { $0.severity.lowercased() == "error" }.count
+            DisclosureGroup(isExpanded: Binding(get: { showDiagnostics[phaseName] ?? (errors > 0) },
+                                                set: { showDiagnostics[phaseName] = $0 })) {
               VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(all.enumerated()), id: \.offset) { _, entry in
-                    let (phaseName, diagnostic) = entry
+                ForEach(Array(list.enumerated()), id: \.offset) { _, diagnostic in
                     let isError = diagnostic.severity.lowercased() == "error"
                     let color: Color = isError ? .red : .orange
                     HStack(alignment: .top, spacing: 8) {
@@ -935,26 +1231,13 @@ private struct HCPRunDetailView: View {
                 HStack(spacing: 6) {
                     Image(systemName: errors > 0 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
                         .foregroundStyle(errors > 0 ? Color.red : Color.orange)
-                    Text("Diagnostics · \(all.count)").font(.system(size: 13, weight: .semibold))
+                    Text("Diagnostics · \(list.count)").font(.system(size: 13, weight: .semibold))
                 }
             }
         }
     }
 
-    @State private var showDiagnostics = false
-
-    /// HCP's run page strip: policy checks, cost, run tasks, outputs, in one glance.
-    @ViewBuilder private var checksStrip: some View {
-        let hasAny = !details.policyChecks.isEmpty || details.costEstimate != nil || !details.taskStages.isEmpty || !details.outputs.isEmpty
-        if hasAny {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 12) {
-                phase("Policy checks", verbatim: policySummary)
-                phase("Cost estimate", verbatim: costSummary)
-                phase("Run tasks", verbatim: taskSummary)
-                phase("Outputs", verbatim: details.outputs.isEmpty ? "None" : "\(details.outputs.count)")
-            }
-        }
-    }
+    @State private var showDiagnostics: [String: Bool] = [:]
 
     private var policySummary: String {
         guard !details.policyChecks.isEmpty else { return "None" }
@@ -981,7 +1264,6 @@ private struct HCPRunDetailView: View {
 
     private var policySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Policy checks")
             ForEach(details.policyChecks) { check in
                 HStack(spacing: 8) {
                     Circle().fill(check.hardFailed > 0 ? Color.red : (check.softFailed > 0 || check.advisoryFailed > 0 ? .orange : .green)).frame(width: 8, height: 8)
@@ -1000,7 +1282,6 @@ private struct HCPRunDetailView: View {
 
     private func costSection(_ estimate: HCPCostEstimate) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Cost estimate")
             if let error = estimate.errorMessage {
                 Text(error).font(.system(size: 13)).foregroundStyle(.secondary)
             } else {
@@ -1018,7 +1299,6 @@ private struct HCPRunDetailView: View {
 
     private var taskSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Run tasks")
             ForEach(details.taskStages) { stage in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(stage.stage.replacingOccurrences(of: "_", with: "-").capitalized)
@@ -1060,8 +1340,8 @@ private struct HCPRunDetailView: View {
         }
     }
 
-    @ViewBuilder private var otherOutput: some View {
-        let lines = (plan.map { $0.messages + $0.unparsedLines } ?? []) + (apply.map { $0.messages + $0.unparsedLines } ?? [])
+    @ViewBuilder private func otherOutput(_ presentation: HCPRunLogPresentation?) -> some View {
+        let lines = presentation.map { $0.messages + $0.unparsedLines } ?? []
         if !lines.isEmpty {
             DisclosureGroup("Other output") {
                 Text(lines.joined(separator: "\n"))
@@ -1185,4 +1465,9 @@ private struct RemoteVariablesFace: View {
             if model.workspaceVariables.isEmpty, !model.isLoadingVariables { await model.refreshVariables() }
         }
     }
+}
+
+
+private extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }
