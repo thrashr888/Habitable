@@ -1204,12 +1204,12 @@ struct ResourceMapContent: View {
                 }
                 if let change = preview?.change(for: address) { whatChanges(change) }
                 Divider()
+                Text("Attributes").font(.headline)
+                memberDetails(address)
+                Divider()
                 sourceSection
                 Divider()
                 referenceSection.id(selectedMember)
-                Divider()
-                Text("Attributes").font(.headline)
-                memberDetails(address)
                 Divider()
                 historySection(forResource: true)
             }

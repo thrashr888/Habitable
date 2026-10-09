@@ -128,3 +128,16 @@ extension ResourceListQueryTests {
         XCTAssertEqual(rows.map(\.name), ["Static Site", "Static Site · acl"])
     }
 }
+
+
+extension ResourceListQueryTests {
+    func testNameKeepsLowercaseResourceNameWhenTitleOnlyCapitalizesIt() {
+        let tile = MapTile(id: "aws_s3_bucket.this", title: "This", kind: .data,
+                           anchors: ["aws_s3_bucket.this"], resources: ["aws_s3_bucket.this", "aws_s3_bucket_acl.this"])
+        let rows = ResourceListBuilder.rows(
+            resources: [MapDisplayResource(address: "aws_s3_bucket.this", type: "aws_s3_bucket", displayAttributes: []),
+                        MapDisplayResource(address: "aws_s3_bucket_acl.this", type: "aws_s3_bucket_acl", displayAttributes: [])],
+            tiles: [tile], actions: [:], drifted: [])
+        XCTAssertEqual(rows.map(\.name), ["this", "this · acl"])
+    }
+}

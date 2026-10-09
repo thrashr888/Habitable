@@ -47,8 +47,10 @@ struct ContentView: View {
             }
         }
 
+        /// Sections with a collection beside a detail pane. The List is not one:
+        /// it is the Map content in list mode, with the Inspector at its side.
         var hasDetailList: Bool {
-            self == .runs || self == .resources || self == .outputs
+            self == .runs || self == .outputs
         }
     }
 
@@ -371,7 +373,8 @@ struct ContentView: View {
                             }, onOpenConnections: { openWindow(id: "App.settings") })
             } else {
                 VStack(spacing: 0) {
-                    if let page = selection, page != .map {
+                    // Map and List are the two views of the workspace; neither gets the page bar.
+                    if let page = selection, page != .map, page != .resources {
                         pageHeader(page)
                         Divider()
                     }
