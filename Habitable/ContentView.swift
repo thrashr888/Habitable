@@ -271,9 +271,26 @@ struct ContentView: View {
         })
     }
 
-    private var newRunTitle: String { workspace.autoApply ? "Preview and apply" : "Preview Changes" }
+    /// A checkout's runs happen in HCP Terraform; its changes start in the cloud
+    /// window's Proposal face rather than as a local plan.
+    private var isCheckout: Bool {
+        if case .checkout = remoteWorkspaceLink?.source { return true }
+        return false
+    }
+
+    private func openCloudProposal() {
+        guard let link = remoteWorkspaceLink else { return }
+        onOpenRemoteWorkspace(link)
+        cloud.requestedFace = "proposal"
+        openWindow(id: "HCP.browser")
+    }
+
+    private var newRunTitle: String {
+        isCheckout ? "Make a change" : (workspace.autoApply ? "Preview and apply" : "Preview Changes")
+    }
     private var newRunAction: (() -> Void)? {
         guard workspace.workingDirectory != nil, !workspace.locked else { return nil }
+        if isCheckout { return { openCloudProposal() } }
         return { previewChanges() }
     }
 
@@ -389,14 +406,14 @@ struct ContentView: View {
             openFolder: openFolder,
             openRecent: openRecent,
             clearRecents: recentWorkspaces.clear,
-            plan: previewChanges,
+            plan: isCheckout ? openCloudProposal : previewChanges,
             initialize: { workspace.initialize() },
             validate: { workspace.validate() },
             canPlan: workspace.workingDirectory != nil && !workspace.locked && !workspace.historyLoading
                 && workspace.historyError == nil && !workspace.isInspectingInputs && !workspace.hasUnavailableRememberedInputs,
             canInitialize: workspace.workingDirectory != nil && !workspace.locked,
             canValidate: workspace.workingDirectory != nil && !workspace.locked && !workspace.hasUnavailableRememberedInputs,
-            planTitle: workspace.autoApply ? "Preview and apply automatically" : "Preview Changes"
+            planTitle: isCheckout ? "Make a Change in HCP Terraform" : (workspace.autoApply ? "Preview and apply automatically" : "Preview Changes")
         )
     }
 

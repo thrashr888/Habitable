@@ -276,6 +276,8 @@ struct ResourceMapContent: View {
         }
         .onChange(of: selectedTileID) { id in if id != nil { sideFaceID = "inspector" } }
         .onChange(of: faceRequest?.id) { _ in if let faceRequest { sideFaceID = faceRequest.faceID } }
+        // A request made before this content existed (the window was still connecting).
+        .onAppear { if let faceRequest { sideFaceID = faceRequest.faceID } }
         .onChange(of: map) { _ in renderCache.reset() }
         .onChange(of: search) { _ in
             if let selectedTileID, !visibleTiles.contains(where: { $0.id == selectedTileID }) {
@@ -827,7 +829,7 @@ struct ResourceMapContent: View {
                     Divider()
                     Text("At a glance").font(.headline)
                     if presentation(for: tile).facts.isEmpty {
-                        Text("\(tile.resources.count) managed resources · \(tile.kind.title)").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text("\(tile.resources.count) managed \(tile.resources.count == 1 ? "resource" : "resources") · \(tile.kind.title)").font(.system(size: 13)).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 8) {
                     ForEach(presentation(for: tile).facts) { fact in
@@ -863,7 +865,7 @@ struct ResourceMapContent: View {
                     Divider()
                     referenceSection.id(selectedMember)
                     Divider()
-                    historySection
+                    historySection(forResource: true)
                     Divider()
                     // Each resource owns its attributes; the open one is the selected member.
                     Text("Resources · \(tile.resources.count)").font(.headline)
@@ -898,7 +900,7 @@ struct ResourceMapContent: View {
                     }
                     if map != nil {
                         Divider()
-                        historySection
+                        historySection(forResource: false)
                     }
                 }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1006,7 +1008,7 @@ struct ResourceMapContent: View {
         }
     }
 
-    private var historySection: some View {
+    private func historySection(forResource: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("History").font(.headline)
             if let stateCreatedAt {
@@ -1022,7 +1024,8 @@ struct ResourceMapContent: View {
             }
             Text(notice == HCPMapSnapshot.noStateRecorded.notice
                  ? "No state has been recorded yet; the first applied run creates it."
-                 : "Current state does not include this resource’s creation or last-change history.")
+                 : (forResource ? "Current state does not include this resource’s creation or last-change history."
+                                : "State records what exists now, not when each resource was created or last changed. The Changes strip has the runs."))
                 .font(.system(size: 13)).foregroundStyle(.secondary)
             if let onShowHistory { Button("Open workspace runs", action: onShowHistory).buttonStyle(.link) }
         }

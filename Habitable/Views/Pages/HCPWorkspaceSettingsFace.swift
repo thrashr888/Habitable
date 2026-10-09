@@ -15,6 +15,11 @@ struct HCPWorkspaceSettingsFace: View {
     @State private var saved = false
 
     private var workspace: HCPWorkspace? { model.selectedWorkspace }
+    private var recordSignature: String {
+        guard let workspace else { return "" }
+        return [workspace.id, workspace.terraformVersion ?? "", workspace.executionMode ?? "", workspace.workingDirectory ?? "",
+                workspace.autoApply ? "auto" : "confirm"].joined(separator: "|")
+    }
 
     /// "latest", the workspace's own value, then released versions newest first.
     private var versionChoices: [String] {
@@ -120,6 +125,11 @@ struct HCPWorkspaceSettingsFace: View {
         .task(id: workspace?.id) {
             if let workspace, loadedFor != workspace.id { load(workspace) }
             await releases.refreshIfNeeded()
+        }
+        // The record can arrive or change after the first load (a placeholder from
+        // the remembered selection, a refresh); follow it unless edits are pending.
+        .onChange(of: recordSignature) { _ in
+            if let workspace, pending.isEmpty || loadedFor != workspace.id { load(workspace) }
         }
         .task(id: saved) {
             guard saved else { return }

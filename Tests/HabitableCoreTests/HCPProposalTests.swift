@@ -104,3 +104,16 @@ extension HCPProposalTests {
         XCTAssertFalse(HCPWorkspaceViewerModel.message(nil, namesPullRequest: 2))
     }
 }
+
+extension HCPProposalTests {
+    func testWorkspaceDecodingKeepsAutoApplyAndWorkingDirectory() {
+        let object: [String: Any] = ["data": [[
+            "id": "ws-1", "type": "workspaces",
+            "attributes": ["name": "fast", "auto-apply": true, "working-directory": "infra", "terraform-version": "1.6.6", "execution-mode": "remote"],
+            "relationships": [:]
+        ]]]
+        let items = HCPAPIClient(configuration: .ephemeral).decodeWorkspaces(object, hostname: "app.terraform.io", organization: "o")
+        XCTAssertEqual(items.first?.autoApply, true)
+        XCTAssertEqual(items.first?.workingDirectory, "infra")
+    }
+}
