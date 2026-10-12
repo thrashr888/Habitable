@@ -111,15 +111,19 @@ struct TerraformPlan: Equatable, Sendable {
     let outputChanges: [PlanOutputChange]
     let formatVersion: String?
     let terraformVersion: String?
+    /// Resources that changed outside Terraform since the last apply
+    /// (`resource_drift`): what the refresh found versus what state recorded.
+    var resourceDrift: [PlanResourceChange] = []
 
     var consequences: PlanConsequences { PlanConsequences(plan: self) }
 
     init(resourceChanges: [PlanResourceChange], outputChanges: [PlanOutputChange],
-         formatVersion: String? = nil, terraformVersion: String? = nil) {
+         formatVersion: String? = nil, terraformVersion: String? = nil, resourceDrift: [PlanResourceChange] = []) {
         self.resourceChanges = resourceChanges
         self.outputChanges = outputChanges
         self.formatVersion = formatVersion
         self.terraformVersion = terraformVersion
+        self.resourceDrift = resourceDrift
     }
 }
 
@@ -172,7 +176,8 @@ func transformPlan(_ source: JSON) -> TerraformPlan {
             transformPlanOutputChange(name: name, change: log["output_changes"][name])
         },
         formatVersion: log["format_version"].string,
-        terraformVersion: log["terraform_version"].string
+        terraformVersion: log["terraform_version"].string,
+        resourceDrift: log["resource_drift"].arrayValue.map(transformPlanResourceChange).filter { $0.action != "no-op" }
     )
 }
 

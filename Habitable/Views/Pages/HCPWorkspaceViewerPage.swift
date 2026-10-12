@@ -35,6 +35,7 @@ struct HCPWorkspaceViewer: View {
     }
     @State private var showingWorkspaces = false
     @State private var showingCommandPalette = false
+    @State private var scrubTask: Task<Void, Never>?
     @State private var inspectorRequest: HCPMapInspectorRequest?
     @StateObject private var checkouts = WorkspaceCheckoutStore()
 
@@ -358,6 +359,13 @@ struct HCPWorkspaceViewer: View {
         .onAppear {
             if let face = model.requestedFace { faceRequest = MapSideFaceRequest(faceID: face); model.requestedFace = nil }
         }
+        // The playhead needs the recorded state versions as soon as the Map is up.
+        .task(id: model.selectedWorkspace?.id) { if model.stateVersions.isEmpty { await model.refreshStateVersions() } }
+        if model.stateVersions.count >= 2 || model.viewingStateVersion != nil {
+            Divider()
+            TimeTravelScrubber(moments: cloudMoments.map { $0.createdAt ?? Date.distantPast }, index: cloudTimeIndex,
+                               comparison: cloudTimeComparison, isLoading: model.isLoadingHistory)
+        }
         Divider()
         MapTimelineStrip(clips: remoteChangeClips, selectedID: model.viewingStateVersion?.runID,
                          hint: model.runs.isEmpty ? "" : "Select a change to see the Map as it was after that run",
@@ -482,6 +490,37 @@ struct HCPWorkspaceViewer: View {
         let word = run.status.replacingOccurrences(of: "_", with: " ")
         let when = run.createdAt.map { " · " + $0.formatted(.relative(presentation: .named)) } ?? ""
         return "Plan from HCP Terraform · \(run.message?.isEmpty == false ? run.message! : "Run") · \(word)\(when)"
+    }
+
+    /// State versions oldest first, for the playhead.
+    private var cloudMoments: [HCPStateVersionSummary] {
+        model.stateVersions.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+    }
+
+    private var cloudTimeIndex: Binding<Int> {
+        Binding(get: {
+            guard let viewing = model.viewingStateVersion, let index = cloudMoments.firstIndex(where: { $0.id == viewing.id }) else { return cloudMoments.count }
+            return index
+        }, set: { index in
+            scrubTask?.cancel()
+            if index >= cloudMoments.count { model.returnToCurrentState(); return }
+            guard cloudMoments.indices.contains(index) else { return }
+            let version = cloudMoments[index]
+            // Dragging passes many stops; load the one the playhead rests on.
+            scrubTask = Task {
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                guard !Task.isCancelled else { return }
+                await model.showStateVersion(version)
+            }
+        })
+    }
+
+    private var cloudTimeComparison: String? {
+        guard let then = model.historicalSnapshot, let now = model.mapSnapshot else { return nil }
+        let thenSet = Set(then.resources.map(\.address)), nowSet = Set(now.resources.map(\.address))
+        let gone = thenSet.subtracting(nowSet).count, arrived = nowSet.subtracting(thenSet).count
+        if gone == 0 && arrived == 0 { return "same resources as today" }
+        return "since then: +\(arrived) −\(gone)"
     }
 
     private var historyNotice: String? {

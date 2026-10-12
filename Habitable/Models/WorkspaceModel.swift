@@ -340,6 +340,11 @@ class Workspace: ObservableObject {
     @Published private(set) var awaitingInitializationConsent = false
     private var autoInitializeOnNextOpen = true
     @Published var hasState = false
+    /// Time travel: recorded states of this folder, oldest first, and the one on show.
+    @Published private(set) var localStateVersions: [LocalStateVersion] = []
+    @Published private(set) var viewingLocalVersion: LocalStateVersion?
+    @Published private(set) var historicalState: ShowMessage?
+    @Published private(set) var historicalMap: ResourceMap?
     @Published var hasVariables = false
 
     // settings
@@ -1150,6 +1155,47 @@ class Workspace: ObservableObject {
         })
     }
     
+    private func recordStateHistory(folder: URL, data: Data, resourceCount: Int) {
+        Task.detached(priority: .utility) {
+            LocalStateHistory.shared.record(folder: folder, data: data, resourceCount: resourceCount)
+            let versions = LocalStateHistory.shared.versions(for: folder)
+            await MainActor.run { if self.workingDirectory == folder { self.localStateVersions = versions } }
+        }
+    }
+
+    func reloadStateHistory() {
+        guard let folder = workingDirectory else { localStateVersions = []; return }
+        Task.detached(priority: .utility) {
+            let versions = LocalStateHistory.shared.versions(for: folder)
+            await MainActor.run { if self.workingDirectory == folder { self.localStateVersions = versions } }
+        }
+    }
+
+    /// Shows a recorded state on the Map; the current state stays loaded.
+    func showLocalStateVersion(_ version: LocalStateVersion) {
+        viewingLocalVersion = version
+        Task { @MainActor in
+            let data = await Task.detached(priority: .userInitiated) { LocalStateHistory.shared.load(version) }.value
+            guard self.viewingLocalVersion == version, let data, let json = try? JSON(data: data) else { return }
+            let shown = transformShow(json)
+            let metadata = shown.resources.compactMap { resource -> MapResource? in
+                guard let address = resource.address, let type = resource.type, let name = resource.name else { return nil }
+                let record = ResourceBrowserRecord(id: address, address: address, type: type, provider: resource.provider_name, mode: resource.mode)
+                return MapResource(address: address, type: type, name: name,
+                                   module: record.module == "root" ? "" : record.module, isData: resource.mode == "data",
+                                   identity: MapResource.stateIdentity(type: type, displayAttributes: resource.displayAttributes))
+            }
+            self.historicalState = shown
+            self.historicalMap = try? ResourceMapClassifier().classify(metadata)
+        }
+    }
+
+    func returnToCurrentLocalState() {
+        viewingLocalVersion = nil
+        historicalState = nil
+        historicalMap = nil
+    }
+
     func refreshResources() {
         guard let workingDirectory, !locked else { return }
         if canAutoInitialize {
@@ -1211,6 +1257,7 @@ class Workspace: ObservableObject {
                                        identity: MapResource.stateIdentity(type: type, displayAttributes: resource.displayAttributes))
                 } ?? []
                 self.resourceMap = try? ResourceMapClassifier().classify(metadata)
+                self.recordStateHistory(folder: workingDirectory, data: data, resourceCount: metadata.count)
                 guard !metadata.isEmpty, !self.isCancelingCommand else { return }
                 self.mapNotice = "Reading resource connections…"
                 pullingState = true

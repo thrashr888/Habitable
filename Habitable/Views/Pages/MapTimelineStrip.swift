@@ -153,6 +153,12 @@ struct MapTimelineStrip: View {
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
                         .opacity(clip.isApplied ? 1 : 0.75)
+                    if let drifted = clip.drifted, drifted > 0 {
+                        // The diamond marks drift the run found (design: "Drift you can see").
+                        Image(systemName: "diamond.fill").font(.system(size: 9)).foregroundStyle(.orange)
+                            .help("\(drifted) \(drifted == 1 ? "resource" : "resources") changed outside Terraform")
+                            .accessibilityLabel("\(drifted) drifted")
+                    }
                 }
                 countsLine(for: clip)
             }
@@ -270,5 +276,46 @@ struct MapChangesList: View {
         case let s where s.contains("planning") || s.contains("applying") || s.contains("pending") || s.contains("confirmed"): return .orange
         default: return .secondary
         }
+    }
+}
+
+/// The playhead: drag through recorded states and the Map animates resources
+/// arriving and leaving; let go to compare that moment with today
+/// (design: "Time travel on the map"). The last stop is always Today.
+struct TimeTravelScrubber: View {
+    /// Dates of the recorded states, oldest first.
+    let moments: [Date]
+    /// Index into `moments`, or `moments.count` for today.
+    @Binding var index: Int
+    /// "+3 −1 vs today" while a recorded state is shown.
+    var comparison: String? = nil
+    var isLoading = false
+
+    private var atToday: Bool { index >= moments.count }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
+                .quickHelp("Time travel", "Drag to see the Map as it was after each recorded state. Nothing changes; this is a view of history. The right end is today.")
+            Slider(value: Binding(get: { Double(index) }, set: { index = Int($0.rounded()) }),
+                   in: 0...Double(max(moments.count, 1)), step: 1)
+                .frame(maxWidth: 420)
+                .accessibilityLabel("Time travel")
+                .accessibilityValue(caption)
+            Text(caption).font(.system(size: 13, weight: atToday ? .regular : .medium)).monospacedDigit().lineLimit(1)
+            if let comparison, !atToday {
+                Text(comparison).font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            if isLoading { LoadingIndicator(size: 12, label: nil) }
+            Spacer()
+            if !atToday { Button("Today") { index = moments.count }.controlSize(.small) }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var caption: String {
+        guard !atToday, moments.indices.contains(index) else { return "Today" }
+        return moments[index].formatted(date: .abbreviated, time: .shortened)
     }
 }
