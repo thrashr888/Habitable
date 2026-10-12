@@ -32,6 +32,8 @@ struct HCPWorkspace: Identifiable, Equatable, Sendable {
     let projectName: String?
     let currentRunStatus: String?
     let currentRunCreatedAt: Date?
+    /// The run behind `currentRunStatus`, so an approval names one exact run.
+    var currentRunID: String? = nil
     let updatedAt: Date?
     let resourceCount: Int?
     let description: String?
@@ -993,8 +995,9 @@ struct HCPAPIClient: Sendable {
             let attributes = row["attributes"] as? [String: Any] ?? [:]
             let relationships = row["relationships"] as? [String: Any] ?? [:]
             let projectID = relationshipID(relationships["project"])
-            let run = relationshipID(relationships["current-run"]).flatMap { runs[$0] }
-            return HCPWorkspace(id: base.id, name: base.name, terraformVersion: base.terraformVersion,
+            let runID = relationshipID(relationships["current-run"])
+            let run = runID.flatMap { runs[$0] }
+            var workspace = HCPWorkspace(id: base.id, name: base.name, terraformVersion: base.terraformVersion,
                                 executionMode: base.executionMode, locked: base.locked, htmlURL: base.htmlURL,
                                 tagNames: base.tagNames, vcs: base.vcs,
                                 projectID: projectID,
@@ -1005,6 +1008,8 @@ struct HCPAPIClient: Sendable {
                                 resourceCount: attributes["resource-count"] as? Int,
                                 description: base.description,
                                 autoApply: base.autoApply, workingDirectory: base.workingDirectory)
+            workspace.currentRunID = runID
+            return workspace
         }
     }
 
@@ -1615,13 +1620,17 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         }
     }
 
-    /// Confirms the newest run awaiting approval in a workspace, for a notification
-    /// action. False when there is nothing to confirm, so the caller opens the window instead.
-    func confirmLatestPlannedRun(workspaceID: String) async -> Bool {
-        guard !isSample, isConnected, let token = try? tokenStore.read(hostname: hostname), !token.isEmpty,
-              let workspace = workspaces.first(where: { $0.id == workspaceID }) else { return false }
-        guard let page = try? await client.runs(hostname: hostname, organization: selectedOrganization, workspace: workspace, token: token, page: 1),
-              let run = page.items.first(where: { AttentionModel.awaitingApproval.contains($0.status) }) else { return false }
+    /// Confirms one exact run from a notification, and only if it is still the
+    /// workspace's current run and still waiting for approval when the person
+    /// answers. Anything else returns false so the caller opens the window and
+    /// the person sees what changed before confirming.
+    func confirmRunFromNotification(workspaceID: String, runID: String) async -> Bool {
+        guard !isSample, isConnected, let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return false }
+        await refreshWorkspaces()
+        guard let workspace = workspaces.first(where: { $0.id == workspaceID }), workspace.currentRunID == runID,
+              let page = try? await client.runs(hostname: hostname, organization: selectedOrganization, workspace: workspace, token: token, page: 1),
+              let run = page.items.first(where: { $0.id == runID }), run.workspaceID == workspaceID,
+              AttentionModel.awaitingApproval.contains(run.status) else { return false }
         let confirmed = await applyRunAction(runID: run.id, discard: false)
         if confirmed, selectedWorkspaceID == workspaceID { await refreshRuns(force: true) }
         return confirmed

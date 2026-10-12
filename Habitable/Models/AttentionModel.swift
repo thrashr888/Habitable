@@ -12,11 +12,13 @@ struct AttentionItem: Identifiable, Equatable, Sendable {
     let workspaceName: String
     let kind: Kind
     var since: Date? = nil
+    /// The run an approval is about; a notification confirms this one and no other.
+    var runID: String? = nil
 
     var id: String {
         switch kind {
         case .running: return "running:\(workspaceID)"
-        case .approval: return "approval:\(workspaceID)"
+        case .approval: return "approval:\(workspaceID):\(runID ?? "")"
         case .drift: return "drift:\(workspaceID)"
         }
     }
@@ -46,7 +48,8 @@ enum AttentionModel {
         for workspace in workspaces {
             if let status = workspace.currentRunStatus {
                 if awaitingApproval.contains(status), !workspace.autoApply {
-                    approvals.append(AttentionItem(workspaceID: workspace.id, workspaceName: workspace.name, kind: .approval, since: workspace.currentRunCreatedAt))
+                    approvals.append(AttentionItem(workspaceID: workspace.id, workspaceName: workspace.name, kind: .approval,
+                                                   since: workspace.currentRunCreatedAt, runID: workspace.currentRunID))
                 } else if inFlight.contains(status) {
                     running.append(AttentionItem(workspaceID: workspace.id, workspaceName: workspace.name, kind: .running(status: status), since: workspace.currentRunCreatedAt))
                 }
