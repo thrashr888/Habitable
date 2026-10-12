@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import SwiftyJSON
 
 /// One recorded moment of a folder's state, for time travel on the Map.
 struct LocalStateVersion: Identifiable, Equatable, Sendable {
@@ -32,9 +33,12 @@ final class LocalStateHistory: @unchecked Sendable {
     }
 
     /// Records `data` for `folder` unless it matches the latest recording.
+    /// Sensitive values are removed before anything is written: the recording
+    /// keeps addresses, types and plain attributes, never secrets.
     /// Returns the new version, or nil when nothing changed.
     @discardableResult
-    func record(folder: URL, data: Data, resourceCount: Int) -> LocalStateVersion? {
+    func record(folder: URL, data rawData: Data, resourceCount: Int) -> LocalStateVersion? {
+        let data = Self.redacted(rawData)
         let directory = folderDirectory(folder)
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         return queue.sync {
@@ -61,6 +65,53 @@ final class LocalStateHistory: @unchecked Sendable {
     func load(_ version: LocalStateVersion) -> Data? { try? Data(contentsOf: version.url) }
 
     func clear(folder: URL) { queue.sync { try? FileManager.default.removeItem(at: folderDirectory(folder)) } }
+
+    /// `terraform show -json` carries real values beside a `sensitive_values`
+    /// map; every value that map marks is replaced, and sensitive outputs too.
+    static func redacted(_ data: Data) -> Data {
+        guard var json = try? JSON(data: data) else { return data }
+        func scrub(module: JSON) -> JSON {
+            var module = module
+            var resources = module["resources"].arrayValue
+            for index in resources.indices {
+                let marks = resources[index]["sensitive_values"]
+                if marks.exists() {
+                    resources[index]["values"] = scrubValues(resources[index]["values"], marks: marks)
+                    resources[index]["sensitive_values"] = marks
+                }
+            }
+            if !resources.isEmpty { module["resources"] = JSON(resources.map { $0.object }) }
+            var children = module["child_modules"].arrayValue
+            for index in children.indices { children[index] = scrub(module: children[index]) }
+            if !children.isEmpty { module["child_modules"] = JSON(children.map { $0.object }) }
+            return module
+        }
+        func scrubValues(_ values: JSON, marks: JSON) -> JSON {
+            if marks.type == .bool { return marks.boolValue ? JSON("(sensitive value)") : values }
+            var result = values
+            if marks.type == .dictionary {
+                for (key, mark) in marks.dictionaryValue where values[key].exists() {
+                    result[key] = scrubValues(values[key], marks: mark)
+                }
+            } else if marks.type == .array {
+                var items = values.arrayValue
+                for (index, mark) in marks.arrayValue.enumerated() where items.indices.contains(index) {
+                    items[index] = scrubValues(items[index], marks: mark)
+                }
+                result = JSON(items.map { $0.object })
+            }
+            return result
+        }
+        if json["values"]["root_module"].exists() {
+            json["values"]["root_module"] = scrub(module: json["values"]["root_module"])
+        }
+        if let outputs = json["values"]["outputs"].dictionary {
+            for (name, output) in outputs where output["sensitive"].boolValue {
+                json["values"]["outputs"][name]["value"] = JSON("(sensitive value)")
+            }
+        }
+        return (try? json.rawData()) ?? data
+    }
 
     private func versionsLocked(_ directory: URL) -> [LocalStateVersion] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
