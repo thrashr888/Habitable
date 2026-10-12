@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import CoreSpotlight
 import SwiftUI
 
 /// Folders handed to the app from outside: Finder's Open With, a drop on the
@@ -31,6 +32,18 @@ final class HabitableAppDelegate: NSObject, NSApplicationDelegate {
         return externalFolders.remove(RecentWorkspaceStore.canonicalPath(folder)) != nil
     }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationBridge.configure(delegate: self)
+    }
+
+    /// A Spotlight result for a workspace or resource.
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity,
+                     restorationHandler: @escaping ([NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == CSSearchableItemActionType,
+              let identifier = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return false }
+        return MainActor.assumeIsolated { SpotlightIndex.open(identifier: identifier) }
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         let folders = urls.filter { url in
             var isDirectory: ObjCBool = false
@@ -45,9 +58,20 @@ final class HabitableAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct HabitableApp: App {
     @NSApplicationDelegateAdaptor private var delegate: HabitableAppDelegate
-    @StateObject private var cloud = HCPWorkspaceViewerModel()
+    @StateObject private var cloud: HCPWorkspaceViewerModel
     @StateObject private var agentAccess = HabitableAgentAccess()
     @StateObject private var recentWorkspaces = RecentWorkspaceStore()
+    @StateObject private var attention: AttentionCenter
+
+    init() {
+        let cloud = HCPWorkspaceViewerModel()
+        _cloud = StateObject(wrappedValue: cloud)
+        _attention = StateObject(wrappedValue: AttentionCenter(cloud: cloud))
+        NotificationBridge.cloud = cloud
+        IntentRegistry.cloud = cloud
+        IntentRegistry.recentFolders = { RecentWorkspaceStore().folders }
+    }
+
     var body: some Scene {
         WindowGroup("Workspace", id: "Workspace.viewer", for: URL.self) { $directory in
             ContentView(initialDirectory: directory, cloud: cloud, agentAccess: agentAccess, onOpenRemoteWorkspace: { link in
@@ -70,6 +94,12 @@ struct HabitableApp: App {
                 .frame(minWidth: 900, minHeight: 560)
                 .background(WindowMenuMembership(hidesTitle: cloud.isConnected))
         }.windowToolbarStyle(.unified).defaultSize(width: 1400, height: 880)
+
+        MenuBarExtra {
+            HabitableMenuBar(cloud: cloud, attention: attention)
+        } label: {
+            HabitableMenuBarLabel(attention: attention)
+        }
 
         Window("Settings", id: "App.settings") {
             ConnectionsSettingsWindow(model: cloud, agentAccess: agentAccess)

@@ -1615,6 +1615,18 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         }
     }
 
+    /// Confirms the newest run awaiting approval in a workspace, for a notification
+    /// action. False when there is nothing to confirm, so the caller opens the window instead.
+    func confirmLatestPlannedRun(workspaceID: String) async -> Bool {
+        guard !isSample, isConnected, let token = try? tokenStore.read(hostname: hostname), !token.isEmpty,
+              let workspace = workspaces.first(where: { $0.id == workspaceID }) else { return false }
+        guard let page = try? await client.runs(hostname: hostname, organization: selectedOrganization, workspace: workspace, token: token, page: 1),
+              let run = page.items.first(where: { AttentionModel.awaitingApproval.contains($0.status) }) else { return false }
+        let confirmed = await applyRunAction(runID: run.id, discard: false)
+        if confirmed, selectedWorkspaceID == workspaceID { await refreshRuns(force: true) }
+        return confirmed
+    }
+
     func confirmApply(run: HCPRun) async {
         if await applyRunAction(runID: run.id, discard: false) { await refreshRuns(force: true) }
     }

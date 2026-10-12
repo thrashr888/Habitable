@@ -40,6 +40,7 @@
 		AA60400000000000000000F4 /* QuickHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F5 /* QuickHelp.swift */; };
 		AA60400000000000000000F8 /* InfrastructureTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F9 /* InfrastructureTemplates.swift */; };
 		AA60400000000000000000FC /* RegistryModules.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000FD /* RegistryModules.swift */; };
+		AA60400000000000000001A8 /* AttentionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000001A9 /* AttentionModel.swift */; };
 		AA60400000000000000001A0 /* LocalStateHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000001A1 /* LocalStateHistory.swift */; };
 		AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000013 /* TerraformDiagnosticSource.swift */; };
 		AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5310000000000000000002 /* WorkspaceReadme.swift */; };
@@ -79,6 +80,9 @@
 		8AA12B1E26427AF10048A4A9 /* StructuredLogModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA12B1D26427AF10048A4A9 /* StructuredLogModel.swift */; };
 		8AF213252639E8BC009F97C2 /* HabitableApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF213242639E8BC009F97C2 /* HabitableApp.swift */; };
 		8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AF213262639E8BC009F97C2 /* ContentView.swift */; };
+		AA60400000000000000001A2 /* MenuBarExtra.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000001A3 /* MenuBarExtra.swift */; };
+		AA60400000000000000001A4 /* HabitableIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000001A5 /* HabitableIntents.swift */; };
+		AA60400000000000000001A6 /* SpotlightIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000001A7 /* SpotlightIndex.swift */; };
 		8AF213292639E8BF009F97C2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AF213282639E8BF009F97C2 /* Assets.xcassets */; };
 		8AF2132C2639E8BF009F97C2 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AF2132B2639E8BF009F97C2 /* Preview Assets.xcassets */; };
 		8AF2133D263A0448009F97C2 /* SwiftyJSON in Frameworks */ = {isa = PBXBuildFile; productRef = 8AF2133C263A0448009F97C2 /* SwiftyJSON */; };
@@ -143,6 +147,7 @@
 		AA60400000000000000000F5 /* QuickHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickHelp.swift; sourceTree = "<group>"; };
 		AA60400000000000000000F9 /* InfrastructureTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfrastructureTemplates.swift; sourceTree = "<group>"; };
 		AA60400000000000000000FD /* RegistryModules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistryModules.swift; sourceTree = "<group>"; };
+		AA60400000000000000001A9 /* AttentionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionModel.swift; sourceTree = "<group>"; };
 		AA60400000000000000001A1 /* LocalStateHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStateHistory.swift; sourceTree = "<group>"; };
 		AA6030000000000000000013 /* TerraformDiagnosticSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformDiagnosticSource.swift; sourceTree = "<group>"; };
 		AA5310000000000000000002 /* WorkspaceReadme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceReadme.swift; sourceTree = "<group>"; };
@@ -182,6 +187,9 @@
 		8AF213212639E8BC009F97C2 /* Habitable.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Habitable.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8AF213242639E8BC009F97C2 /* HabitableApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitableApp.swift; sourceTree = "<group>"; };
 		8AF213262639E8BC009F97C2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		AA60400000000000000001A3 /* MenuBarExtra.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarExtra.swift; sourceTree = "<group>"; };
+		AA60400000000000000001A5 /* HabitableIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HabitableIntents.swift; sourceTree = "<group>"; };
+		AA60400000000000000001A7 /* SpotlightIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightIndex.swift; sourceTree = "<group>"; };
 		8AF213282639E8BF009F97C2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8AF2132B2639E8BF009F97C2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		8AF2132D2639E8BF009F97C2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -272,6 +280,7 @@
 				AA60400000000000000000F5 /* QuickHelp.swift */,
 				AA60400000000000000000F9 /* InfrastructureTemplates.swift */,
 				AA60400000000000000000FD /* RegistryModules.swift */,
+				AA60400000000000000001A9 /* AttentionModel.swift */,
 				AA60400000000000000001A1 /* LocalStateHistory.swift */,
 				AA6030000000000000000013 /* TerraformDiagnosticSource.swift */,
 				AA5310000000000000000002 /* WorkspaceReadme.swift */,
@@ -363,6 +372,9 @@
 			children = (
 				8AF213242639E8BC009F97C2 /* HabitableApp.swift */,
 				8AF213262639E8BC009F97C2 /* ContentView.swift */,
+				AA60400000000000000001A3 /* MenuBarExtra.swift */,
+				AA60400000000000000001A5 /* HabitableIntents.swift */,
+				AA60400000000000000001A7 /* SpotlightIndex.swift */,
 				8A0D933D263F7186001CB06C /* Models */,
 				8A0D933C263F717A001CB06C /* Views */,
 				8AF2134B263C97B6009F97C2 /* Ansi.swift */,
@@ -515,6 +527,7 @@
 				AA60400000000000000000F4 /* QuickHelp.swift in Sources */,
 				AA60400000000000000000F8 /* InfrastructureTemplates.swift in Sources */,
 				AA60400000000000000000FC /* RegistryModules.swift in Sources */,
+				AA60400000000000000001A8 /* AttentionModel.swift in Sources */,
 				AA60400000000000000001A0 /* LocalStateHistory.swift in Sources */,
 				AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */,
 				AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */,
@@ -537,6 +550,9 @@
 				AA60400000000000000000BA /* SettingsWindow.swift in Sources */,
 				AA60400000000000000000B0 /* MapTimelineStrip.swift in Sources */,
 				8AF213272639E8BC009F97C2 /* ContentView.swift in Sources */,
+				AA60400000000000000001A2 /* MenuBarExtra.swift in Sources */,
+				AA60400000000000000001A4 /* HabitableIntents.swift in Sources */,
+				AA60400000000000000001A6 /* SpotlightIndex.swift in Sources */,
 				8AF2134C263C97B6009F97C2 /* Ansi.swift in Sources */,
 				8A926B7B2650682600FDBA5C /* Search.swift in Sources */,
 				8AA12B14264260CB0048A4A9 /* SettingsListPage.swift in Sources */,

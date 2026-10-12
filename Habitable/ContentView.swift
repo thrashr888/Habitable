@@ -146,6 +146,7 @@ struct ContentView: View {
             workspace.reloadStateHistory()
             await loadDeclaredResources(workspace.workingDirectory)
         }
+        .onChange(of: workspace.state?.id) { _ in indexForSpotlight() }
         .onChange(of: workspace.workingDirectory) { directory in
             offerToAgents()
             if let directory, isAvailableDirectory(directory) {
@@ -449,6 +450,18 @@ struct ContentView: View {
         let gone = thenSet.subtracting(nowSet).count, arrived = nowSet.subtracting(thenSet).count
         if gone == 0 && arrived == 0 { return "same resources as today" }
         return "since then: +\(arrived) −\(gone)"
+    }
+
+    /// Spotlight indexes this folder's resource names, addresses and endpoints.
+    private func indexForSpotlight() {
+        guard let folder = workspace.workingDirectory, !workspace.isMapDemo, let state = workspace.state else { return }
+        let entries = state.resources.compactMap { resource -> SpotlightIndex.Entry? in
+            guard let address = resource.address, let type = resource.type else { return nil }
+            let endpoints = resource.displayAttributes.filter { (attribute: ResourceAttribute) in ["arn", "id", "endpoint", "address", "url", "dns_name", "domain_name", "hostname", "name"].contains(attribute.path) }
+                .map(\.value).filter { !$0.isEmpty && $0.count < 200 }
+            return SpotlightIndex.Entry(address: address, type: type, endpoints: Array(endpoints.prefix(4)))
+        }
+        Task.detached(priority: .utility) { SpotlightIndex.index(localFolder: folder, entries: entries) }
     }
 
     private var mapPreview: MapChangePreview? {
