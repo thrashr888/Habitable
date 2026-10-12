@@ -279,3 +279,9 @@ Still from D: Quick Help on individual Inspector facts and on run stages; the "W
 - The same rail in both windows: Map · List · Changes (Runs in the cloud) · Inputs · Outputs · Settings. The folder's info menu keeps only Overview, README, Source files and Environment variables. The HCP window gained Outputs (current state) and Settings sections; its inspector is Inspector and Proposal.
 - Variables is Inputs everywhere. Checkout action is "Make a Change". Mode bars (title left, one exit right) on the folder's non-rail pages; the Preview bar is titled.
 - Toolbars use the taller unified style. About pane: version, copyright, Releases link, and the Homebrew upgrade command with a copy button.
+
+## Title on the left, ⌘K, links that leave
+
+- The window's native title is hidden in workspace windows. A title control at the start of the toolbar carries the name, the source line ("Local state · This Mac", "From HCP Terraform · This Mac", "pthrasher_v2 · HCP Terraform") and a chevron: on this Mac it switches among recent folders and reaches the Library and New Infrastructure; in the cloud it is the organization and workspace switcher.
+- **Go to Anything** (View menu, ⌘K): a palette of resources (from state, or declared when there is no state), sections and actions. Type to filter, arrows and Return, Escape to leave. Both windows.
+- Every link that leaves the app for HCP Terraform, the Registry or GitHub shows the outbound arrow (`ExternalLink`).

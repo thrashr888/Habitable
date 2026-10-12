@@ -27,6 +27,7 @@
 		AA60400000000000000000E0 /* HCPProposalFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000E1 /* HCPProposalFace.swift */; };
 		AA60400000000000000000F2 /* ResourceTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F3 /* ResourceTableView.swift */; };
 		AA60400000000000000000FA /* NewInfrastructureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000FB /* NewInfrastructureSheet.swift */; };
+		AA60400000000000000000FE /* CommandPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000FF /* CommandPalette.swift */; };
 		AA60400000000000000000F6 /* QuickHelpPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F7 /* QuickHelpPanel.swift */; };
 		AA60400000000000000000E2 /* HCPWorkspaceSettingsFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */; };
 		AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000B9 /* ConnectionsPane.swift */; };
@@ -128,6 +129,7 @@
 		AA60400000000000000000E1 /* HCPProposalFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPProposalFace.swift; sourceTree = "<group>"; };
 		AA60400000000000000000F3 /* ResourceTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceTableView.swift; sourceTree = "<group>"; };
 		AA60400000000000000000FB /* NewInfrastructureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewInfrastructureSheet.swift; sourceTree = "<group>"; };
+		AA60400000000000000000FF /* CommandPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPalette.swift; sourceTree = "<group>"; };
 		AA60400000000000000000F7 /* QuickHelpPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickHelpPanel.swift; sourceTree = "<group>"; };
 		AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HCPWorkspaceSettingsFace.swift; sourceTree = "<group>"; };
 		AA60400000000000000000B9 /* ConnectionsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsPane.swift; sourceTree = "<group>"; };
@@ -320,6 +322,7 @@
 				AA60400000000000000000E1 /* HCPProposalFace.swift */,
 				AA60400000000000000000F3 /* ResourceTableView.swift */,
 				AA60400000000000000000FB /* NewInfrastructureSheet.swift */,
+				AA60400000000000000000FF /* CommandPalette.swift */,
 				AA60400000000000000000F7 /* QuickHelpPanel.swift */,
 				AA60400000000000000000E3 /* HCPWorkspaceSettingsFace.swift */,
 				AA60400000000000000000B9 /* ConnectionsPane.swift */,
@@ -523,6 +526,7 @@
 				AA60400000000000000000E0 /* HCPProposalFace.swift in Sources */,
 				AA60400000000000000000F2 /* ResourceTableView.swift in Sources */,
 				AA60400000000000000000FA /* NewInfrastructureSheet.swift in Sources */,
+				AA60400000000000000000FE /* CommandPalette.swift in Sources */,
 				AA60400000000000000000F6 /* QuickHelpPanel.swift in Sources */,
 				AA60400000000000000000E2 /* HCPWorkspaceSettingsFace.swift in Sources */,
 				AA60400000000000000000B8 /* ConnectionsPane.swift in Sources */,

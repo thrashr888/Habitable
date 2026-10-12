@@ -253,10 +253,7 @@ struct NewInfrastructureSheet: View {
                 }
                 Spacer()
                 ForEach(item.links, id: \.url) { link in
-                    Button {
-                        openURL(link.url)
-                    } label: { Label(link.title, systemImage: "arrow.up.right.square") }
-                        .help(link.url.absoluteString)
+                    ExternalLink(title: link.title, url: link.url)
                 }
                 Button("Back") { template = nil; registry.clearDetail() }
             }

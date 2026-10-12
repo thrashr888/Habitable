@@ -345,7 +345,7 @@ struct HCPProposalFace: View {
                             trailing: nil, last: true)
             }
             HStack {
-                if let url = run?.htmlURL { Button("Open in HCP Terraform") { NSWorkspace.shared.open(url) } }
+                if let url = run?.htmlURL { ExternalLink(title: "Open in HCP Terraform", url: url) }
                 Spacer()
                 if waiting, let run {
                     Button("Discard") { Task { await model.discard(run: run) } }
@@ -485,7 +485,7 @@ struct HCPProposalFace: View {
             }
             HStack {
                 if let run = model.runs.first(where: { $0.id == proposal.runID }), let url = run.htmlURL {
-                    Button("Open in HCP Terraform") { NSWorkspace.shared.open(url) }
+                    ExternalLink(title: "Open in HCP Terraform", url: url)
                 }
                 Spacer()
                 switch proposal.step {

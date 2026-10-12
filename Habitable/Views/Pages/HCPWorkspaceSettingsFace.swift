@@ -139,7 +139,7 @@ struct HCPWorkspaceSettingsFace: View {
                     Text("Workspace settings are updated only when you choose Save.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                     if let url = workspace.htmlURL {
-                        Button("All settings in HCP Terraform") { NSWorkspace.shared.open(url.appendingPathComponent("settings").appendingPathComponent("general")) }
+                        ExternalLink(title: "All settings in HCP Terraform", url: url.appendingPathComponent("settings").appendingPathComponent("general"))
                             .buttonStyle(.link).font(.system(size: 13))
                     }
                 } else {

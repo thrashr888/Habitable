@@ -34,6 +34,7 @@ struct HCPWorkspaceViewer: View {
         nonmutating set { sectionStorage = newValue.rawValue }
     }
     @State private var showingWorkspaces = false
+    @State private var showingCommandPalette = false
     @State private var inspectorRequest: HCPMapInspectorRequest?
     @StateObject private var checkouts = WorkspaceCheckoutStore()
 
@@ -113,16 +114,14 @@ struct HCPWorkspaceViewer: View {
             if !connectionOnly && model.isConnected {
               QuietToolbar {
                 ToolbarItemGroup(placement: .navigation) {
-                    SourceBadge(kind: .cloud(organization: model.selectedOrganization), action: onOpenLibrary)
-                    // The switcher names the workspace, as a Finder pop-up names its folder.
+                    // The title control is the switcher: name and organization on the left.
                     Button { showingWorkspaces.toggle() } label: {
-                        HStack(spacing: 4) {
-                            Text(model.selectedWorkspace?.name ?? "Choose workspace").lineLimit(1)
-                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
-                        }
+                        WorkspaceTitleControl(kind: .cloud, name: model.selectedWorkspace?.name ?? "Choose workspace",
+                                              subtitle: "\(model.selectedOrganization) · HCP Terraform", switches: true)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Switch cloud workspace")
-                    .help("Switch to another workspace in this organization")
+                    .help("Switch to another workspace or organization")
                     .popover(isPresented: $showingWorkspaces) {
                         VStack(alignment: .leading, spacing: 12) {
                             organizationPicker
@@ -138,6 +137,8 @@ struct HCPWorkspaceViewer: View {
             }
         }
         .onChange(of: model.mapRequestKey) { _ in inspectorRequest = nil }
+        .focusedSceneValue(\.openCommandPalette, { showingCommandPalette = true })
+        .sheet(isPresented: $showingCommandPalette) { CommandPalette(items: commandPaletteItems) }
         .sheet(item: $inspectorRequest) { request in
             HCPMapResourceSheet(resources: model.mapSnapshot?.resources ?? [],
                                 title: model.selectedWorkspace?.name ?? "Workspace", selectedAddress: request.address)
@@ -375,6 +376,42 @@ struct HCPWorkspaceViewer: View {
         }
     }
 
+    /// Everything ⌘K reaches in the cloud window.
+    private var commandPaletteItems: [CommandPaletteItem] {
+        var items: [CommandPaletteItem] = []
+        for resource in (model.mapSnapshot?.resources ?? []).prefix(400) {
+            let name = resource.address.split(separator: ".").last.map(String.init) ?? resource.address
+            items.append(CommandPaletteItem(id: "resource:\(resource.address)", group: .resources, title: name,
+                                            subtitle: resource.address, symbol: "square.dashed") {
+                mapSelectionRequest = MapSelectionRequest(address: resource.address); section = .map
+            })
+        }
+        let symbols: [HCPWorkspaceSection: String] = [.map: "map", .list: "list.bullet", .runs: "clock.arrow.circlepath",
+                                                      .variables: "slider.horizontal.3", .outputs: "arrow.turn.down.right", .settings: "gearshape"]
+        for item in HCPWorkspaceSection.allCases {
+            items.append(CommandPaletteItem(id: "section:\(item.rawValue)", group: .sections, title: item.rawValue, symbol: symbols[item]) {
+                section = item
+            })
+        }
+        if model.selectedWorkspace != nil {
+            items.append(CommandPaletteItem(id: "action:propose", group: .actions, title: "Make a change", symbol: "play.circle") {
+                section = .map; faceRequest = MapSideFaceRequest(faceID: "proposal")
+            })
+            if let url = model.selectedWorkspace?.htmlURL {
+                items.append(CommandPaletteItem(id: "action:open", group: .actions, title: "Open in HCP Terraform", symbol: "arrow.up.right") {
+                    NSWorkspace.shared.open(url)
+                })
+            }
+            items.append(CommandPaletteItem(id: "action:refresh", group: .actions, title: "Refresh from HCP Terraform", symbol: "arrow.clockwise") {
+                Task { await model.refreshMap() }
+            })
+        }
+        items.append(CommandPaletteItem(id: "action:switch", group: .actions, title: "Switch workspace…", symbol: "cloud") { showingWorkspaces = true })
+        items.append(CommandPaletteItem(id: "action:library", group: .actions, title: "Library", symbol: "books.vertical", shortcut: "⌘⇧L") { onOpenLibrary() })
+        items.append(CommandPaletteItem(id: "action:connections", group: .actions, title: "Connections…", symbol: "network") { onOpenConnections() })
+        return items
+    }
+
     /// The Proposal rides the cloud Map's inspector as a face (DESIGN.md §2).
     /// Inputs and Settings are sections of the rail, not faces.
     private var remoteSideFaces: [MapSideFace] {
@@ -531,7 +568,7 @@ struct HCPWorkspaceViewer: View {
                         }
                         .buttonStyle(.plain).accessibilityLabel("Choose workspace \(workspace.name)")
                         .contextMenu {
-                            if let url = workspace.htmlURL { Link("Open in HCP Terraform", destination: url) }
+                            if let url = workspace.htmlURL { ExternalLink(title: "Open in HCP Terraform", url: url) }
                         }
                     }
                 }
@@ -789,7 +826,7 @@ private struct HCPRunDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "hand.raised.fill").foregroundStyle(Color.accentColor)
                         Text("This plan is waiting for a confirmation.").font(.system(size: 13))
-                        Link("Review in HCP Terraform", destination: review).font(.system(size: 13))
+                        ExternalLink(title: "Review in HCP Terraform", url: review)
                     }
                     .padding(10).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
@@ -1131,7 +1168,7 @@ private struct HCPRunDetailView: View {
                 if let date = details.run.createdAt { Text(hcpRelativeDate(date)).font(.system(size: 13)).foregroundStyle(.secondary) }
                 if let url = details.runURL {
                     Text("·").foregroundStyle(.secondary)
-                    Link("Open in HCP Terraform", destination: url).font(.system(size: 13))
+                    ExternalLink(title: "Open in HCP Terraform", url: url)
                 }
             }
             .accessibilityElement(children: .contain)

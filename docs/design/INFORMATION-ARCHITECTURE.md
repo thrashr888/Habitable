@@ -78,3 +78,4 @@ Keep the Settings window to General, Connections, Agents, Terraform, About. Anyt
 - D: the rail. Done. Map · List · Changes/Runs · Inputs · Outputs · Settings in both windows. The folder's Inputs, Outputs and workspace settings left the info menu; the HCP window gained an Outputs section (current state outputs) and a Settings section; the inspector keeps Inspector and Proposal only.
 - E: mode bars. Done for the folder's README, source files, environment variables and overview (title left, Back to Map right), and the Preview review bar is titled. The Proposal face keeps its own Done buttons.
 - F: app Settings stays General, Connections, Agents, Terraform, About. Done.
+- Title control (October 12): the window title moved to the left of the rail and became the switcher; the badge merged into it. ⌘K Go to Anything landed in both windows.
