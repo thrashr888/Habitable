@@ -40,6 +40,7 @@
 		AA60400000000000000000F4 /* QuickHelp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F5 /* QuickHelp.swift */; };
 		AA60400000000000000000F8 /* InfrastructureTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000F9 /* InfrastructureTemplates.swift */; };
 		AA60400000000000000000FC /* RegistryModules.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000000FD /* RegistryModules.swift */; };
+		AA60400000000000000001A0 /* LocalStateHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA60400000000000000001A1 /* LocalStateHistory.swift */; };
 		AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA6030000000000000000013 /* TerraformDiagnosticSource.swift */; };
 		AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5310000000000000000002 /* WorkspaceReadme.swift */; };
 		AA5510000000000000000001 /* ExternalEditorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5510000000000000000002 /* ExternalEditorStore.swift */; };
@@ -142,6 +143,7 @@
 		AA60400000000000000000F5 /* QuickHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickHelp.swift; sourceTree = "<group>"; };
 		AA60400000000000000000F9 /* InfrastructureTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfrastructureTemplates.swift; sourceTree = "<group>"; };
 		AA60400000000000000000FD /* RegistryModules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistryModules.swift; sourceTree = "<group>"; };
+		AA60400000000000000001A1 /* LocalStateHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStateHistory.swift; sourceTree = "<group>"; };
 		AA6030000000000000000013 /* TerraformDiagnosticSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerraformDiagnosticSource.swift; sourceTree = "<group>"; };
 		AA5310000000000000000002 /* WorkspaceReadme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceReadme.swift; sourceTree = "<group>"; };
 		AA5510000000000000000002 /* ExternalEditorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalEditorStore.swift; sourceTree = "<group>"; };
@@ -270,6 +272,7 @@
 				AA60400000000000000000F5 /* QuickHelp.swift */,
 				AA60400000000000000000F9 /* InfrastructureTemplates.swift */,
 				AA60400000000000000000FD /* RegistryModules.swift */,
+				AA60400000000000000001A1 /* LocalStateHistory.swift */,
 				AA6030000000000000000013 /* TerraformDiagnosticSource.swift */,
 				AA5310000000000000000002 /* WorkspaceReadme.swift */,
 				AA5510000000000000000002 /* ExternalEditorStore.swift */,
@@ -512,6 +515,7 @@
 				AA60400000000000000000F4 /* QuickHelp.swift in Sources */,
 				AA60400000000000000000F8 /* InfrastructureTemplates.swift in Sources */,
 				AA60400000000000000000FC /* RegistryModules.swift in Sources */,
+				AA60400000000000000001A0 /* LocalStateHistory.swift in Sources */,
 				AA6030000000000000000012 /* TerraformDiagnosticSource.swift in Sources */,
 				AA5310000000000000000001 /* WorkspaceReadme.swift in Sources */,
 				AA5510000000000000000001 /* ExternalEditorStore.swift in Sources */,

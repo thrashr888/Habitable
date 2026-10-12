@@ -62,18 +62,19 @@ struct ResourceMapPage: View {
     var welcome: MapWelcome? = nil
     var onPreviewChanges: (() -> Void)? = nil
     var onReadReadme: (() -> Void)? = nil
+    var liveApply: [String: MapLiveApplyState] = [:]
 
     var body: some View {
         ResourceMapContent(
             title: workspace.isMapDemo ? "Acme · Sample workspace" : (workspace.workingDirectory?.lastPathComponent ?? "Infrastructure"),
-            identity: "\(workspace.workingDirectory?.path ?? "sample")|\(workspace.state?.id.uuidString ?? "")",
-            map: workspace.resourceMap,
-            resources: (workspace.state?.resources ?? []).compactMap { resource in
+            identity: "\(workspace.workingDirectory?.path ?? "sample")|\(workspace.state?.id.uuidString ?? "")|\(workspace.viewingLocalVersion?.id ?? "")",
+            map: workspace.viewingLocalVersion != nil ? workspace.historicalMap : workspace.resourceMap,
+            resources: ((workspace.viewingLocalVersion != nil ? workspace.historicalState : workspace.state)?.resources ?? []).compactMap { resource in
                 guard let address = resource.address, let type = resource.type else { return nil }
                 return MapDisplayResource(address: address, type: type, displayAttributes: resource.displayAttributes,
                                           providerName: resource.provider_name)
             },
-            notice: workspace.mapNotice,
+            notice: workspace.viewingLocalVersion.map { "State as recorded \($0.date.formatted(date: .abbreviated, time: .shortened))" } ?? workspace.mapNotice,
             // A remote-state handoff is the explanation; the local state-read error
             // would only restate that there is nothing to read here.
             errorMessage: emptyTitle == nil ? workspace.errorMessage : nil,
@@ -85,11 +86,16 @@ struct ResourceMapPage: View {
             onShowHistory: onShowHistory,
             onShowVariables: onShowVariables,
             sideFaces: sideFaces,
+            historyBanner: workspace.viewingLocalVersion.map { version in
+                (text: "State as recorded \(version.date.formatted(date: .abbreviated, time: .shortened)) · \(version.resourceCount) resources",
+                 dismiss: { workspace.returnToCurrentLocalState() })
+            },
             preview: preview, onDiscardPreview: onDiscardPreview, onReviewPreview: onReviewPreview,
             onShowPlanOutput: onShowPlanOutput, autoApplyBadge: autoApplyBadge,
             selectionRequest: selectionRequest,
             listMode: listMode, onShowOnMap: onShowOnMap, onOpenSource: onOpenSource,
             welcome: welcome, onPreviewChanges: onPreviewChanges, onReadReadme: onReadReadme,
+            liveApply: liveApply,
             terraformExecutableURL: workspace.runner.executableURL,
             workspaceInitialized: workspace.isInitialized)
     }
@@ -242,12 +248,14 @@ struct ResourceMapContent: View {
     var welcome: MapWelcome? = nil
     var onPreviewChanges: (() -> Void)? = nil
     var onReadReadme: (() -> Void)? = nil
+    /// Per-resource apply progress while Terraform is applying (design: "Changes that arrive").
+    var liveApply: [String: MapLiveApplyState] = [:]
     @State private var listSelection: Set<String> = []
 
     private var listRows: [ResourceListRow] {
         var actions: [String: String] = [:]
         for (address, action) in preview?.resourceActions ?? [:] where action != .none { actions[address] = "\(action)" }
-        return ResourceListBuilder.rows(resources: resources, tiles: tiles, actions: actions, drifted: [])
+        return ResourceListBuilder.rows(resources: resources, tiles: tiles, actions: actions, drifted: preview?.driftedAddresses ?? [])
     }
 
     private var listTable: some View {
@@ -271,6 +279,7 @@ struct ResourceMapContent: View {
     var terraformExecutableURL: URL? = nil
     var workspaceInitialized = false
     @SceneStorage("map.sideFace") private var sideFaceID = "inspector"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingVariables = false
     // Settings › General › "Show inventory when a map opens".
     @State private var showingInventory = UserDefaults.standard.object(forKey: "map.showInventory") as? Bool ?? true
@@ -611,9 +620,12 @@ struct ResourceMapContent: View {
                                     tileButton(tile)
                                         .frame(width: placement.width, height: placement.height)
                                         .offset(x: placement.x, y: placement.y).id(tile.id)
+                                        // Time travel: tiles arrive and leave rather than blink.
+                                        .transition(.scale(scale: 0.7).combined(with: .opacity))
                                 }
                             }
                         }
+                        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.78), value: visibleTiles.map(\.id))
                         .frame(width: layout.width, height: layout.height + portHeight, alignment: .topLeading)
                         .scaleEffect(canvasZoom, anchor: .topLeading)
                         .frame(width: layout.width * canvasZoom, height: (layout.height + portHeight) * canvasZoom, alignment: .topLeading)
@@ -797,6 +809,10 @@ struct ResourceMapContent: View {
                 }
             }
             .opacity(preview != nil && action(for: tile) == .none ? 0.45 : 1)
+            .overlay {
+                if tileDrifted(tile) { DriftPulse() }
+            }
+            .modifier(LiveApplyTileEffect(state: liveState(for: tile)))
             .background {
                 if copies > 1 {
                     RoundedRectangle(cornerRadius: 13).fill(Color(nsColor: .controlBackgroundColor))
@@ -817,6 +833,20 @@ struct ResourceMapContent: View {
         .accessibilityLabel("\(tile.title), \(tile.resources.count) \(tile.resources.count == 1 ? "resource" : "resources"), \(tile.kind.title)")
         .accessibilityAddTraits(selectedTileID == tile.id ? [.isSelected] : [])
         .help(tile.resources.joined(separator: "\n"))
+    }
+
+    private func tileDrifted(_ tile: MapTile) -> Bool {
+        guard let preview, !preview.driftedAddresses.isEmpty else { return false }
+        return tile.resources.contains { preview.driftedAddresses.contains($0) }
+    }
+
+    /// The tile's state during an apply: failed beats applying beats done.
+    private func liveState(for tile: MapTile) -> MapLiveApplyState? {
+        guard !liveApply.isEmpty else { return nil }
+        let states = tile.resources.compactMap { liveApply[$0] }
+        if states.contains(.failed) { return .failed }
+        if let applying = states.first(where: { if case .applying = $0 { return true }; return false }) { return applying }
+        return states.isEmpty ? nil : .done
     }
 
     // MARK: Preview Changes
@@ -1005,6 +1035,10 @@ struct ResourceMapContent: View {
                         }
                     }
                     connections(for: tile)
+                    if let resource = selectedResource, let drift = preview?.drift(for: resource.address) {
+                        Divider()
+                        driftSection(drift, address: resource.address)
+                    }
                     Divider()
                     sourceSection
                     Divider()
@@ -1412,6 +1446,52 @@ struct ResourceMapContent: View {
         .background(actionColor(MapChangePreview.action(for: change)).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    /// Drift: what the refresh found versus what state recorded, and the two honest
+    /// answers. "Put it back" reviews the plan that restores the code's version;
+    /// "Keep it" opens the declaration with the live values on the clipboard.
+    private func driftSection(_ drift: PlanResourceChange, address: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "diamond.fill").font(.system(size: 10)).foregroundStyle(.orange)
+                Text("Changed outside Terraform").font(.headline)
+            }
+            .quickHelp(glossary: "drift")
+            Text("Someone or something changed this resource without Terraform. State recorded the left value; the resource now has the right one.")
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            ForEach(drift.attributes.prefix(12)) { attribute in
+                HStack(alignment: .top, spacing: 6) {
+                    Text(attribute.path).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                        .frame(width: 130, alignment: .leading).lineLimit(1).truncationMode(.middle)
+                    Text(attribute.before.displayValue).font(.system(size: 12, design: .monospaced)).lineLimit(2).strikethrough()
+                    Text("→").foregroundStyle(.secondary)
+                    Text(attribute.after.displayValue).font(.system(size: 12, design: .monospaced)).lineLimit(2)
+                }
+            }
+            if drift.attributes.count > 12 {
+                Text("and \(drift.attributes.count - 12) more attributes").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                if let onReviewPreview {
+                    Button("Put it back", action: onReviewPreview).buttonStyle(.borderedProminent)
+                        .help("Review and apply the plan, which restores what the code declares")
+                }
+                if let onOpenSource {
+                    Button("Keep it and update code") {
+                        let snippet = drift.attributes.map { "\($0.path) = \($0.after.displayValue)" }.joined(separator: "\n")
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(snippet, forType: .string)
+                        onOpenSource(address)
+                    }
+                    .help("Opens the declaration in your editor; the live values are on the clipboard")
+                }
+            }
+            Text("Nothing changes until you apply. Put it back needs an apply; keeping it needs a code change, then a plan that shows no changes.")
+                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     /// Selects the tile holding an address and opens that resource in the Inspector.
     private func select(address: String) {
         guard let tile = tiles.first(where: { $0.resources.contains(address) || $0.anchors.contains(address) || $0.id == address }) else { return }
@@ -1658,5 +1738,94 @@ private struct MapResourceReference: View {
         }
         return Array(all.enumerated().sorted { (rank($0.element.title), $0.offset) < (rank($1.element.title), $1.offset) }
             .map(\.element).prefix(12))
+    }
+}
+
+// MARK: - Signature details: drift pulse and live apply
+
+/// An amber pulse on a drifted tile; a steady amber edge with Reduce Motion.
+struct DriftPulse: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var on = false
+    var body: some View {
+        RoundedRectangle(cornerRadius: 13)
+            .strokeBorder(Color.orange, lineWidth: 2)
+            .shadow(color: Color.orange.opacity(on ? 0.55 : 0.1), radius: on ? 10 : 2)
+            .opacity(on ? 1 : 0.55)
+            .onAppear {
+                guard !reduceMotion else { on = true; return }
+                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { on = true }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Ring while applying, a settle when done, a shake on failure.
+struct LiveApplyTileEffect: ViewModifier {
+    let state: MapLiveApplyState?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settled = false
+    @State private var shakes = 0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .topTrailing) {
+                switch state {
+                case .applying(let elapsed):
+                    HStack(spacing: 5) {
+                        ApplyRing().frame(width: 14, height: 14)
+                        if let elapsed, let seconds = Double(elapsed), seconds >= 1 {
+                            Text("\(Int(seconds))s").font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(6).background(Color(nsColor: .controlBackgroundColor), in: Capsule()).padding(6)
+                    .accessibilityLabel("Applying")
+                case .done:
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 14)).foregroundStyle(.green)
+                        .padding(8).accessibilityLabel("Applied")
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 14)).foregroundStyle(.red)
+                        .padding(8).accessibilityLabel("Failed")
+                case nil:
+                    EmptyView()
+                }
+            }
+            .scaleEffect(settled ? 1 : (state == .done && !reduceMotion ? 1.05 : 1))
+            .modifier(ShakeEffect(shakes: CGFloat(shakes)))
+            .onChange(of: state) { new in
+                if new == .done, !reduceMotion {
+                    settled = false
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.5)) { settled = true }
+                } else if new == .failed, !reduceMotion {
+                    withAnimation(.default) { shakes += 1 }
+                }
+            }
+    }
+}
+
+private struct ApplyRing: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var spinning = false
+    var body: some View {
+        Circle().trim(from: 0.1, to: 0.8)
+            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            .rotationEffect(.degrees(spinning ? 360 : 0))
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { spinning = true }
+            }
+    }
+}
+
+/// A horizontal shake; `shakes` counts the number of full oscillations.
+private struct ShakeEffect: GeometryEffect {
+    var shakes: CGFloat
+    var animatableData: CGFloat {
+        get { shakes }
+        set { shakes = newValue }
+    }
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: 6 * sin(shakes * .pi * 4), y: 0))
     }
 }

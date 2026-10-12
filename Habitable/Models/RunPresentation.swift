@@ -30,6 +30,8 @@ struct MapChangeClip: Identifiable, Equatable, Sendable {
     let changed: Int?
     let destroyed: Int?
     let author: String?
+    /// Resources the run's refresh found changed outside Terraform.
+    var drifted: Int? = nil
 
     var hasRecordedCounts: Bool { added != nil || changed != nil || destroyed != nil }
 

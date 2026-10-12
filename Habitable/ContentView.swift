@@ -142,7 +142,10 @@ struct ContentView: View {
                 isOpenErrorPresented = true
             }
         }
-        .task(id: workspace.workingDirectory) { await loadDeclaredResources(workspace.workingDirectory) }
+        .task(id: workspace.workingDirectory) {
+            workspace.reloadStateHistory()
+            await loadDeclaredResources(workspace.workingDirectory)
+        }
         .onChange(of: workspace.workingDirectory) { directory in
             offerToAgents()
             if let directory, isAvailableDirectory(directory) {
@@ -418,6 +421,36 @@ struct ContentView: View {
         return candidates.max { $0.createdAt < $1.createdAt }
     }
 
+    /// The run Terraform is applying now, or one that finished in the last moments
+    /// so its tiles can settle before the Map reloads.
+    private var applyingRun: TerraformRun? {
+        workspace.runs.first { run in
+            run.status == .applying
+                || (run.status == .applied && (run.applyFinishedAt.map { Date().timeIntervalSince($0) < 6 } ?? false))
+                || (run.status == .errored && run.apply != nil && (run.applyFinishedAt.map { Date().timeIntervalSince($0) < 20 } ?? false))
+        }
+    }
+
+    /// The playhead over this folder's recorded states; the last stop is today.
+    private var localTimeIndex: Binding<Int> {
+        Binding(get: {
+            guard let viewing = workspace.viewingLocalVersion,
+                  let index = workspace.localStateVersions.firstIndex(of: viewing) else { return workspace.localStateVersions.count }
+            return index
+        }, set: { index in
+            if index >= workspace.localStateVersions.count { workspace.returnToCurrentLocalState() }
+            else if workspace.localStateVersions.indices.contains(index) { workspace.showLocalStateVersion(workspace.localStateVersions[index]) }
+        })
+    }
+
+    private var localTimeComparison: String? {
+        guard let then = workspace.historicalState, let now = workspace.state else { return nil }
+        let thenSet = Set(then.resources.compactMap(\.address)), nowSet = Set(now.resources.compactMap(\.address))
+        let gone = thenSet.subtracting(nowSet).count, arrived = nowSet.subtracting(thenSet).count
+        if gone == 0 && arrived == 0 { return "same resources as today" }
+        return "since then: +\(arrived) −\(gone)"
+    }
+
     private var mapPreview: MapChangePreview? {
         _ = previewTick
         guard let run = previewRun, let plan = run.planDiff else { return nil }
@@ -446,7 +479,8 @@ struct ContentView: View {
                           title: run.message?.isEmpty == false ? run.message! : "Run #\(run.number)",
                           date: run.createdAt, status: run.status.displayTitle,
                           isApplied: run.status == .applied,
-                          added: run.added, changed: run.changed, destroyed: run.destroyed, author: nil)
+                          added: run.added, changed: run.changed, destroyed: run.destroyed, author: nil,
+                          drifted: run.planDiff.map { $0.resourceDrift.count })
         }
     }
 
@@ -683,6 +717,8 @@ struct ContentView: View {
             // Changes stay on the right.
             let remote = (remoteWorkspaceLink != nil && workspace.state == nil && !workspace.locked) ? remoteWorkspaceLink : nil
             VStack(spacing: 0) {
+                // Observing the applying run's log re-renders the Map as each resource lands.
+                RunApplyObserver(run: applyingRun) { liveApply in
                 ResourceMapPage(onShowVariables: { navigationSelection.wrappedValue = .variables },
                                 onShowList: { navigationSelection.wrappedValue = .resources },
                                 onOpenResource: { address in
@@ -723,7 +759,14 @@ struct ContentView: View {
                                 autoApplyBadge: workspace.autoApply ? "Applies automatically" : nil,
                                 welcome: mapWelcome,
                                 onPreviewChanges: previewChanges,
-                                onReadReadme: { navigationSelection.wrappedValue = .readme })
+                                onReadReadme: { navigationSelection.wrappedValue = .readme },
+                                liveApply: liveApply)
+                }
+                if workspace.localStateVersions.count >= 2 || workspace.viewingLocalVersion != nil {
+                    Divider()
+                    TimeTravelScrubber(moments: workspace.localStateVersions.map(\.date), index: localTimeIndex,
+                                       comparison: localTimeComparison, isLoading: workspace.viewingLocalVersion != nil && workspace.historicalState == nil)
+                }
                 Divider()
                 MapTimelineStrip(clips: localChangeClips, selectedID: selectedRun?.uuidString,
                                  hint: "Select a change to review its run",
@@ -994,6 +1037,37 @@ private struct LocalInputsFace: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// Wraps the Map in subscriptions to the applying run and its apply log, so the
+/// Map re-renders as Terraform reports each resource.
+private struct RunApplyObserver<Content: View>: View {
+    let run: TerraformRun?
+    @ViewBuilder let content: ([String: MapLiveApplyState]) -> Content
+    var body: some View {
+        if let run { Observed(run: run, content: content) } else { content([:]) }
+    }
+    private struct Observed: View {
+        @ObservedObject var run: TerraformRun
+        let content: ([String: MapLiveApplyState]) -> Content
+        var body: some View {
+            if let log = run.apply { LogObserved(log: log, content: content) } else { content([:]) }
+        }
+    }
+    private struct LogObserved: View {
+        @ObservedObject var log: StructuredLog
+        let content: ([String: MapLiveApplyState]) -> Content
+        var body: some View {
+            var states: [String: MapLiveApplyState] = [:]
+            for resource in log.resources {
+                guard let stage = resource.stages.last else { continue }
+                if stage.errored { states[resource.address] = .failed }
+                else if stage.done { states[resource.address] = .done }
+                else { states[resource.address] = .applying(elapsed: stage.elapsed) }
+            }
+            return content(states)
         }
     }
 }

@@ -32,6 +32,10 @@ struct MapChangePreview: Equatable, Sendable {
         plan?.resourceChanges.first { $0.address == address && $0.action != "no-op" }
     }
 
+    /// Addresses the refresh found changed outside Terraform.
+    var driftedAddresses: Set<String> { Set(plan?.resourceDrift.map(\.address) ?? []) }
+    func drift(for address: String) -> PlanResourceChange? { plan?.resourceDrift.first { $0.address == address } }
+
     var changedTileCount: Int { tileActions.values.filter { $0 != .none }.count }
     var unchangedTileCount: Int { tileActions.count - changedTileCount }
 
@@ -142,4 +146,12 @@ struct MapChangePreview: Equatable, Sendable {
         guard segments.count - index == 2, segments[index..<index + 2].allSatisfy({ !$0.isEmpty }) else { return nil }
         return (segments[index], segments[index + 1], modules.joined(separator: "."), isData)
     }
+}
+
+/// What a tile shows while an apply is running: a ring while Terraform works on
+/// it, a settle when it lands, a shake when it fails (design: "Changes that arrive").
+enum MapLiveApplyState: Equatable, Sendable {
+    case applying(elapsed: String?)
+    case done
+    case failed
 }
