@@ -361,6 +361,16 @@ struct HCPWorkspaceViewer: View {
         }
         // The playhead needs the recorded state versions as soon as the Map is up.
         .task(id: model.selectedWorkspace?.id) { if model.stateVersions.isEmpty { await model.refreshStateVersions() } }
+        .onChange(of: model.mapSnapshot?.versionID) { _ in
+            guard let snapshot = model.mapSnapshot, let workspace = model.selectedWorkspace, !model.isSample else { return }
+            let entries = snapshot.resources.map { resource in
+                SpotlightIndex.Entry(address: resource.address, type: resource.type,
+                                     endpoints: Array(resource.displayAttributes.filter { (attribute: ResourceAttribute) in ["arn", "id", "endpoint", "url", "dns_name", "domain_name", "hostname"].contains(attribute.path) }
+                                        .map(\.value).filter { !$0.isEmpty && $0.count < 200 }.prefix(4)))
+            }
+            let host = model.hostname, organization = model.selectedOrganization, name = workspace.name
+            Task.detached(priority: .utility) { SpotlightIndex.index(cloudHost: host, organization: organization, workspaceName: name, entries: entries) }
+        }
         if model.stateVersions.count >= 2 || model.viewingStateVersion != nil {
             Divider()
             TimeTravelScrubber(moments: cloudMoments.map { $0.createdAt ?? Date.distantPast }, index: cloudTimeIndex,

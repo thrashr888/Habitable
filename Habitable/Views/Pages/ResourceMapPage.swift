@@ -1043,6 +1043,10 @@ struct ResourceMapContent: View {
                     sourceSection
                     Divider()
                     referenceSection.id(selectedMember)
+                    if let resource = selectedResource {
+                        Divider()
+                        askClaudeRow(address: resource.address, type: resource.type)
+                    }
                     Divider()
                     historySection(forResource: true)
                     Divider()
@@ -1392,6 +1396,7 @@ struct ResourceMapContent: View {
                 memberDetails(address)
                 Divider()
                 sourceSection
+                if let row { Divider(); askClaudeRow(address: row.address, type: row.type) }
                 Divider()
                 referenceSection.id(selectedMember)
                 Divider()
@@ -1444,6 +1449,39 @@ struct ResourceMapContent: View {
         }
         .padding(10)
         .background(actionColor(MapChangePreview.action(for: change)).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// "Ask Claude" with everything the Inspector knows about the resource, values excluded.
+    private func askClaudeRow(address: String, type: String) -> some View {
+        let changeText: String? = preview?.change(for: address).map { change in
+            let action = MapChangePreview.action(for: change)
+            let word: String = {
+                switch action {
+                case .create: return "it will be created"
+                case .update: return "it will change"
+                case .replace: return "it will be replaced (delete, then create)"
+                case .delete: return "it will be removed"
+                case .read: return "it will be read"
+                case .none: return "no change"
+                }
+            }()
+            let paths = change.attributes.prefix(8).map(\.path).joined(separator: ", ")
+            let forcing = change.replacementPaths.isEmpty ? "" : "; replacement forced by \(change.replacementPaths.joined(separator: ", "))"
+            return word + (paths.isEmpty ? "" : " (attributes: \(paths))") + forcing
+        }
+        let driftText: String? = preview?.drift(for: address).map { "attributes \($0.attributes.prefix(8).map(\.path).joined(separator: ", ")) changed outside Terraform" }
+        let source = workspaceDirectory != nil ? "a folder on this Mac" : "HCP Terraform"
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                ClaudeHandoff.ask(ClaudeHandoff.prompt(workspace: title, source: source, address: address, type: type,
+                                                       change: changeText, drift: driftText, agentAccess: workspaceDirectory != nil))
+            } label: { Label("Ask Claude", systemImage: "sparkles") }
+                .help(ClaudeHandoff.isAppInstalled ? "Opens Claude with a question about this resource on the clipboard; paste it in"
+                                                   : "Opens claude.ai with a question about this resource")
+                .quickHelp("Ask Claude", "Hands Claude what the Inspector knows: the address, type and the shape of any change or drift, never values. Claude's code changes come back as a Preview you review here.")
+            Text(ClaudeHandoff.isAppInstalled ? "The question is on the clipboard; paste it into Claude." : "Opens claude.ai in your browser.")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+        }
     }
 
     /// Drift: what the refresh found versus what state recorded, and the two honest

@@ -290,3 +290,46 @@ struct ModeBar<Trailing: View>: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 }
+
+/// "Ask Claude" (design: "Claude, built in"): hands a question about a resource
+/// to Claude with the prompt on the clipboard, in the Claude app when it is
+/// installed and otherwise at claude.ai. Claude can read the workspace through
+/// Habitable's agent access when that is on; its code changes come back as a
+/// Preview you review on the Map like any other.
+enum ClaudeHandoff {
+    static let appBundleID = "com.anthropic.claudefordesktop"
+
+    static var isAppInstalled: Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) != nil
+    }
+
+    static func ask(_ prompt: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(prompt, forType: .string)
+        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            var components = URLComponents(string: "https://claude.ai/new")!
+            components.queryItems = [URLQueryItem(name: "q", value: prompt)]
+            if let url = components.url { NSWorkspace.shared.open(url) }
+        }
+    }
+
+    /// The question, built from what the Inspector knows. Values stay out: Claude
+    /// gets addresses, types and the shape of the change, never secrets.
+    static func prompt(workspace: String, source: String, address: String, type: String,
+                       change: String?, drift: String?, agentAccess: Bool) -> String {
+        var lines = ["I'm looking at the Terraform resource `\(address)` (`\(type)`) in the workspace \(workspace) (\(source)) in Habitable."]
+        if let change { lines.append("Preview Changes says: \(change).") }
+        if let drift { lines.append("It drifted: \(drift).") }
+        lines.append(change?.contains("replace") == true
+                     ? "Explain why Terraform wants to replace it and draft the code change that avoids the replacement, if one exists."
+                     : "Explain what this resource does here and anything I should know before changing it.")
+        if agentAccess {
+            lines.append("You can read this workspace's declarations, state metadata and runs through Habitable's agent access (MCP server \"habitable\"). If you change files, ask Habitable to plan so I can review the change on the Map; never apply.")
+        } else {
+            lines.append("Keep suggestions as code I can paste; nothing is applied from this conversation.")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
