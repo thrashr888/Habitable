@@ -17,7 +17,7 @@ final class AttentionModelTests: XCTestCase {
             workspaces: [workspace("zeta", status: "applying"), workspace("alpha", status: "planned"),
                          workspace("auto", status: "planned", autoApply: true), workspace("quiet", status: "applied")],
             explorer: ["quiet": explorer("quiet", drifted: true, count: 2), "alpha": explorer("alpha", drifted: false, count: 0)])
-        XCTAssertEqual(items.map(\.id), ["approval:ws-alpha", "running:ws-zeta", "drift:ws-quiet"])
+        XCTAssertEqual(items.map(\.id), ["approval:ws-alpha:", "running:ws-zeta", "drift:ws-quiet"])
         XCTAssertEqual(items.first?.title, "Waiting for your approval")
         XCTAssertEqual(items.last?.title, "2 resources drifted")
     }

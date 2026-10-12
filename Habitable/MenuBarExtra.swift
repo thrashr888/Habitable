@@ -178,18 +178,22 @@ enum NotificationBridge {
         case .running:
             return
         }
-        content.userInfo = ["workspaceID": item.workspaceID, "workspaceName": item.workspaceName, "organization": organization]
+        var info: [String: String] = ["workspaceID": item.workspaceID, "workspaceName": item.workspaceName, "organization": organization]
+        if let runID = item.runID { info["runID"] = runID }
+        content.userInfo = info
         content.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: item.id, content: content, trigger: nil))
     }
 
-    @MainActor static func handle(action: String, workspaceID id: String, workspaceName name: String) async {
+    @MainActor static func handle(action: String, workspaceID id: String, workspaceName name: String, runID: String?) async {
         guard let cloud else { return }
         let link = TerraformRemoteWorkspaceLink(hostname: cloud.hostname, organization: cloud.selectedOrganization, workspaceName: name,
                                                 url: cloud.workspaces.first { $0.id == id }?.htmlURL ?? URL(string: "https://\(cloud.hostname)")!)
         switch action {
         case confirmAction:
-            let confirmed = await cloud.confirmLatestPlannedRun(workspaceID: id)
+            // Only the exact run the notification named, and only while it still waits.
+            let confirmed: Bool
+            if let runID { confirmed = await cloud.confirmRunFromNotification(workspaceID: id, runID: runID) } else { confirmed = false }
             if !confirmed { CloudOpenRequests.shared.pending.append(link) }
         default:
             CloudOpenRequests.shared.pending.append(link)
@@ -202,7 +206,8 @@ extension HabitableAppDelegate: UNUserNotificationCenterDelegate {
         let info = response.notification.request.content.userInfo
         let action = response.actionIdentifier
         guard let name = info["workspaceName"] as? String, let id = info["workspaceID"] as? String else { return }
-        await NotificationBridge.handle(action: action, workspaceID: id, workspaceName: name)
+        let runID = info["runID"] as? String
+        await NotificationBridge.handle(action: action, workspaceID: id, workspaceName: name, runID: runID)
     }
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
