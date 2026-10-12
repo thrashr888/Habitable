@@ -1145,7 +1145,7 @@ struct ResourceMapContent: View {
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                 }
             }
-            if let workspaceURL { Link("Open workspace in HCP Terraform", destination: workspaceURL).font(.system(size: 13)) }
+            if let workspaceURL { ExternalLink(title: "Open workspace in HCP Terraform", url: workspaceURL) }
         }
     }
 
@@ -1283,7 +1283,7 @@ struct ResourceMapContent: View {
                                 HStack(spacing: 8) {
                                     Text("Module · its resources appear after Preview").font(.system(size: 12)).foregroundStyle(.secondary)
                                     if let url = module.registryURL {
-                                        Link("Registry", destination: url).font(.system(size: 12))
+                                        ExternalLink(title: "Registry", url: url, font: .system(size: 12))
                                     }
                                 }
                             }

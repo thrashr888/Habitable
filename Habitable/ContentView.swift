@@ -105,6 +105,8 @@ struct ContentView: View {
     @State private var previewTick = 0
     @State private var mapSelectionRequest: MapSelectionRequest?
     @State private var showingNewInfrastructure = false
+    @State private var showingCommandPalette = false
+    @State private var showingFolderSwitcher = false
     @Environment(\.quickHelpModel) private var quickHelpEnvironment
     /// Resources the folder declares, read from configuration for the welcome.
     @State private var declaredResources: [MapWelcome.Declared] = []
@@ -178,7 +180,7 @@ struct ContentView: View {
         .onDisappear { agentAccess.deactivate(workspace) }
         .background(WindowKeyObserver(onBecomeKey: offerToAgents))
         // The folder is the window's represented file: proxy icon, and one window per folder.
-        .background(WindowMenuMembership(folder: workspace.workingDirectory))
+        .background(WindowMenuMembership(folder: workspace.workingDirectory, hidesTitle: workspace.workingDirectory != nil))
         .onReceive(previewRun?.objectWillChange.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()) { _ in
             previewTick &+= 1
         }
@@ -217,11 +219,52 @@ struct ContentView: View {
             .allowsHitTesting(false))
         .disclosureGroupStyle(FullHeaderDisclosureStyle())
         .focusedSceneValue(\.workspaceWindowActions, windowActions)
+        .focusedSceneValue(\.openCommandPalette, { showingCommandPalette = true })
+        .sheet(isPresented: $showingCommandPalette) { CommandPalette(items: commandPaletteItems) }
         .toolbar {
           QuietToolbar {
             if workspace.workingDirectory != nil {
                 ToolbarItemGroup(placement: .navigation) {
-                    SourceBadge(kind: .thisMac, action: { openWindow(id: "Workspace.viewer", value: Self.libraryURL) })
+                    // The title control: name and source on the left, as a switcher to
+                    // other folders on this Mac and to the Library.
+                    Button { showingFolderSwitcher.toggle() } label: {
+                        WorkspaceTitleControl(kind: .thisMac, name: workspaceName, subtitle: workspaceSubtitle, switches: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Switch folder")
+                    .help("Switch to another folder on this Mac, or open the Library")
+                    .popover(isPresented: $showingFolderSwitcher, arrowEdge: .bottom) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Folders on this Mac").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 4)
+                            ForEach(recentWorkspaces.folders.prefix(10), id: \.path) { folder in
+                                let current = folder.standardizedFileURL == workspace.workingDirectory?.standardizedFileURL
+                                Button {
+                                    showingFolderSwitcher = false
+                                    if !current { openRecent(folder) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: current ? "checkmark" : "folder").frame(width: 14)
+                                        VStack(alignment: .leading, spacing: 0) {
+                                            Text(folder.lastPathComponent).font(.system(size: 13, weight: current ? .semibold : .regular))
+                                            Text(folder.deletingLastPathComponent().path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                                                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 10).padding(.vertical, 5).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Divider().padding(.vertical, 4)
+                            Button { showingFolderSwitcher = false; openWindow(id: "Workspace.viewer", value: Self.libraryURL) } label: {
+                                Label("Library", systemImage: "books.vertical").padding(.horizontal, 10).padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                            Button { showingFolderSwitcher = false; showingNewInfrastructure = true } label: {
+                                Label("New Infrastructure…", systemImage: "plus.square").padding(.horizontal, 10).padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                        .padding(8).frame(width: 320)
+                    }
                     // The section rail, the same in both workspace windows
                     // (INFORMATION-ARCHITECTURE.md §D).
                     Picker("Section", selection: viewModeSelection) {
@@ -464,6 +507,66 @@ struct ContentView: View {
             detail.frame(minWidth: selection == .resources ? 400 : 360,
                          maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Everything ⌘K reaches in a folder window: resources in state or declared,
+    /// the rail's sections and the other pages, and the window's actions.
+    private var commandPaletteItems: [CommandPaletteItem] {
+        var items: [CommandPaletteItem] = []
+        let stateResources = workspace.state?.resources ?? []
+        for resource in stateResources.prefix(400) {
+            guard let address = resource.address else { continue }
+            items.append(CommandPaletteItem(id: "resource:\(address)", group: .resources,
+                                            title: resource.name ?? address, subtitle: address, symbol: "square.dashed") {
+                mapSelectionRequest = MapSelectionRequest(address: address)
+                navigationSelection.wrappedValue = .map
+            })
+        }
+        if stateResources.isEmpty {
+            for declared in declaredResources {
+                items.append(CommandPaletteItem(id: "declared:\(declared.address)", group: .resources,
+                                                title: declared.address.split(separator: ".").last.map(String.init) ?? declared.address,
+                                                subtitle: "\(declared.address) · declared, not built", symbol: "square.dashed") {
+                    navigationSelection.wrappedValue = .map
+                })
+            }
+        }
+        let sections: [(NavigationItem, String, String)] = [
+            (.map, "Map", "map"), (.resources, "List", "list.bullet"), (.runs, "Changes", "clock.arrow.circlepath"),
+            (.variables, "Inputs", "slider.horizontal.3"), (.outputs, "Outputs", "arrow.turn.down.right"),
+            (.settings, "Settings", "gearshape"), (.workspace, "Overview", "info.circle"), (.readme, "README", "doc.text"),
+            (.configuration, "Source files", "doc.plaintext"), (.envVariables, "Environment variables", "terminal"),
+        ]
+        for (page, title, symbol) in sections {
+            items.append(CommandPaletteItem(id: "section:\(page.rawValue)", group: .sections, title: title, symbol: symbol) {
+                navigationSelection.wrappedValue = page
+            })
+        }
+        if windowActions.canPlan {
+            items.append(CommandPaletteItem(id: "action:plan", group: .actions, title: windowActions.planTitle,
+                                            symbol: "play.circle", shortcut: "⌘⇧P") { windowActions.plan() })
+        }
+        if let link = remoteWorkspaceLink {
+            items.append(CommandPaletteItem(id: "action:cloud", group: .actions,
+                                            title: link.isExact ? "Open in HCP Terraform" : "Find in HCP Terraform", symbol: "cloud") {
+                onOpenRemoteWorkspace(link); openWindow(id: "HCP.browser")
+            })
+        }
+        items.append(CommandPaletteItem(id: "action:library", group: .actions, title: "Library", symbol: "books.vertical", shortcut: "⌘⇧L") {
+            openWindow(id: "Workspace.viewer", value: Self.libraryURL)
+        })
+        items.append(CommandPaletteItem(id: "action:new", group: .actions, title: "New Infrastructure…", symbol: "plus.square", shortcut: "⌘⇧N") {
+            showingNewInfrastructure = true
+        })
+        items.append(CommandPaletteItem(id: "action:settings", group: .actions, title: "Settings…", symbol: "gearshape", shortcut: "⌘,") {
+            openWindow(id: "App.settings")
+        })
+        if let quickHelp = quickHelpEnvironment {
+            items.append(CommandPaletteItem(id: "action:quickhelp", group: .actions,
+                                            title: quickHelp.isEnabled ? "Turn Quick Help off" : "Turn Quick Help on",
+                                            symbol: "questionmark.circle", shortcut: "⌘⇧/") { quickHelp.isEnabled.toggle() })
+        }
+        return items
     }
 
     private var windowActions: WorkspaceWindowActions {

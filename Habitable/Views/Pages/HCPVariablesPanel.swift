@@ -155,7 +155,7 @@ struct HCPMapVariablesPanel: View {
                     Text("Values from configuration files are not included here.")
                         .font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if let url = model.selectedWorkspace?.htmlURL {
-                        Link("Open workspace in HCP Terraform", destination: url)
+                        ExternalLink(title: "Open workspace in HCP Terraform", url: url)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }

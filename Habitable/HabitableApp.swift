@@ -68,7 +68,7 @@ struct HabitableApp: App {
             CloudWorkspaceWindow(model: cloud)
                 .modifier(QuickHelpWindowModifier())
                 .frame(minWidth: 900, minHeight: 560)
-                .background(WindowMenuMembership())
+                .background(WindowMenuMembership(hidesTitle: cloud.isConnected))
         }.windowToolbarStyle(.unified).defaultSize(width: 1400, height: 880)
 
         Window("Settings", id: "App.settings") {
@@ -112,6 +112,7 @@ private struct FolderOpenHandler: View {
 
 private struct WorkspaceCommands: Commands {
     @FocusedValue(\.workspaceWindowActions) private var actions
+    @FocusedValue(\.openCommandPalette) private var openCommandPalette
     /// Open… and Open Recent work with no window in front: they open a new one.
     @ObservedObject var recentWorkspaces: RecentWorkspaceStore
 
@@ -165,6 +166,11 @@ private struct WorkspaceCommands: Commands {
                     Text("No Recent Folders").disabled(true)
                 }
             }
+        }
+        CommandGroup(after: .toolbar) {
+            Button("Go to Anything…") { openCommandPalette?() }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(openCommandPalette == nil)
         }
         CommandMenu("Terraform") {
             Button(actions?.planTitle ?? "Plan") { actions?.plan() }

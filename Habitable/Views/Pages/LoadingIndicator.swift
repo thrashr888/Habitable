@@ -46,12 +46,15 @@ struct WindowMenuMembership: NSViewRepresentable {
     /// The folder this window shows, when it shows one. It becomes the window's
     /// represented file, so a second request to open the folder finds this window.
     var folder: URL? = nil
+    /// Workspace windows draw their own title control in the toolbar.
+    var hidesTitle = false
 
     func makeNSView(context: Context) -> MembershipView { MembershipView() }
-    func updateNSView(_ view: MembershipView, context: Context) { view.folder = folder; view.apply() }
+    func updateNSView(_ view: MembershipView, context: Context) { view.folder = folder; view.hidesTitle = hidesTitle; view.apply() }
 
     final class MembershipView: NSView {
         var folder: URL?
+        var hidesTitle = false
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             apply()
@@ -60,6 +63,15 @@ struct WindowMenuMembership: NSViewRepresentable {
             guard let window else { return }
             if window.isExcludedFromWindowsMenu { window.isExcludedFromWindowsMenu = false }
             if window.representedURL != folder { window.representedURL = folder }
+            // SwiftUI re-applies its own title settings after navigationTitle changes;
+            // set ours now and again once those have landed.
+            let visibility: NSWindow.TitleVisibility = hidesTitle ? .hidden : .visible
+            for delay in [0.0, 0.3, 1.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
+                    guard let window, window.titleVisibility != visibility else { return }
+                    window.titleVisibility = visibility
+                }
+            }
             // One window per folder, also across restoration: a second window for the
             // same folder (left over from an earlier session) closes itself.
             if let folder {
@@ -192,46 +204,60 @@ struct HoldToConfirmButton: View {
     }
 }
 
-/// Where a workspace lives, at the start of every workspace window's title bar
-/// (docs/design/INFORMATION-ARCHITECTURE.md §A). Neutral for this Mac, blue for
-/// HCP Terraform; the same spot in both windows so the eye learns it once.
-struct SourceBadge: View {
-    enum Kind: Equatable {
-        case thisMac
-        case cloud(organization: String)
-    }
+/// The workspace's name and where it lives, at the start of every workspace
+/// window's title bar (INFORMATION-ARCHITECTURE.md §A). The window's own title
+/// is hidden; this control is the title. Neutral folder for this Mac, blue cloud
+/// for HCP Terraform, in the same spot in both windows.
+struct WorkspaceTitleControl: View {
+    enum Kind: Equatable { case thisMac, cloud }
     let kind: Kind
-    var action: (() -> Void)? = nil
+    let name: String
+    let subtitle: String
+    /// A chevron marks a control that switches workspaces.
+    var switches = false
 
-    private var title: String {
-        switch kind {
-        case .thisMac: "This Mac"
-        case .cloud(let organization): organization.isEmpty ? "HCP Terraform" : organization
-        }
-    }
     private var symbol: String { kind == .thisMac ? "folder.fill" : "cloud.fill" }
     private var tint: Color { kind == .thisMac ? Color.secondary : Color(red: 0.16, green: 0.45, blue: 0.95) }
-    private var help: String {
-        switch kind {
-        case .thisMac: "This workspace is a folder on this Mac. Open the Library to see every workspace."
-        case .cloud: "This workspace lives in HCP Terraform. Open the Library to see every workspace."
-        }
-    }
 
     var body: some View {
-        Button(action: { action?() }) {
-            Label(title, systemImage: symbol)
-                .labelStyle(.titleAndIcon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(tint.opacity(0.14), in: Capsule())
-                .lineLimit(1)
+        HStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 4) {
+                    Text(name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                    if switches { Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
+                }
+                Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(action == nil)
-        .help(help)
-        .accessibilityLabel("Workspace source: \(title)")
+        .frame(maxWidth: 260, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name), \(subtitle)")
+    }
+}
+
+/// A link that leaves the app, with the outbound arrow so nobody is surprised
+/// (WRITING.md: say where a control goes). Used for every link into HCP
+/// Terraform, the Registry and GitHub.
+struct ExternalLink: View {
+    let title: String
+    let url: URL
+    var font: Font = .system(size: 13)
+
+    var body: some View {
+        Button { NSWorkspace.shared.open(url) } label: {
+            HStack(spacing: 3) {
+                Text(title)
+                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .bold))
+            }
+            .font(font)
+        }
+        .buttonStyle(.link)
+        .help(url.absoluteString)
+        .accessibilityLabel("\(title), opens in your browser")
     }
 }
 
