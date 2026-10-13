@@ -1,5 +1,9 @@
 # Release verification gates
 
+## October 13, 2026 release verification
+
+Habitable 0.6.0 (build 12) was packaged from commit 8c9cf25 (tag `v0.6.0`): 421 package tests passed with 0 failures, the universal app was signed with Developer ID, notarization returned Accepted, the stapled app passed Gatekeeper, and the ZIP digest `df3832181e0ddd21ee05e6b5febd7fc32d2cb006369de75b76d94689beab61b4` was verified after download from the published release. Published at https://github.com/thrashr888/homebrew-tap/releases/tag/habitable-v0.6.0; the cask was updated in the same commit series.
+
 ## October 13, 2026 release authorization
 
 The user requested the 0.6.0 release after running the design-refresh candidate, with the README updated and screenshots added. This authorizes packaging, publishing, and updating the Homebrew tap. The design rounds it ships are recorded in docs/design/DESIGN-ACCEPTANCE.md; the remaining gaps (Quick Look and widgets, HCL writing, cloud apply progress) are listed there.
