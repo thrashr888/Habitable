@@ -10,7 +10,7 @@ final class InfrastructureTemplatesTests: XCTestCase {
     func testCategoriesAreInDeclaredOrder() {
         XCTAssertEqual(
             InfrastructureTemplate.Category.allCases.map(\.rawValue),
-            ["Websites", "Apps & APIs", "Databases", "Networks", "Learn", "Playground (no cloud)"]
+            ["Websites", "Apps & APIs", "Databases", "Networks", "Learn", "Playground (no cloud)", "From the registry"]
         )
     }
 

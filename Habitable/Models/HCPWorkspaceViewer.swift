@@ -1257,7 +1257,9 @@ struct HCPAPIClient: Sendable {
     /// Removes terminal color and style sequences, including ones whose escape
     /// byte was already lost in transit (`[31m` on its own).
     static func stripANSI(_ text: String) -> String {
-        let patterns = [#"\u{1B}\[[0-9;?]*[A-Za-z]"#, #"(?<![\w\]])\[[0-9;]*m"#]
+        // Logs often lose the escape byte and keep "[31m"; a trailing "m" after digits
+        // is never HCL indexing, so only a preceding "]" is left alone.
+        let patterns = [#"\u{1B}\[[0-9;?]*[A-Za-z]"#, #"(?<!\])\[[0-9;]*m"#]
         var result = text
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
