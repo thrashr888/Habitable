@@ -1,29 +1,56 @@
 # Habitable
 
-A native macOS app for managing infrastructure, not code: your Terraform resources on a map, with configuration and runs as supporting detail. Works with local folders and HCP Terraform workspaces.
+A native macOS app for infrastructure, not code. Your Terraform resources on a map, with configuration and runs as supporting detail. Works with folders on this Mac and HCP Terraform workspaces. Habitable never applies from your Mac: runs happen in HCP Terraform, or in a local folder you confirm, and you review every change on the Map first.
+
+![The Library: every folder on this Mac and every HCP Terraform workspace](docs/screenshots/library.png)
+
+## What's in 0.6.0
+
+**The Library is home.** One window lists every folder you have opened and every HCP Terraform workspace you can reach, with status, project and tags. Needs attention gathers errored runs and drift. Remove a folder from the Library without touching it on disk.
+
+**One shape for every workspace.** Each workspace window starts with its name and where it lives, "Local state · This Mac" or "pthrasher_v2 · HCP Terraform", then the same rail: Map, List, Changes (Runs in the cloud), Inputs, Outputs, Settings. The name is also the switcher: other folders on this Mac, or other workspaces in the organization.
+
+![A local folder in Preview: the new resource outlined green, counts beside the decision](docs/screenshots/local-preview.png)
+
+**Preview Changes on the Map.** Press Preview Changes and the Map switches into review: new things outlined green, changes amber, replacements pink, removals red, with the counts beside the decision and Everything or Changes only. The Inspector shows what changes for a resource, attribute by attribute. Review and Apply opens the saved plan; replacements and removals in the cloud need a press-and-hold to confirm.
+
+**Time travel.** A playhead under the Map. Drag it and the Map shows the workspace as it was after each recorded state, tiles arriving and leaving, with "since then: +a −r" beside the date. In the cloud this reads HCP state versions. On this Mac, Habitable records each distinct state read, with sensitive values stripped, under Application Support; nothing is written into your folder.
+
+![Time travel on an HCP Terraform workspace: the Map as it was after revision 1](docs/screenshots/time-travel.png)
+
+**Changes that arrive.** During an apply, each tile shows a ring while Terraform works on it, a settle when it lands, and a shake if it fails.
+
+**Drift you can see.** A resource that changed outside Terraform gets an amber pulse on the Map, a Drifted status in the List, a diamond on the change card, and an Inspector section with before and after. Put it back reviews the plan that restores the code's version. Keep it and update code opens the declaration with the live values on the clipboard.
+
+**Making changes in HCP Terraform.** The Proposal face starts a change from a folder on this Mac. For a repository-backed workspace Habitable creates the branch, commits, pushes and opens the pull request, then follows its checks, reviews, merge and the run it starts. For an API-driven workspace it uploads the folder and starts the run. The plan lands on the Map like a local preview, and you confirm the apply from Habitable. Runs show HCP's stages: plan, policy, cost, tasks, apply, outputs.
+
+**New infrastructure.** File › New Infrastructure… (⌘⇧N) is a chooser in the GarageBand shape: open a folder or a workspace, start from a template (websites, apps, databases, networks, learn, a no-cloud playground), or search the public Terraform Registry for a module. Each template shows what it creates and a rough monthly cost before anything is written. Create Folder writes readable `.tf` files you own, with a README that links back to the source.
+
+![New Infrastructure: open a folder or workspace, start from a template, or search the Registry](docs/screenshots/new-infrastructure.png)
+
+**Power users.** The List is the same workspace as a dense, sortable table with filter tokens like `type:aws_* module:edge status:changed`. Go to Anything (⌘K) reaches every resource, section and action. Quick Help (⌘⇧/) explains whatever you hover.
+
+![Go to Anything: every resource, section and action from the keyboard](docs/screenshots/go-to-anything.png)
+
+**Native everywhere.** A menu bar extra lists runs waiting for your approval, runs in flight and drifted workspaces, checked every minute, with notifications you can act on. Shortcuts and Siri can check a workspace for drift or open it. Spotlight indexes resource names, addresses and endpoints. Ask Claude in the Inspector hands Claude a question about a resource with the shape of the change and never a value.
+
+![An HCP Terraform workspace on the Map, with the Inspector](docs/screenshots/cloud-map.png)
 
 ## Golden workflows
 
-Habitable is built around a few short paths. Each starts in the **Library** (File › Library, ⌘⇧L), which lists every folder you have opened on this Mac and every HCP Terraform workspace you can reach.
-
 **Local folder: see it, preview a change, apply it.**
 
-1. Open a Terraform folder: Open Folder…, a Library card, Finder's Open With, a drop on the Dock icon, or `open -a Habitable <folder>`. Folders opened from inside the app initialize on first open (Settings › General); a folder handed in from Finder or the Dock asks first, since init downloads and runs the providers it declares. A folder has one window; opening it again brings that window forward.
-2. The **Map** shows what exists, grouped by what it does. Click a tile to inspect facts, endpoints, connections, where it is defined, and the provider's reference.
-3. Edit configuration in your editor ("Defined in" opens the file). Press **Preview Changes**: the Map switches into review, with new things outlined green, changes amber, replacements pink, removals red, and the counts beside the decision.
-4. **Review and Apply…** opens the saved plan; apply from there. The **Changes** strip below the Map records every run.
+1. Open a Terraform folder: New Infrastructure…, Open Folder…, a Library card, Finder's Open With, a drop on the Dock icon, or `open -a Habitable <folder>`. Folders opened from inside the app initialize on first open (Settings › General); a folder handed in from outside asks first, since init downloads and runs the providers it declares.
+2. The Map shows what exists, grouped by what it does. A folder with no state yet shows what it declares: "Declared, not built."
+3. Edit configuration in your editor ("Defined in" opens the file). Press Preview Changes.
+4. Review and Apply… opens the saved plan; apply from there. The Changes strip below the Map records every run.
 
 **HCP Terraform workspace: browse, review, and bring it to this Mac.**
 
-1. Sign in once in **Settings › Connections**. The Library then shows each organization, its projects and tags, and every workspace with its latest run status.
-2. Open a workspace: the Map reads its current state. The **Changes** strip lists its runs; click one to see the Map as it was after that run, then return to the current state.
-3. **Variables** shows workspace variables and the variable sets applied to it; private values stay hidden.
-4. **Check Out…** clones a repository-backed workspace into `~/Documents/Habitable` and opens it as a local folder. From then on the two windows link to each other, and "Defined in" resolves file and line from the checkout with a link to the repository host.
-5. **Make a change.** The Inspector's **Proposal** face starts a change from a folder on this Mac. For a repository-backed workspace, edit the checkout in your editor; Habitable creates the branch, commits, pushes and opens the pull request, and HCP Terraform plans it. For an API-driven workspace, Habitable uploads the folder as a configuration version and starts the run. Either way the plan lands on the Map like a local preview, and you confirm the apply from Habitable. Habitable never applies from your Mac.
-
-**Between the two.** A local folder whose backend is HCP Terraform opens its workspace with one click, and a workspace knows which folders on this Mac belong to it, whether by backend or by checkout.
-
-Not yet in these paths: policy and cost checks inline on the Map, and the Needs attention view only reflects what HCP Terraform itself records.
+1. Sign in once in Settings › Connections. The Library then shows each organization and every workspace with its latest run status.
+2. Open a workspace. Runs lists its history with who started each run and from where. Inputs shows variables and variable sets; private values stay hidden. Outputs shows the current state's outputs. Settings changes the Terraform version, execution mode, working directory, auto-apply, description and lock.
+3. Check Out… clones a repository-backed workspace into `~/Documents/Habitable` and opens it as a local folder. The two windows link to each other.
+4. Make a change from the Proposal face, review the plan on the Map, confirm the apply.
 
 ## Install
 
@@ -33,74 +60,56 @@ Download the signed and notarized universal app from [GitHub Releases](https://g
 brew install --cask thrashr888/tap/habitable
 ```
 
-Requires macOS 13 or later. The universal app supports Apple silicon and Intel. Download a Terraform CLI from **Settings → Terraform** after launching.
+Upgrade with:
 
-## Run in Xcode
+```sh
+brew upgrade --cask thrashr888/tap/habitable
+```
 
-Requires macOS 13 or later and a Terraform CLI downloaded in Settings or installed locally. The restoration is tested with Xcode 27.0 beta (27A5237l), Apple silicon, and Terraform 1.16.4.
-
-1. Open `Habitable.xcodeproj` in Xcode and let Swift packages resolve.
-2. Select the **Habitable** scheme and **My Mac**, then press **⌘R**. Local builds use **Sign to Run Locally**; no developer team is required.
-3. Choose a Terraform directory and press **Preview Changes**; the Map shows the saved plan in review.
-4. **Review and Apply…** opens the plan; select **Confirm and apply** to execute exactly that saved plan.
-
-## Terraform versions
-
-Open **Settings → Terraform** to load compatible stable releases from HashiCorp's [official release catalog](https://releases.hashicorp.com/terraform/). The app reads its `index.json`, sorts versions numerically, and offers macOS builds for the running app's architecture. Prereleases and versions older than 0.15 are excluded. **Refresh** checks for new releases; upgrading is explicit, never automatic.
-
-Choose a version and click **Download and use**. Habitable downloads the archive and SHA-256 checksum list over HTTPS from `releases.hashicorp.com`, verifies the archive, extracts only the Terraform executable, and checks its reported version before activating it. Downloads live under `~/Library/Application Support/Habitable/Terraform/<version>/<architecture>/terraform`. Installed versions remain available offline. Failed downloads leave the active CLI unchanged. This checks the published SHA-256 digest; it does not verify the separate GPG signature.
-
-The chosen managed version persists as the default for newly opened workspaces. Existing windows retain their active CLI until changed or reopened. Switching is disabled during a run and discards pending plans in that workspace, requiring a fresh plan with the selected CLI. A missing selected executable reports an error instead of silently falling back to another version.
-
-**Use system Terraform** returns to CLI discovery: `HABITABLE_TERRAFORM_PATH`, then `PATH`, `/opt/homebrew/bin`, and `/usr/local/bin`. For a custom executable, set `HABITABLE_TERRAFORM_PATH` under **Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables**. Settings shows the active path and actual version. Managed installs do not alter Homebrew or your shell's Terraform installation.
-
-If Xcode reports missing first-launch components, run `xcodebuild -runFirstLaunch` and finish any setup requested by Xcode.
+Requires macOS 13 or later. The universal app supports Apple silicon and Intel. Download a Terraform CLI from Settings › Terraform after launching, or use one already on this Mac.
 
 ## Try without cloud infrastructure
 
-Copy `Examples/local-only` to a scratch directory and choose that folder in the app. It uses Terraform's built-in `terraform_data` resource (Terraform 1.4+) and a greeting output, with no external providers or credentials. Initialization, planning, and applying affect only that scratch directory's local state.
+New Infrastructure… › Playground creates a folder with two harmless resources that run on this Mac. Or copy `Examples/local-only` to a scratch directory and open that folder.
 
 ```sh
 cp -R Examples/local-only /tmp/habitable-demo
 ```
 
-## Run history
+## Run in Xcode
 
-History is local to this Mac and directory path. Symlink aliases share history; moving a directory gives it a new identity. Each run has an atomic record with owner-only file permissions. Concurrent writers allocate distinct run numbers. A failed write is visible in Runs and blocks new plans/apply until **Reload history** successfully retries it. Corrupt or newer-format history is preserved and reported; the app does not silently replace it with an empty history.
+Requires macOS 13 or later, Xcode 27, Go (for the bundled configuration helper), and a Terraform CLI downloaded in Settings or installed locally.
 
-Saved history loads in the background in pages of 50 runs. Use **Previous** and **Next** to browse older pages. The history menu offers JSON export, deletion of a selected completed run, and confirmed cleanup of completed runs older than 30 days, 90 days, or one year. Cleanup never runs automatically and preserves active runs, pending saved plans, and unsaved results. Run numbering continues after deletion; interrupted archive updates are recovered before allocating another number.
+1. Open `Habitable.xcodeproj` and let Swift packages resolve.
+2. Select the Habitable scheme and My Mac, then press ⌘R. Local builds use Sign to Run Locally; no developer team is required.
 
-Workspace descriptions save automatically under **Settings → Workspace**, separately for each canonical directory. They survive restarts and switching folders. If saving fails, the edit remains visible and folder switching waits for a successful retry.
+## Terraform versions
 
-Values marked Sensitive in Habitable are snapshotted before planning and redacted from run logs, errors, saved history, and plan reviews, including nested JSON input values. Terraform-sensitive outputs are also redacted. The saved binary plan stays unchanged so Apply uses the exact reviewed artifact. Redaction matches known input values; transformed values and unrelated provider secrets can still appear. History is private local data, not encrypted storage, and has no automatic cleanup policy. Each run records its backend and Terraform workspace context.
+Settings › Terraform loads compatible stable releases from HashiCorp's [official release catalog](https://releases.hashicorp.com/terraform/). Choose a version and click Download and use. Habitable downloads the archive and SHA-256 checksum list over HTTPS, verifies the archive, extracts only the Terraform executable, and checks its reported version before activating it. Downloads live under `~/Library/Application Support/Habitable/Terraform`. Use system Terraform returns to CLI discovery: `HABITABLE_TERRAFORM_PATH`, then `PATH`, `/opt/homebrew/bin`, and `/usr/local/bin`.
 
-Init, validate, plan, and apply show live output. **Cancel** requests a graceful Terraform stop; the workspace stays locked until the process exits. A canceled apply can leave partial changes, so Habitable invalidates earlier plans and refreshes state. Logs are bounded; oversized lines are omitted and a truncated command result requires a new plan before applying. State and saved-plan inspection retain complete JSON.
+## What stays on this Mac
 
-If coordination metadata fails to save, commands are blocked. **Settings → Recover coordination** takes the workspace lock, advances the saved generation durably, then clears the failure marker. Queue a fresh plan after recovery.
+Run history is saved per folder under `~/Library/Application Support/Habitable/RunHistory`, with owner-only permissions. Values marked Sensitive are redacted from logs, errors, history and plan reviews. State recordings for time travel strip every value Terraform marks sensitive before they are written. Remembered inputs live in the keychain. Habitable reads the HCP Terraform credential from `~/.terraform.d/credentials.tfrc.json` or the one you enter in Connections, and never writes it anywhere else.
+
+Agent access (Settings › Agents) runs a local MCP server so Claude and other agents can read the open workspace's declarations, state metadata and runs. It is off until you turn it on.
 
 ## Build and test
 
 ```sh
+bash scripts/build-config-inspector.sh
 xcodebuild -project Habitable.xcodeproj -scheme Habitable \
   -configuration Debug -destination 'platform=macOS' \
   -derivedDataPath /tmp/habitable-build build
-swift test
+HABITABLE_CONFIG_INSPECT_PATH=<helper path> swift test
 HABITABLE_TEST_TERRAFORM="$(command -v terraform)" swift test
-HABITABLE_TEST_RELEASES=1 swift test
 ```
 
-The project resolves SwiftyJSON 5.0.2 in both Xcode and SwiftPM. SwiftPM uses tools 6.4; both targets use Swift 6 language mode and concurrency checking.
+The Swift package compiles the app's models. Tests cover the Terraform runner, run history, sensitive redaction, release downloads, the Map classifier, the List's filter grammar, templates and Registry modules, state history, and the attention model behind the menu bar. The opt-in integration test runs init, validate, plan, apply and show against a provider-free folder.
 
-The Swift package compiles the app's actual models. Tests cover missing/invalid CLI installs, literal paths and arguments, large stdout/stderr output, failed commands, and saved-plan application. The opt-in integration test creates a temporary provider-free workspace and checks init, validate, plan, apply, and show, including a configuration change after plan review. History tests cover restart recovery, workspace isolation, sensitive output redaction, corrupt/future records, concurrent numbering, disk-write recovery, and failed applies. Release-manager tests cover architecture filtering, stable numeric ordering, checksum failures, invalid archives, executable-version mismatches, offline reuse, and switching during a run. `HABITABLE_TEST_RELEASES=1` additionally downloads and runs the latest official stable release in a temporary directory.
+## Design
 
-## Current scope
-
-This is an early preview of the revived app. Run history is saved per canonical directory under `~/Library/Application Support/Habitable/RunHistory`. Saved results survive restarts, including timestamps, Terraform version, plan/apply summaries, resource events, and diagnostics. Plans restored from an earlier session are marked **Expired** and cannot be applied; queue a new plan. Runs last recorded during a command are marked **Interrupted**, with an unknown outcome that requires checking state. Workspace descriptions, the last folder, and the selected Terraform version persist locally. Auto-apply remains a session setting. Explicitly saved variable and environment inputs are validated and passed to plans; values discovered in Terraform files or the process environment are shown for reference. The app inherits the environment it is launched with, so Finder/Xcode may have different credentials and `PATH` than your terminal. Long-running commands stream bounded logs and support graceful cancellation.
-
-The runner uses `Process` with explicit arguments and no shell. Apply executes the saved plan shown for that run, following Terraform's [saved-plan workflow](https://developer.hashicorp.com/terraform/cli/commands/apply#saved-plan-mode).
+The design is documented in `DESIGN.md` (visual and interaction), `WRITING.md` (words), and `docs/design/` (decisions, explorations, the resource map RFC, information architecture, and the acceptance log for each round).
 
 ## Package a release
 
-`scripts/package-release.sh` builds both Mac architectures, signs with Developer ID, submits to Apple, staples the accepted ticket, and creates a ZIP plus `SHA256SUMS`. Set `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, and `NOTARY_PROFILE` to your existing signing identity, team, and notarytool keychain profile. Optional `BUILD_DIR` controls the build and artifact location. Credentials are never stored in the repository.
-
-Update the version and build number in `Habitable/Info.plist`, run the tests above, and inspect the Release app before publishing. Tag the verified source commit, upload the ZIP and checksums to a draft GitHub release, then publish and update the Homebrew cask with the final archive checksum. Public app downloads are hosted on `thrashr888/homebrew-tap` releases (tags `habitable-v<version>`) while the source repository remains private.
+`scripts/package-release.sh` builds both Mac architectures, signs with Developer ID, submits to Apple, staples the accepted ticket, and creates a ZIP plus `SHA256SUMS`. Set `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, and `NOTARY_PROFILE`. Update the version and build number in `Habitable/Info.plist`, run the tests, tag the verified commit, upload the ZIP and checksums to a GitHub release on `thrashr888/homebrew-tap` (tags `habitable-v<version>`), then update the cask with the archive checksum.
