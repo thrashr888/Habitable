@@ -1,5 +1,9 @@
 # Release verification gates
 
+## October 13, 2026 release authorization
+
+The user requested the 0.6.0 release after running the design-refresh candidate, with the README updated and screenshots added. This authorizes packaging, publishing, and updating the Homebrew tap. The design rounds it ships are recorded in docs/design/DESIGN-ACCEPTANCE.md; the remaining gaps (Quick Look and widgets, HCL writing, cloud apply progress) are listed there.
+
 ## October 3, 2026 release authorization
 
 The user explicitly requested a release of the current progress after running the latest candidate, superseding the earlier appearance hold for version 0.5.0. This authorizes packaging, publishing, and updating the Homebrew tap; it does not establish visual or accessibility acceptance. Broader design review remains tracked in Habitable-rt3.57 and native acceptance in Habitable-rt3.21.
