@@ -4,6 +4,43 @@ import XCTest
 
 @MainActor
 final class VariableInputsTests: XCTestCase {
+    func testInheritedEnvironmentPreservesSensitivityEvenWhenShadowed() throws {
+        let declaration = TerraformDeclaredInput(name: "password", type: "string", description: nil,
+            hasDefault: false, defaultJSON: nil, required: true, sensitive: true, ephemeral: nil,
+            sourceFile: "variables.tf", sourceLine: 1)
+        let publicDeclaration = TerraformDeclaredInput(name: "region", type: "string", description: nil,
+            hasDefault: false, defaultJSON: nil, required: true, sensitive: false, ephemeral: nil,
+            sourceFile: "variables.tf", sourceLine: 2)
+        let environment = ["TF_VAR_password": "synthetic-inherited-secret", "TF_VAR_region": "west",
+                           "TF_VAR_unknown": "synthetic-unclassified-secret", "PATH": "/usr/bin"]
+        let inherited = Workspace.inheritedEnvironmentVariables(environment: environment,
+            declarations: [declaration, publicDeclaration])
+        XCTAssertEqual(inherited.map(\.key), ["TF_VAR_password", "TF_VAR_region", "TF_VAR_unknown"])
+        XCTAssertTrue(try XCTUnwrap(inherited.first { $0.key == "TF_VAR_password" }).sensitive)
+        XCTAssertFalse(try XCTUnwrap(inherited.first { $0.key == "TF_VAR_region" }).sensitive)
+        XCTAssertTrue(try XCTUnwrap(inherited.first { $0.key == "TF_VAR_unknown" }).sensitive)
+        XCTAssertTrue(inherited.allSatisfy { !$0.isUserInput })
+
+        // An app override or tfvars can replace the effective value, but the
+        // independently displayed inherited copy must retain its classification.
+        let override = EnvironmentVariable()
+        override.key = "TF_VAR_password"; override.value = "synthetic-override-secret"
+        override.isUserInput = true; override.sensitive = true
+        let redactor = SensitiveInputRedactor(variables: [], environmentVariables: [override] + inherited)
+        let output = redactor.redact("synthetic-inherited-secret synthetic-override-secret synthetic-unclassified-secret west")
+        XCTAssertFalse(output.contains("synthetic-inherited-secret"))
+        XCTAssertFalse(output.contains("synthetic-override-secret"))
+        XCTAssertFalse(output.contains("synthetic-unclassified-secret"))
+        XCTAssertTrue(output.contains("west"))
+        let refreshed = Workspace.inheritedEnvironmentVariables(environment: environment, declarations: [])
+        XCTAssertTrue(refreshed.allSatisfy(\.sensitive), "Failed or unavailable declarations must not expose inherited values")
+        let declassified = TerraformDeclaredInput(name: "password", type: "string", description: nil,
+            hasDefault: false, defaultJSON: nil, required: true, sensitive: false, ephemeral: nil,
+            sourceFile: "variables.tf", sourceLine: 1)
+        let updated = Workspace.inheritedEnvironmentVariables(environment: environment, declarations: [declassified])
+        XCTAssertFalse(try XCTUnwrap(updated.first { $0.key == "TF_VAR_password" }).sensitive)
+    }
+
     func testTerraformVariableSerializesStringAndStructuredJSONValues() throws {
         let string = TerraformVariable()
         string.key = "message"

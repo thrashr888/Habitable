@@ -41,9 +41,20 @@ struct WorkspaceReadme: Sendable {
         return nil
     }
 
-    static func canOpen(_ url: URL, relativeTo root: URL) -> Bool {
-        if ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") { return true }
-        return url.isFileURL && contains(url.standardizedFileURL.resolvingSymlinksInPath(), in: root.resolvingSymlinksInPath())
+    enum LinkDestination: Equatable {
+        case external(URL)
+        case editor(URL)
+    }
+
+    /// Local links must use an explicitly selected editor, never Launch Services'
+    /// default handler, which can execute scripts or launch application bundles.
+    static func linkDestination(_ url: URL, relativeTo root: URL) -> LinkDestination? {
+        if ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") { return .external(url) }
+        guard url.isFileURL, url.host == nil || url.host == "" || url.host == "localhost" else { return nil }
+        let file = url.standardizedFileURL.resolvingSymlinksInPath()
+        guard contains(file, in: root.resolvingSymlinksInPath()),
+              (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
+        return .editor(file)
     }
 
     private static func contains(_ file: URL, in root: URL) -> Bool {

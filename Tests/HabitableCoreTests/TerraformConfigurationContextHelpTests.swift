@@ -3,6 +3,30 @@ import XCTest
 @testable import HabitableCore
 
 final class TerraformConfigurationContextHelpTests: XCTestCase {
+    func testDuplicateModuleKeysRejectInstalledMetadataAndKeepDeclarations() throws {
+        for conflicting in [false, true] {
+            let root = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let manifestDirectory = root.appendingPathComponent(".terraform/modules", isDirectory: true)
+            try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+            let records: [[String: String]] = [
+                ["Key": "child", "Source": "acme/child/aws", "Version": "2.1.0", "Dir": ".terraform/modules/child"],
+                ["Key": "child", "Source": conflicting ? "attacker/child/aws" : "acme/child/aws", "Version": "2.1.0", "Dir": ".terraform/modules/child"]
+            ]
+            try JSONSerialization.data(withJSONObject: ["Modules": records]).write(to: manifestDirectory.appendingPathComponent("modules.json"))
+            let context = TerraformConfigurationContextHelpLoader.load(directory: root, helper: try metadataHelper(in: root))
+            XCTAssertTrue(context.diagnostics.contains { $0.contains("duplicate keys") })
+            let child = try XCTUnwrap(context.modules.first { $0.key == "child" })
+            XCTAssertEqual(child.source, "acme/child/aws")
+            XCTAssertEqual(child.declaredVersion, "~> 2.0")
+            XCTAssertNil(child.installedVersion)
+            XCTAssertNil(child.documentationURL)
+            XCTAssertNil(child.metadata)
+            XCTAssertFalse(context.providers.isEmpty)
+            XCTAssertFalse(context.inputs.isEmpty)
+        }
+    }
+
     func testDeclaredModulesAndNormalizedLockedProviderAreAvailableBeforeInit() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

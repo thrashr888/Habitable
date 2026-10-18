@@ -65,7 +65,7 @@ final class ExternalEditorStore: ObservableObject {
         }
     }
 
-    func chooseApplication() {
+    func chooseApplication(opening file: URL? = nil) {
         let panel = NSOpenPanel()
         panel.title = "Choose an Editor"
         panel.prompt = "Use Editor"
@@ -78,6 +78,7 @@ final class ExternalEditorStore: ObservableObject {
             self.selectedID = id
             self.defaults.set(id, forKey: Self.preference)
             self.refresh()
+            if let file { self.open(file) }
         }
     }
 }

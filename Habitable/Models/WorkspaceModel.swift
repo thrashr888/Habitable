@@ -964,16 +964,21 @@ class Workspace: ObservableObject {
             variable.unresolvedSource = nil
         }
         terraformVariables = userVariables + rowsByKey.values.filter { !userKeys.contains($0.key) }.sorted { $0.key < $1.key }
-        environmentVariables = userEnvironmentVariables + parseEnvironmentVariables()
+        environmentVariables = userEnvironmentVariables + Self.inheritedEnvironmentVariables(
+            environment: ProcessInfo.processInfo.environment, declarations: inspected.declarations)
         hasVariables = !inspected.declarations.isEmpty || !inspected.values.isEmpty || environmentVariables.count > userEnvironmentVariables.count
     }
 
-    private func parseEnvironmentVariables() -> [EnvironmentVariable] {
-        ProcessInfo.processInfo.environment.keys.sorted().compactMap { key in
-            guard key.hasPrefix("TF_VAR_"), let value = ProcessInfo.processInfo.environment[key] else { return nil }
+    static func inheritedEnvironmentVariables(environment: [String: String],
+                                              declarations: [TerraformDeclaredInput]) -> [EnvironmentVariable] {
+        environment.keys.sorted().compactMap { key in
+            guard key.hasPrefix("TF_VAR_"), let value = environment[key] else { return nil }
             let variable = EnvironmentVariable()
             variable.key = key
             variable.value = value
+            // Keep the classification on this independent copy even when tfvars
+            // or an app override shadows it. Unknown declarations fail closed.
+            variable.sensitive = declarations.first { $0.name == String(key.dropFirst("TF_VAR_".count)) }?.sensitive ?? true
             return variable
         }
     }

@@ -64,7 +64,8 @@ enum TerraformConfigurationContextHelpLoader {
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 
         let manifest = root.appendingPathComponent(".terraform/modules/modules.json")
-        let records = readModules(manifest).sorted { $0.Key.localizedStandardCompare($1.Key) == .orderedAscending }
+        let moduleResult = readModules(manifest)
+        let records = moduleResult.modules.sorted { $0.Key.localizedStandardCompare($1.Key) == .orderedAscending }
         var declaredModules = Dictionary(uniqueKeysWithValues: rootMetadata.modules.map { ($0.name, $0) })
         for record in records where declaredModules[record.Key] == nil {
             declaredModules[record.Key] = TerraformModuleCallMetadata(name: record.Key, source: record.Source,
@@ -90,7 +91,7 @@ enum TerraformConfigurationContextHelpLoader {
                 metadata: moduleMetadata))
         }
 
-        var diagnostics = rootMetadata.diagnostics
+        var diagnostics = rootMetadata.diagnostics + moduleResult.diagnostics
         if allKeys.count > maximumModules { diagnostics.append("Showing declaration help for the first \(maximumModules) of \(allKeys.count) declared and installed modules.") }
         if records.contains(where: { validatedModuleDirectory($0.Dir, root: root) == nil }) {
             diagnostics.append("Some module paths are outside this workspace and were not inspected.")
@@ -108,13 +109,17 @@ enum TerraformConfigurationContextHelpLoader {
         return "registry.terraform.io/hashicorp/\(provider.name)"
     }
 
-    private static func readModules(_ manifest: URL) -> [Module] {
+    private static func readModules(_ manifest: URL) -> (modules: [Module], diagnostics: [String]) {
         guard let values = try? manifest.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
               values.isRegularFile == true, let size = values.fileSize, size <= maximumManifestBytes,
               let data = try? Data(contentsOf: manifest), data.count <= maximumManifestBytes,
               let decoded = try? JSONDecoder().decode(Manifest.self, from: data),
-              let modules = decoded.Modules, modules.count <= 128 else { return [] }
-        return modules.filter { !$0.Key.isEmpty && !$0.Source.isEmpty && !$0.Dir.isEmpty }
+              let modules = decoded.Modules, modules.count <= 128 else { return ([], []) }
+        var keys = Set<String>()
+        guard modules.allSatisfy({ keys.insert($0.Key).inserted }) else {
+            return ([], ["Installed module metadata contains duplicate keys. Reinitialize the workspace before loading installed module help."])
+        }
+        return (modules.filter { !$0.Key.isEmpty && !$0.Source.isEmpty && !$0.Dir.isEmpty }, [])
     }
 
     private static func validatedModuleDirectory(_ path: String, root: URL) -> URL? {

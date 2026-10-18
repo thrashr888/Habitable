@@ -274,6 +274,7 @@ private struct WorkspaceSection<Content: View>: View {
 struct WorkspaceReadmePage: View {
     let directory: URL?
     @ObservedObject var presentation: WorkspaceReadmePresentation
+    @EnvironmentObject private var editors: ExternalEditorStore
     @State private var refreshID = UUID()
 
     var body: some View {
@@ -304,8 +305,14 @@ struct WorkspaceReadmePage: View {
                                 .markdownTextStyle { FontSize(14) }
                                 .textSelection(.enabled)
                                 .environment(\.openURL, OpenURLAction { url in
-                                    guard WorkspaceReadme.canOpen(url, relativeTo: document.root) else { return .discarded }
-                                    return .systemAction
+                                    switch WorkspaceReadme.linkDestination(url, relativeTo: document.root) {
+                                    case .external: return .systemAction
+                                    case .editor(let file):
+                                        if editors.selected != nil { editors.open(file) }
+                                        else { editors.chooseApplication(opening: file) }
+                                        return .handled
+                                    case nil: return .discarded
+                                    }
                                 })
                         } else {
                             Text(document.content).textSelection(.enabled)

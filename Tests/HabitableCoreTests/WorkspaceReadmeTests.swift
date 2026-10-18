@@ -14,9 +14,42 @@ final class WorkspaceReadmeTests: XCTestCase {
         XCTAssertEqual(document.file.lastPathComponent, "ReadMe.MD")
         XCTAssertTrue(document.isMarkdown)
         XCTAssertTrue(document.content.hasPrefix("# Repository"))
-        XCTAssertTrue(WorkspaceReadme.canOpen(root.appendingPathComponent("docs/start.md"), relativeTo: root))
-        XCTAssertFalse(WorkspaceReadme.canOpen(root.appendingPathComponent("../outside.txt"), relativeTo: root))
-        XCTAssertFalse(WorkspaceReadme.canOpen(URL(string: "javascript:alert(1)")!, relativeTo: root))
+        XCTAssertEqual(WorkspaceReadme.linkDestination(document.file, relativeTo: root), .editor(document.file))
+        XCTAssertNil(WorkspaceReadme.linkDestination(root.appendingPathComponent("../outside.txt"), relativeTo: root))
+        XCTAssertNil(WorkspaceReadme.linkDestination(URL(string: "javascript:alert(1)")!, relativeTo: root))
+    }
+
+    func testLocalLinksAlwaysUseEditorIncludingExecutableAndEncodedTargets() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for name in ["guide.md", "run.command", "upper.COMMAND", "extensionless", "link.webloc"] {
+            let file = root.appendingPathComponent(name)
+            try "Fixture content; never execute".write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+            XCTAssertEqual(WorkspaceReadme.linkDestination(file, relativeTo: root), .editor(file))
+        }
+        let command = root.appendingPathComponent("run.command")
+        let encoded = try XCTUnwrap(URL(string: root.absoluteString + "/run%2ecommand"))
+        XCTAssertEqual(WorkspaceReadme.linkDestination(encoded, relativeTo: root), .editor(command))
+        let alias = root.appendingPathComponent("guide.txt")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: command)
+        XCTAssertEqual(WorkspaceReadme.linkDestination(alias, relativeTo: root), .editor(command))
+
+        let app = root.appendingPathComponent("Payload.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: false)
+        XCTAssertNil(WorkspaceReadme.linkDestination(app, relativeTo: root))
+        XCTAssertNil(WorkspaceReadme.linkDestination(root, relativeTo: root))
+        XCTAssertNil(WorkspaceReadme.linkDestination(root.appendingPathComponent("missing.md"), relativeTo: root))
+        XCTAssertNil(WorkspaceReadme.linkDestination(URL(string: "file://untrusted.example/guide.md")!, relativeTo: root))
+    }
+
+    func testWebAndMailLinksKeepTheirExternalDestination() throws {
+        let root = URL(fileURLWithPath: "/workspace")
+        for value in ["https://example.invalid/docs", "http://example.invalid/docs", "mailto:help@example.invalid"] {
+            let url = try XCTUnwrap(URL(string: value))
+            XCTAssertEqual(WorkspaceReadme.linkDestination(url, relativeTo: root), .external(url))
+        }
     }
 
     func testMissingPlaintextAndOversizedReadme() throws {
@@ -40,5 +73,6 @@ final class WorkspaceReadmeTests: XCTestCase {
         try "private".write(to: privateFile, atomically: true, encoding: .utf8)
         try FileManager.default.createSymbolicLink(at: workspace.appendingPathComponent("README.md"), withDestinationURL: privateFile)
         XCTAssertNil(try WorkspaceReadme.load(directory: workspace))
+        XCTAssertNil(WorkspaceReadme.linkDestination(workspace.appendingPathComponent("README.md"), relativeTo: workspace))
     }
 }
