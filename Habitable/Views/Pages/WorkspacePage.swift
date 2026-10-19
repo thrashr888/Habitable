@@ -342,7 +342,7 @@ private struct ReadmeImageLinks: ImageProvider {
 struct WorkspacePage_Previews: PreviewProvider {
     static var previews: some View {
         WorkspacePage()
-            .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
+            .environmentObject(Workspace(dir: FileManager.default.temporaryDirectory.appendingPathComponent("habitable-preview")))
     }
 }
 

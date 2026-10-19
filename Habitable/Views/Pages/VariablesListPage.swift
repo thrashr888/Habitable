@@ -522,6 +522,6 @@ private struct TerraformVariableEditor: View {
 struct VariableListPage_Previews: PreviewProvider {
     static var previews: some View {
         VariableListPage()
-            .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
+            .environmentObject(Workspace(dir: FileManager.default.temporaryDirectory.appendingPathComponent("habitable-preview")))
     }
 }

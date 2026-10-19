@@ -267,7 +267,7 @@ private extension RunStatus {
 
 struct RunListPage_Previews: PreviewProvider {
     static let workspace: Workspace = {
-        let model = Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable"))
+        let model = Workspace(dir: FileManager.default.temporaryDirectory.appendingPathComponent("habitable-preview"))
         model.runs = [
             TerraformRun(workspace: model),
             TerraformRun(workspace: model),

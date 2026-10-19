@@ -1,96 +1,39 @@
-# Agent Instructions
+# Working on Habitable
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+Instructions for people and coding agents contributing to this repository.
 
-## Quick Reference
+## What this is
 
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
+A native macOS app (SwiftUI and AppKit, Swift 6, macOS 13 and later) that shows Terraform resources on a map, for folders on this Mac and HCP Terraform workspaces. Habitable never applies from the Mac on a cloud workspace: runs happen in HCP Terraform, and every change is reviewed on the Map first.
+
+## Before UI or copy changes
+
+- `docs/design/DECISIONS.md`: the settled decisions (Map first, not an IDE, HCP Terraform writes through pull requests or the API, Terraform purple accent).
+- `DESIGN.md`: the visual and interaction source of truth.
+- `WRITING.md`: the words. Plain, specific, no exclamation points, and the safety sentence as written there.
+- `docs/design/INFORMATION-ARCHITECTURE.md`: where things live and why.
+- `docs/design/DESIGN-ACCEPTANCE.md`: what each design round shipped and what is still open. Add to it when you finish a round.
+
+## Build and test
+
+```sh
+bash scripts/build-config-inspector.sh          # Go helper; needs Go
+bash scripts/build-map-preview.sh               # Debug app installed as "Habitable Preview"
+HABITABLE_CONFIG_INSPECT_PATH=<helper path> swift test
 ```
 
-## Landing the Plane (Session Completion)
+- The SwiftPM target `HabitableCore` is `Habitable/Models` only. Views are built by Xcode; a new view file must be added to `Habitable.xcodeproj`.
+- Run the full suite before a commit that touches models. A suite that reports failures has failures; nothing in it is expected to fail.
+- `docs/RELEASE-GATES.md` describes CI and the release checks. `scripts/package-release.sh` builds, signs, notarizes and packages.
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+## Conventions
 
-**MANDATORY WORKFLOW:**
+- Swift 6 strict concurrency. Models are `Sendable` or `@MainActor`; network and file work happens off the main actor and hands results back.
+- Sensitive values never reach logs, history, recordings or prompts. Redact before persisting; tests cover the redaction.
+- Links that leave the app use `ExternalLink` so the outbound arrow shows.
+- Quick Help entries live in `Habitable/Models/QuickHelp.swift`; attach them with `.quickHelp(glossary:)`.
+- One window per folder. The Library is the only home.
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+## Finishing a session
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
-> **Tracking moved to Linear (October 5, 2026):** file and update work in the Habitable project at https://linear.app/paul-thrasher/project/habitable-78a007a8998d/overview. The `bd` notes below are historical; do not create new beads issues.
-
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-
-## Session Completion
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->
-
-## Design refresh verification
-
-`DESIGN.md` is the visual and interaction source of truth and `WRITING.md` governs user-facing words; read both before UI or copy changes.
-
-For UI work, read `docs/design/DESIGN-ACCEPTANCE.md` and the relevant original exploration before editing. Compare the final running app to that reference and the user's later decisions before handoff. Preserve the accepted overrides recorded there. Passing tests/builds alone is not design acceptance. Use the single stable Habitable Preview, real workspaces for product flows, and screenshot-backed verification; report remaining mismatches in beads.
+Run the tests, update `docs/design/DESIGN-ACCEPTANCE.md` if a design round changed, commit with a message that says why, and push. Work is not done until it is pushed.

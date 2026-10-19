@@ -14,3 +14,10 @@ DerivedData/
 .swiftpm/
 **/xcuserdata/
 .beads.gate.lock
+
+# Local scratch and history that never belongs in the repository
+.beads/
+cli/
+*.tfplan
+/main.tf
+/.terraform.lock.hcl

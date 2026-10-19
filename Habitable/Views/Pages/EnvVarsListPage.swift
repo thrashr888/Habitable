@@ -246,6 +246,6 @@ private struct EnvironmentVariableEditor: View {
 struct EnvVarListPage_Previews: PreviewProvider {
     static var previews: some View {
         EnvVarListPage()
-            .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
+            .environmentObject(Workspace(dir: FileManager.default.temporaryDirectory.appendingPathComponent("habitable-preview")))
     }
 }

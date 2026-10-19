@@ -146,6 +146,6 @@ struct OutputsListPage: View {
 struct OutputsListPage_Previews: PreviewProvider {
     static var previews: some View {
         OutputsListPage(selection: .constant(nil))
-            .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
+            .environmentObject(Workspace(dir: FileManager.default.temporaryDirectory.appendingPathComponent("habitable-preview")))
     }
 }

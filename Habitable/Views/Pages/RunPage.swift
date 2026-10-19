@@ -617,7 +617,7 @@ struct RunSummaryView: View {
 
 struct RunPageView_Previews: PreviewProvider {
     static let workspace: Workspace = {
-        let model = Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable"))
+        let model = Workspace(dir: FileManager.default.temporaryDirectory.appendingPathComponent("habitable-preview"))
         return model
     }()
     static let run: TerraformRun = {

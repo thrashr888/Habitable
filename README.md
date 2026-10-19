@@ -54,7 +54,7 @@ A native macOS app for infrastructure, not code. Your Terraform resources on a m
 
 ## Install
 
-Download the signed and notarized universal app from [GitHub Releases](https://github.com/thrashr888/homebrew-tap/releases?q=habitable), or install with Homebrew:
+Download the signed and notarized universal app from [GitHub Releases](https://github.com/thrashr888/Habitable/releases), or install with Homebrew:
 
 ```sh
 brew install --cask thrashr888/tap/habitable
@@ -112,4 +112,4 @@ The design is documented in `DESIGN.md` (visual and interaction), `WRITING.md` (
 
 ## Package a release
 
-`scripts/package-release.sh` builds both Mac architectures, signs with Developer ID, submits to Apple, staples the accepted ticket, and creates a ZIP plus `SHA256SUMS`. Set `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, and `NOTARY_PROFILE`. Update the version and build number in `Habitable/Info.plist`, run the tests, tag the verified commit, upload the ZIP and checksums to a GitHub release on `thrashr888/homebrew-tap` (tags `habitable-v<version>`), then update the cask with the archive checksum.
+`scripts/package-release.sh` builds both Mac architectures, signs with Developer ID, submits to Apple, staples the accepted ticket, and creates a ZIP plus `SHA256SUMS`. Set `SIGNING_IDENTITY`, `DEVELOPMENT_TEAM`, and `NOTARY_PROFILE`. Update the version and build number in `Habitable/Info.plist`, run the tests, tag the verified commit, upload the ZIP and checksums to the GitHub release here (tag `v<version>`) and to `thrashr888/homebrew-tap` (tag `habitable-v<version>`, where the cask downloads from), then update the cask with the archive checksum.

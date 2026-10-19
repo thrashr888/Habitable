@@ -125,7 +125,7 @@ struct SettingsListPage: View {
 struct SettingsListPage_Previews: PreviewProvider {
     static var previews: some View {
         SettingsListPage(catalog: TerraformReleaseCatalog())
-            .environmentObject(Workspace(dir: URL(fileURLWithPath: "~/workspace/Habitable")))
+            .environmentObject(Workspace(dir: FileManager.default.temporaryDirectory.appendingPathComponent("habitable-preview")))
     }
 }
 
