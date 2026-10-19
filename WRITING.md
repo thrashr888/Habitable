@@ -8,14 +8,14 @@ the app looks; this file governs how it talks.
 
 Habitable speaks like a careful operator explaining your infrastructure to
 you. Plain, specific, calm. It names the thing (`Orders database`,
-`rookeryhq.com`) before the Terraform address, and it never claims more than
+`acmehq.com`) before the Terraform address, and it never claims more than
 state or a run actually recorded.
 
 ## Register by surface
 
 | Surface | Register | Example |
 | --- | --- | --- |
-| Window titles, tile titles | The thing's name, nothing else | `Rookery` · `rookeryhq.com · DNS` |
+| Window titles, tile titles | The thing's name, nothing else | `acme-platform` · `acmehq.com · DNS` |
 | Subtitles, status lines | Fragments joined by middle dots | `pthrasher_v2 · HCP Terraform` · `Applied · 5 months ago` |
 | Toolbar and menu verbs | Verb + object, title case in menus | **Preview Changes**, Open in HCP Terraform, Initialize Terraform |
 | Inspector facts | Label left, value right, no sentences | `Engine · postgres`, `Backup retention · 7 days` |

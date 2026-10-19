@@ -2,7 +2,7 @@
 
 The standalone Terraform CLI and Habitable both connected to an isolated HCP Terraform workspace in `pthrasher_v2`. The fixture has no providers or managed resources; the only state changes were output values.
 
-The existing `terraform-fast` workspace (`ws-jwkDXaaPntEE485i`) was inspected read-only. It has auto-apply enabled, so no runs were started there.
+The existing `acme-fast` workspace (`ws-jwkDXaaPntEE485i`) was inspected read-only. It has auto-apply enabled, so no runs were started there.
 
 ## Isolated run evidence
 

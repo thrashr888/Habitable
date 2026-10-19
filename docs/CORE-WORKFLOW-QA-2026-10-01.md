@@ -4,7 +4,7 @@ Verified the Debug app built from this checkout with Xcode 27, Swift 6 language 
 
 The final SwiftPM suite ran with the real Terraform integration enabled: 64 tests, zero failures, one optional official-release download test skipped. Model and test compilation produced no Swift concurrency warnings.
 
-Local copies of terraform-fast, terraform-outputs, terraform-empty, and terraform-apply-fail were exercised in isolated temporary directories. Terraform 1.16.4 initialized and validated the fixtures; saved plans and local applies completed. No HCP Terraform writes were performed.
+Local copies of acme-fast, terraform-outputs, terraform-empty, and terraform-apply-fail were exercised in isolated temporary directories. Terraform 1.16.4 initialized and validated the fixtures; saved plans and local applies completed. No HCP Terraform writes were performed.
 
 The live app restored workspace descriptions after switching folders and restarting. Missing state and optional variable files use neutral check indicators. Structured apply diagnostics display readable messages and source locations. Large nested output values remain visible, scalar and empty values retain their meanings, and sensitive outputs stay masked.
 

@@ -25,7 +25,7 @@ Every Habitable window is **one toolbar, side panes, an uncontained center,
 and a strip along the bottom** (Exploration B in `docs/design/design-explorations.html`).
 
 - **Toolbar is the title bar.** Native title and subtitle name the subject
-  (`terraform` / `Rookery · HCP Terraform state · This Mac`; `Rookery` /
+  (`terraform` / `acme-platform · HCP Terraform state · This Mac`; `acme-platform` /
   `pthrasher_v2 · HCP Terraform`). The view switcher (Map | List, Map | Runs)
   is a segmented control at navigation size. Primary verbs sit trailing:
   **Preview Changes** is prominent; Inputs, Changes, Workspace, the cross
