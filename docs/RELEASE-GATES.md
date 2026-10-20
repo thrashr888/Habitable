@@ -1,5 +1,9 @@
 # Release verification gates
 
+## October 19, 2026 release verification
+
+Habitable 0.6.1 (build 13) was packaged from commit 2a73779 (tag `v0.6.1`): 425 package tests passed with 0 failures, the universal app was signed with Developer ID, notarization returned Accepted, the stapled app passed Gatekeeper, and the ZIP digest `fcdf76764be19f23669929fd077f5ea75d04ec55e5e91e410785de32c7565c77` was verified after download from the published release. Published at https://github.com/thrashr888/Habitable/releases/tag/v0.6.1 and https://github.com/thrashr888/homebrew-tap/releases/tag/habitable-v0.6.1; the cask was updated to match.
+
 ## October 13, 2026 release verification
 
 Habitable 0.6.0 (build 12) was packaged from commit 8c9cf25 (tag `v0.6.0`): 421 package tests passed with 0 failures, the universal app was signed with Developer ID, notarization returned Accepted, the stapled app passed Gatekeeper, and the ZIP digest `df3832181e0ddd21ee05e6b5febd7fc32d2cb006369de75b76d94689beab61b4` was verified after download from the published release. Published at https://github.com/thrashr888/homebrew-tap/releases/tag/habitable-v0.6.0; the cask was updated in the same commit series.
