@@ -1464,7 +1464,8 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     func refreshStateVersions() async {
-        guard !isSample, isConnected, let workspace = selectedWorkspace,
+        if isSample { stateVersions = selectedWorkspace.map(Self.sampleStateVersions(for:)) ?? []; return }
+        guard isConnected, let workspace = selectedWorkspace,
               let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
         let operation = historyOperation
         let host = hostname, organization = selectedOrganization
@@ -1489,7 +1490,16 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     func showStateVersion(_ version: HCPStateVersionSummary) async {
-        guard !isSample, isConnected, let workspace = selectedWorkspace else { return }
+        if isSample {
+            viewingStateVersion = version
+            historyError = nil
+            let kept = Self.samplePlatformKept(serial: version.serial ?? 1)
+            let raw = try? JSONSerialization.data(withJSONObject: ResourceMapSample.platformRawState(keeping: kept))
+            let shown = try? JSONSerialization.data(withJSONObject: ResourceMapSample.platformShownState(keeping: kept))
+            historicalSnapshot = raw.flatMap { try? HCPMapSnapshot.decode(versionID: version.id, raw: $0, shown: shown, stateCreatedAt: version.createdAt, stateSerial: version.serial) }
+            return
+        }
+        guard isConnected, let workspace = selectedWorkspace else { return }
         let operation = UUID()
         historyOperation = operation
         let host = hostname, organization = selectedOrganization
@@ -1800,6 +1810,11 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     /// Loads the selected workspace's current outputs, without downloading state.
     func refreshWorkspaceOutputs() async {
         guard let workspace = selectedWorkspace else { workspaceOutputs = []; return }
+        if isSample {
+            workspaceOutputs = ["sample-platform", "sample-production"].contains(workspace.id) ? Self.sampleOutputs : []
+            workspaceOutputsMessage = workspaceOutputs.isEmpty ? "This workspace declares no outputs." : nil
+            return
+        }
         workspaceOutputsLoading = true
         workspaceOutputsMessage = nil
         defer { workspaceOutputsLoading = false }
@@ -1869,7 +1884,18 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     /// Loads the Explorer view of the organization (drift, resource counts, checks).
     /// Silent fallback: an unavailable plan sets `explorerUnavailable`; other errors keep current rows.
     func refreshExplorer() async {
-        guard !isSample, isConnected, let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
+        if isSample {
+            explorerRows = Dictionary(uniqueKeysWithValues: Self.sampleWorkspaces.map { workspace in
+                (workspace.name, HCPExplorerWorkspace(workspaceID: workspace.id, workspaceName: workspace.name, projectName: workspace.projectName,
+                                                      currentRunStatus: workspace.currentRunStatus, currentRunAppliedAt: workspace.currentRunCreatedAt,
+                                                      drifted: workspace.id == "sample-production", resourcesDrifted: workspace.id == "sample-production" ? 2 : 0,
+                                                      resourcesUndrifted: workspace.resourceCount, resourceCount: workspace.resourceCount,
+                                                      terraformVersion: workspace.terraformVersion, vcsRepoIdentifier: "acme/platform", tags: workspace.tagNames,
+                                                      checksFailed: 0, checksErrored: 0, updatedAt: workspace.updatedAt))
+            })
+            return
+        }
+        guard isConnected, let token = try? tokenStore.read(hostname: hostname), !token.isEmpty else { return }
         let host = hostname, organization = selectedOrganization, operation = currentOperation
         func current() -> Bool { currentOperation == operation && isConnected && hostname == host && selectedOrganization == organization }
         do {
@@ -2001,6 +2027,10 @@ final class HCPWorkspaceViewerModel: ObservableObject {
                 mapError = "No state is available, or your credential cannot read this workspace’s state."
             } else if selectedWorkspaceID == "sample-empty" {
                 mapSnapshot = HCPMapSnapshot(versionID: "sample-empty", map: ResourceMap(tiles: [], connections: [], dataSources: []), resources: [], notice: "Offline sample · empty workspace")
+            } else if selectedWorkspaceID == "sample-platform" {
+                let raw = try? JSONSerialization.data(withJSONObject: ResourceMapSample.platformRawState())
+                let shown = try? JSONSerialization.data(withJSONObject: ResourceMapSample.platformShownState())
+                if let raw { mapSnapshot = try? HCPMapSnapshot.decode(versionID: "sv-sample-7", raw: raw, shown: shown, stateCreatedAt: Date().addingTimeInterval(-3 * 86_400), stateSerial: 7) }
             } else if selectedWorkspaceID == "sample-reference" {
                 let raw = try? JSONSerialization.data(withJSONObject: ResourceMapSample.referenceRawState)
                 let shown = try? JSONSerialization.data(withJSONObject: ResourceMapSample.referenceShownState)
@@ -2134,7 +2164,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         self.selectionStore = selectionStore
         self.client = client
         let saved = isSample ? nil : selectionStore.load()
-        let base = isSample ? HCPConnectionIdentity(hostname: "app.terraform.io", organization: "Example") : (saved?.identity ?? .app)
+        let base = isSample ? HCPConnectionIdentity(hostname: "app.terraform.io", organization: "acme") : (saved?.identity ?? .app)
         identity = base
         hostname = base.hostname
         selectedOrganization = base.organization
@@ -2142,16 +2172,77 @@ final class HCPWorkspaceViewerModel: ObservableObject {
         selectedRunID = saved?.selectedRunID ?? base.runID
         hasStoredCredential = !isSample && (try? tokenStore.read(hostname: base.hostname)) != nil
         if isSample {
-            workspaces = [
-                HCPWorkspace(id: "sample-production", name: "Acme production · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
-                HCPWorkspace(id: "sample-reference", name: "Map reference · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
-                HCPWorkspace(id: "sample-empty", name: "Empty workspace · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil),
-                HCPWorkspace(id: "sample-unavailable", name: "Unavailable state · sample", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil)
-            ]
+            workspaces = Self.sampleWorkspaces
             selectedWorkspaceID = workspaces.first?.id
             isConnected = true
         }
     }
+
+    // MARK: Offline sample (no account, no network)
+
+    static let sampleWorkspaces: [HCPWorkspace] = {
+        let now = Date()
+        func day(_ n: Double) -> Date { now.addingTimeInterval(-n * 86_400) }
+        return [
+            HCPWorkspace(id: "sample-production", name: "acme-production", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil,
+                         tagNames: ["aws", "prod"], projectName: "Storefront", currentRunStatus: "applied", currentRunCreatedAt: day(1.2),
+                         updatedAt: day(1.2), resourceCount: 10, description: "Orders, uploads and the web service for the store."),
+            HCPWorkspace(id: "sample-platform", name: "acme-platform", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil,
+                         tagNames: ["aws", "prod", "platform"], projectName: "Storefront", currentRunStatus: "planned", currentRunCreatedAt: day(0.1),
+                         updatedAt: day(0.1), resourceCount: ResourceMapSample.platformResourceCount,
+                         description: "The shop end to end: CDN and DNS, web and API services, a resizer, Postgres, Redis, buckets and the network under them."),
+            HCPWorkspace(id: "sample-reference", name: "acme-assistant", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil,
+                         tagNames: ["aws", "ai"], projectName: "Assistant", currentRunStatus: "applied", currentRunCreatedAt: day(6),
+                         updatedAt: day(6), resourceCount: 17, description: "Bedrock logging, chat alerts and caches for the support assistant."),
+            HCPWorkspace(id: "sample-empty", name: "acme-sandbox", terraformVersion: "1.16.5", executionMode: "remote", locked: false, htmlURL: nil,
+                         tagNames: ["sandbox"], projectName: "Experiments", currentRunStatus: nil, resourceCount: 0, description: "Nothing applied yet."),
+            HCPWorkspace(id: "sample-unavailable", name: "acme-archive", terraformVersion: "1.9.8", executionMode: "remote", locked: true, htmlURL: nil,
+                         tagNames: ["archive"], projectName: "Experiments", currentRunStatus: "errored", currentRunCreatedAt: day(40),
+                         updatedAt: day(40), resourceCount: nil, description: "Locked; its state is no longer readable with this credential."),
+        ]
+    }()
+
+    /// Nine runs over three weeks for the production and platform samples; nothing elsewhere.
+    static func sampleRuns(for workspace: HCPWorkspace) -> [HCPRun] {
+        guard ["sample-production", "sample-platform"].contains(workspace.id) else { return [] }
+        let now = Date()
+        func run(_ n: Int, days: Double, status: String, message: String, changes: Bool = true, by: String = "sam", branch: String = "main") -> HCPRun {
+            HCPRun(id: "run-sample-\(workspace.id)-\(n)", workspaceID: workspace.id, workspaceName: workspace.name, status: status, message: message,
+                   operation: "plan", createdAt: now.addingTimeInterval(-days * 86_400), hasChanges: changes, isDestroy: false,
+                   planID: "plan-sample-\(n)", applyID: status == "applied" ? "apply-sample-\(n)" : nil, htmlURL: nil,
+                   source: "tfe-configuration-version", createdBy: by, branch: branch, commitSHA: String(format: "%07x", 0x1a2b3c + n * 7919),
+                   sender: by, triggerReason: "matched", commitMessage: message, repositoryIdentifier: "acme/platform")
+        }
+        return [
+            run(1, days: 21, status: "applied", message: "Bootstrap the network"),
+            run(2, days: 18, status: "applied", message: "Add Postgres and Redis", by: "priya"),
+            run(3, days: 15, status: "applied", message: "Buckets, KMS and the secret"),
+            run(4, days: 12, status: "planned_and_finished", message: "Tidy tags", changes: false, by: "priya"),
+            run(5, days: 10, status: "applied", message: "Web and API on Fargate"),
+            run(6, days: 7, status: "errored", message: "Image resizer (first try)", by: "lee", branch: "resizer"),
+            run(7, days: 6, status: "applied", message: "Image resizer, queue and nightly reports", by: "lee"),
+            run(8, days: 3, status: "applied", message: "CloudFront, certificate and DNS"),
+            run(9, days: 0.1, status: workspace.id == "sample-platform" ? "planned" : "applied", message: "Audit log group with a year of retention", by: "priya"),
+        ]
+    }
+
+    static func sampleStateVersions(for workspace: HCPWorkspace) -> [HCPStateVersionSummary] {
+        guard workspace.id == "sample-platform" else { return [] }
+        return sampleRuns(for: workspace).filter { $0.status == "applied" }.enumerated().map { index, run in
+            HCPStateVersionSummary(id: "sv-sample-\(index + 1)", serial: index + 1, createdAt: run.createdAt, runID: run.id,
+                                   resourceCount: Self.samplePlatformKept(serial: index + 1))
+        }
+    }
+
+    /// How many platform resources each applied revision had, in order.
+    static func samplePlatformKept(serial: Int) -> Int { [7, 9, 17, 22, 26, 34, 36][min(max(serial - 1, 0), 6)] }
+
+    static let sampleOutputs: [HCPStateOutput] = [
+        HCPStateOutput(id: "out-1", name: "site_url", sensitive: false, type: "string", value: "https://shop.acme.example"),
+        HCPStateOutput(id: "out-2", name: "api_endpoint", sensitive: false, type: "string", value: "https://shop.acme.example/api"),
+        HCPStateOutput(id: "out-3", name: "cdn_domain", sensitive: false, type: "string", value: "d111111abcdef8.cloudfront.net"),
+        HCPStateOutput(id: "out-4", name: "database_password", sensitive: true, type: "string", value: nil),
+    ]
 
     var connectionSummary: String { "\(selectedOrganization) · \(hostname)" }
     var selectedWorkspace: HCPWorkspace? { workspaces.first { $0.id == selectedWorkspaceID } }
@@ -2390,7 +2481,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     }
 
     func refreshRuns(nextPage: Bool = false, force: Bool = false) async {
-        guard !isSample else { return }
+        if isSample { runs = selectedWorkspace.map(Self.sampleRuns(for:)) ?? []; return }
         guard isConnected, let workspace = selectedWorkspace,
               let token = try? tokenStore.read(hostname: hostname) else { return }
         // One run-list fetch per 8 s. A person pressing Refresh twice sees the
@@ -2509,7 +2600,20 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     /// no published state touched. Sample models have no real state, so this throws
     /// `HCPViewerError.noCredential` for them rather than inventing a snapshot.
     func librarySnapshot(for workspace: HCPWorkspace) async throws -> HCPMapSnapshot {
-        guard !isSample else { throw HCPViewerError.noCredential }
+        if isSample {
+            let (raw, shown): ([String: Any], [String: Any]) = {
+                switch workspace.id {
+                case "sample-platform": return (ResourceMapSample.platformRawState(), ResourceMapSample.platformShownState())
+                case "sample-reference": return (ResourceMapSample.referenceRawState, ResourceMapSample.referenceShownState)
+                default: return (ResourceMapSample.rawState, ResourceMapSample.shownState)
+                }
+            }()
+            guard !["sample-empty", "sample-unavailable"].contains(workspace.id) else { throw HCPViewerError.noCredential }
+            let rawData = try JSONSerialization.data(withJSONObject: raw)
+            let shownData = try JSONSerialization.data(withJSONObject: shown)
+            return try HCPMapSnapshot.decode(versionID: "library-\(workspace.id)", raw: rawData, shown: shownData,
+                                             stateCreatedAt: workspace.currentRunCreatedAt, stateSerial: 7)
+        }
         let host = hostname
         guard HCPAPIClient.normalizedHostname(host) != nil else { throw HCPViewerError.invalidHost }
         guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {
@@ -2547,7 +2651,7 @@ final class HCPWorkspaceViewerModel: ObservableObject {
     /// Current state version id for a Library card, without downloading state.
     /// Same credential handling as `librarySnapshot(for:)`.
     func librarySnapshotVersionID(for workspace: HCPWorkspace) async throws -> String? {
-        guard !isSample else { throw HCPViewerError.noCredential }
+        if isSample { return ["sample-empty", "sample-unavailable"].contains(workspace.id) ? nil : "library-\(workspace.id)" }
         let host = hostname
         guard HCPAPIClient.normalizedHostname(host) != nil else { throw HCPViewerError.invalidHost }
         guard let token = try? tokenStore.read(hostname: host), !token.isEmpty else {

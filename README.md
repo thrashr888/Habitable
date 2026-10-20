@@ -2,7 +2,7 @@
 
 A native macOS app for infrastructure, not code. Your Terraform resources on a map, with configuration and runs as supporting detail. Works with folders on this Mac and HCP Terraform workspaces. Habitable never applies from your Mac: runs happen in HCP Terraform, or in a local folder you confirm, and you review every change on the Map first.
 
-![The Library: every folder on this Mac and every HCP Terraform workspace](docs/screenshots/library.png)
+![The Library: every folder on this Mac and every HCP Terraform workspace, with the acme sample organization](docs/screenshots/library.png)
 
 ## What's in 0.6.0
 
@@ -16,7 +16,7 @@ A native macOS app for infrastructure, not code. Your Terraform resources on a m
 
 **Time travel.** A playhead under the Map. Drag it and the Map shows the workspace as it was after each recorded state, tiles arriving and leaving, with "since then: +a −r" beside the date. In the cloud this reads HCP state versions. On this Mac, Habitable records each distinct state read, with sensitive values stripped, under Application Support; nothing is written into your folder.
 
-![Time travel on an HCP Terraform workspace: the Map as it was after revision 1](docs/screenshots/time-travel.png)
+![Time travel: acme-platform as it was after revision 4, with 14 resources still to come](docs/screenshots/time-travel.png)
 
 **Changes that arrive.** During an apply, each tile shows a ring while Terraform works on it, a settle when it lands, and a shake if it fails.
 
@@ -34,7 +34,7 @@ A native macOS app for infrastructure, not code. Your Terraform resources on a m
 
 **Native everywhere.** A menu bar extra lists runs waiting for your approval, runs in flight and drifted workspaces, checked every minute, with notifications you can act on. Shortcuts and Siri can check a workspace for drift or open it. Spotlight indexes resource names, addresses and endpoints. Ask Claude in the Inspector hands Claude a question about a resource with the shape of the change and never a value.
 
-![An HCP Terraform workspace on the Map, with the Inspector](docs/screenshots/cloud-map.png)
+![acme-platform on the Map: 36 resources in 18 tiles, the Platform service selected, its dependencies drawn](docs/screenshots/cloud-map.png)
 
 ## Golden workflows
 
@@ -71,6 +71,12 @@ Requires macOS 13 or later. The universal app supports Apple silicon and Intel. 
 ## Try without cloud infrastructure
 
 New Infrastructure… › Playground creates a folder with two harmless resources that run on this Mac. Or copy `Examples/local-only` to a scratch directory and open that folder.
+
+To see the cloud side without an account, launch with `HABITABLE_SAMPLE_DATA=1`: the HCP Terraform window and the Library then show the offline acme sample organization, with runs, state versions, outputs and drift, and make no network requests. The screenshots in this README were taken that way.
+
+```sh
+open -a Habitable --env HABITABLE_SAMPLE_DATA=1
+```
 
 ```sh
 cp -R Examples/local-only /tmp/habitable-demo

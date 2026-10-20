@@ -688,7 +688,7 @@ final class HCPWorkspaceViewerTests: XCTestCase {
                                            client: makeClient(), isSample: true)
         await model.refreshMap()
         XCTAssertEqual(model.mapSnapshot?.resources.count, 10)
-        XCTAssertTrue(model.workspaces.contains { $0.id == "sample-reference" && $0.name == "Map reference · sample" })
+        XCTAssertTrue(model.workspaces.contains { $0.id == "sample-reference" && $0.name == "acme-assistant" })
         model.selectedWorkspaceID = "sample-reference"
         await model.refreshMap()
         let reference = try XCTUnwrap(model.mapSnapshot)

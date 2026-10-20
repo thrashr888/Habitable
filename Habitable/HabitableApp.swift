@@ -64,7 +64,9 @@ struct HabitableApp: App {
     @StateObject private var attention: AttentionCenter
 
     init() {
-        let cloud = HCPWorkspaceViewerModel()
+        // HABITABLE_SAMPLE_DATA=1 runs the app on the offline acme sample: no account,
+        // no network, the same screens. Used for screenshots and demos.
+        let cloud = HCPWorkspaceViewerModel(isSample: ProcessInfo.processInfo.environment["HABITABLE_SAMPLE_DATA"] == "1")
         _cloud = StateObject(wrappedValue: cloud)
         _attention = StateObject(wrappedValue: AttentionCenter(cloud: cloud))
         NotificationBridge.cloud = cloud
