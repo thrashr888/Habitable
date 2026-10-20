@@ -16,7 +16,7 @@ state or a run actually recorded.
 | Surface | Register | Example |
 | --- | --- | --- |
 | Window titles, tile titles | The thing's name, nothing else | `acme-platform` · `acmehq.com · DNS` |
-| Subtitles, status lines | Fragments joined by middle dots | `pthrasher_v2 · HCP Terraform` · `Applied · 5 months ago` |
+| Subtitles, status lines | Fragments joined by middle dots | `acme · HCP Terraform` · `Applied · 5 months ago` |
 | Toolbar and menu verbs | Verb + object, title case in menus | **Preview Changes**, Open in HCP Terraform, Initialize Terraform |
 | Inspector facts | Label left, value right, no sentences | `Engine · postgres`, `Backup retention · 7 days` |
 | Empty states | One plain sentence, then the action | "No changes recorded yet. Preview Changes starts the first one." |

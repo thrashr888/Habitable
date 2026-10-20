@@ -8,7 +8,7 @@ A native macOS app for infrastructure, not code. Your Terraform resources on a m
 
 **The Library is home.** One window lists every folder you have opened and every HCP Terraform workspace you can reach, with status, project and tags. Needs attention gathers errored runs and drift. Remove a folder from the Library without touching it on disk.
 
-**One shape for every workspace.** Each workspace window starts with its name and where it lives, "Local state · This Mac" or "pthrasher_v2 · HCP Terraform", then the same rail: Map, List, Changes (Runs in the cloud), Inputs, Outputs, Settings. The name is also the switcher: other folders on this Mac, or other workspaces in the organization.
+**One shape for every workspace.** Each workspace window starts with its name and where it lives, "Local state · This Mac" or "acme · HCP Terraform", then the same rail: Map, List, Changes (Runs in the cloud), Inputs, Outputs, Settings. The name is also the switcher: other folders on this Mac, or other workspaces in the organization.
 
 ![A local folder in Preview: the new resource outlined green, counts beside the decision](docs/screenshots/local-preview.png)
 
